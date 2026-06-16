@@ -1,6 +1,7 @@
 ﻿require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+const express = require('express');
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
 const config = require('./config.json');
 const commandHandler = require('./handlers/commandHandler');
@@ -29,4 +30,12 @@ for (const file of eventFiles) {
 
 raidStateManager.ensureDataFiles();
 
+// Express keep-alive server for Render + UptimeRobot
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.get('/', (req, res) => res.send('Kakuzu is Online!'));
+app.listen(port, () => console.log(`Keep-alive server running on port ${port}`));
+
+// Discord bot login
 client.login(process.env.DISCORD_TOKEN);
