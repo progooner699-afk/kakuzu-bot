@@ -4,7 +4,7 @@ const config = require('../config.json');
 const commandHandler = require('../handlers/commandHandler');
 
 const commands = commandHandler.getCommandDataArray();
-const rest = new REST({ version: '10' }).setToken(config.token);
+const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 
 (async () => {
     try {
