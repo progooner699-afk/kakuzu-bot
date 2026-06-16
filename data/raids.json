@@ -1,0 +1,143 @@
+{
+    "lastRaidId": 6,
+    "raids": [
+        {
+            "raidId": 1,
+            "status": "CLOSED",
+            "requesterId": "1392856295807389756",
+            "requesterTag": "yourdad043",
+            "robloxUsername": "yourdad043",
+            "serverLink": "https://www.roblox.com/share?code=_198x6wl160ihrgw9kx20z55wnydmmyv3rt1i4yd3ku9tr2olgy&type=ExperienceInvite",
+            "region": "EU",
+            "enemyCount": 9,
+            "teamers": "AIZEN SILLY BZUKA",
+            "teamersCount": 1,
+            "enemyClanNames": "RGN",
+            "enemyClanPresent": "YES",
+            "reason": "TEAMING ON ME",
+            "helperLimit": 9,
+            "helpers": [
+                "1392856295807389756"
+            ],
+            "messageId": "1513219765756498070",
+            "channelId": "1513217583669711021",
+            "createdAt": 1780850267252
+        },
+        {
+            "raidId": 2,
+            "status": "CLOSED",
+            "requesterId": "1392856295807389756",
+            "requesterTag": "yourdad043",
+            "robloxUsername": "YOURDAD043",
+            "serverLink": "D09IQWID09OsDOKWAD",
+            "region": "AWD",
+            "enemyCount": 9,
+            "teamers": "WADWAD",
+            "teamersCount": 1,
+            "enemyClanNames": "AWDWAWAD",
+            "enemyClanPresent": "NO",
+            "reason": "AWDAWDWAD",
+            "helperLimit": 9,
+            "helpers": [],
+            "messageId": "1513222662875250861",
+            "channelId": "1513217583669711021",
+            "createdAt": 1780850957904
+        },
+        {
+            "raidId": 3,
+            "status": "CLOSED",
+            "requesterId": "1392856295807389756",
+            "requesterTag": "yourdad043",
+            "robloxUsername": "WAD",
+            "serverLink": "AWD",
+            "region": "ASIA",
+            "enemyCount": 9,
+            "teamers": "IDK",
+            "teamersCount": 1,
+            "enemyClanNames": "JKD",
+            "enemyClanPresent": "NO",
+            "reason": "IJDW",
+            "helperLimit": 6,
+            "helpers": [],
+            "messageId": "1513226802615550164",
+            "channelId": "1513217583669711021",
+            "createdAt": 1780851945059
+        },
+        {
+            "raidId": 4,
+            "status": "CLOSED",
+            "requesterId": "1392856295807389756",
+            "requesterTag": "yourdad043",
+            "robloxUsername": "WAD",
+            "serverLink": "DWA",
+            "region": "DWA",
+            "enemyCount": 3,
+            "teamers": "3",
+            "teamersCount": 1,
+            "enemyClanNames": "3",
+            "enemyClanPresent": "NO",
+            "reason": "3",
+            "helperLimit": 3,
+            "helpers": [
+                "1392856295807389756"
+            ],
+            "messageId": "1513227521343357049",
+            "channelId": "1513217583669711021",
+            "createdAt": 1780852116413
+        },
+        {
+            "raidId": 5,
+            "status": "OPEN",
+            "requesterId": "1392856295807389756",
+            "requesterTag": "yourdad043",
+            "robloxUsername": "DWA",
+            "serverLink": "DWA",
+            "region": "DWA",
+            "enemyCount": 7,
+            "teamers": "DWA",
+            "teamersCount": 1,
+            "enemyClanNames": "DWA",
+            "enemyClanPresent": "NO",
+            "reason": "GWWEFFDSFSFEOJK",
+            "helperLimit": 8,
+            "helpers": [],
+            "messageId": "1513228977165176973",
+            "channelId": "1513217583669711021",
+            "createdAt": 1780852463571
+        },
+        {
+            "raidId": 6,
+            "status": "CLOSED",
+            "requesterId": "1134108323801747538",
+            "requesterTag": "pyro_dark",
+            "robloxUsername": "serve19999",
+            "serverLink": "https://www.roblox.com/share?code=_198x6wl160ihrgw9kx20z55wo2cuuwsq4n8b2no3i27ufpv3pa&type=ExperienceInvite",
+            "region": "ind",
+            "enemyCount": 4,
+            "teamers": "all_seer",
+            "teamersCount": 1,
+            "enemyClanNames": "kazuka",
+            "enemyClanPresent": "YES",
+            "reason": "THEY ANNOYIN G FR FRFRFRFRFRFRFRFRF",
+            "helperLimit": 20,
+            "helpers": [
+                "1392856295807389756",
+                "1281898860003983395"
+            ],
+            "messageId": "1513250869997600788",
+            "channelId": "1513243686027132938",
+            "createdAt": 1780857683442
+        }
+    ],
+    "blacklist": {},
+    "leaderboard": {
+        "daily": {},
+        "weekly": {},
+        "allTime": {
+            "1392856295807389756": 3,
+            "1281898860003983395": 1
+        },
+        "dailyReset": 1780963200000,
+        "weeklyReset": 1781481600000
+    }
+}

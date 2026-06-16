@@ -1,0 +1,19 @@
+{
+  "name": "kakuzu",
+  "version": "1.0.0",
+  "description": "Kakuzu Bot for Roblox clan raid management",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "deploy-commands": "node commands/deploy-commands.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "discord.js": "^14.26.4",
+    "dotenv": "^17.4.2",
+    "sql.js": "^1.8.0"
+  }
+}
