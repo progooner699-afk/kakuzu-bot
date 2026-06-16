@@ -17,6 +17,7 @@ const defaultSettings = {
 const defaultRaids = {
     lastRaidId: 0,
     raids: [],
+    activeRaidByOwner: {},
     blacklist: {},
     leaderboard: {
         daily: {},
@@ -56,11 +57,36 @@ function loadRaids() {
     const raw = fs.readFileSync(raidsPath, 'utf8');
     const raids = JSON.parse(raw);
     raids.leaderboard = Object.assign({}, defaultRaids.leaderboard, raids.leaderboard || {});
-    return Object.assign({}, defaultRaids, raids);
+    raids.activeRaidByOwner = Object.assign({}, defaultRaids.activeRaidByOwner, raids.activeRaidByOwner || {});
+    const loadedRaids = Object.assign({}, defaultRaids, raids);
+    rebuildActiveRaidByOwner(loadedRaids);
+    return loadedRaids;
 }
 
 function saveRaids(raids) {
     fs.writeFileSync(raidsPath, JSON.stringify(raids, null, 4));
+}
+
+function rebuildActiveRaidByOwner(raids) {
+    raids.activeRaidByOwner = {};
+    for (const raid of raids.raids) {
+        if (raid.requesterId && raid.status && raid.status !== 'CLOSED') {
+            raids.activeRaidByOwner[raid.requesterId] = raid.raidId;
+        }
+    }
+}
+
+function getActiveRaidByOwner(userId) {
+    const raids = loadRaids();
+    const raidId = raids.activeRaidByOwner[userId];
+    if (raidId) {
+        return raids.raids.find(item => item.raidId === raidId) || null;
+    }
+    return raids.raids.find(raid => raid.requesterId === userId && raid.status !== 'CLOSED') || null;
+}
+
+function hasActiveRaid(userId) {
+    return Boolean(getActiveRaidByOwner(userId));
 }
 
 function getNextDailyReset() {
@@ -106,9 +132,7 @@ function parseBooleanYesNo(value) {
 }
 
 function canCreateRaid(userId) {
-    const raids = loadRaids();
-    const active = raids.raids.filter(raid => raid.requesterId === userId && raid.status !== 'CLOSED');
-    return active.length < 1 && !isBlacklisted(userId);
+    return !hasActiveRaid(userId) && !isBlacklisted(userId);
 }
 
 function isBlacklisted(userId) {
@@ -123,6 +147,9 @@ function blacklistUser(userId, reason = 'Misuse of raid system') {
 }
 
 function createRaid(options) {
+    if (!canCreateRaid(options.requesterId)) {
+        throw new Error('User already has an active raid or is blocked from creating new raids.');
+    }
     const raids = loadRaids();
     resetLeaderboardsIfNeeded(raids);
     const nextId = raids.lastRaidId + 1;
@@ -149,6 +176,7 @@ function createRaid(options) {
     };
     raids.lastRaidId = nextId;
     raids.raids.push(raid);
+    raids.activeRaidByOwner[raid.requesterId] = raid.raidId;
     saveRaids(raids);
     return raid;
 }
@@ -196,6 +224,9 @@ function closeRaid(raidId) {
     const raid = raids.raids.find(item => item.raidId === raidId);
     if (!raid) return null;
     raid.status = 'CLOSED';
+    if (raids.activeRaidByOwner[raid.requesterId] === raid.raidId) {
+        delete raids.activeRaidByOwner[raid.requesterId];
+    }
     saveRaids(raids);
     return raid;
 }
