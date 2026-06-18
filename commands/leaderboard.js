@@ -21,7 +21,7 @@ module.exports = {
         .setName('leaderboard')
         .setDescription('Show the current raid helper leaderboard with the top 15 users.'),
     async execute(interaction) {
-        const entries = leaderboardDb.getTopLeaderboard(15);
+        const entries = await leaderboardDb.getTopLeaderboard(15);
         if (!entries || entries.length === 0) {
             return interaction.reply({ content: 'No raid leaderboard data is available yet.', flags: 64 });
         }
@@ -34,15 +34,16 @@ module.exports = {
 
         const embed = new EmbedBuilder()
             .setTitle('🏆 Raid Helper Leaderboard')
-            .setDescription('Top 15 accepted raid helpers')
+            .setDescription('**Top 15 accepted raid helpers**\nStay active and earn your place on the board.')
             .setColor(0x22b14c)
             .addFields([
                 {
-                    name: 'Leaderboard',
+                    name: '🟢 Current Standings',
                     value: `\`\`\`text\n${lines.join('\n')}\n\`\`\``
                 }
             ])
-            .setFooter({ text: `Updated ${new Date().toLocaleString()}` });
+            .setFooter({ text: `Updated ${new Date().toLocaleString()}` })
+            .setTimestamp();
 
         await interaction.reply({ embeds: [embed] });
     }
