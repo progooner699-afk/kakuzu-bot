@@ -319,7 +319,7 @@ module.exports = {
                 }
 
                 const message = await targetChannel.send({
-                    content: '@everyone',
+                    content: `@everyone\n\n🚨 **NEW RAID REQUEST** 🚨\nCheck out the raid alert channel: <#${targetChannelId}>`,
                     embeds: [content],
                     components: [raidButtonRow],
                     allowedMentions: { parse: ['everyone'] }
@@ -339,13 +339,13 @@ module.exports = {
                     }
                 }
 
-                if (settings.helpChannel) {
-                    const helpChannel = await interaction.client.channels.fetch(settings.helpChannel).catch(() => null);
-                    if (helpChannel && helpChannel.isTextBased()) {
-                        await helpChannel.send({
-                            content: `🚨 NEW HELP REQUEST 🚨\n\nRequested By: <@${userId}>\nRaid ID: #${raid.raidId}\nHelpers: 0/${raid.helperLimit}\nLink: ${message.url}`
-                        });
-                    }
+                const notifyChannelId = '1513243686027132938';
+                const notifyChannel = await interaction.client.channels.fetch(notifyChannelId).catch(() => null);
+                if (notifyChannel && notifyChannel.isTextBased()) {
+                    await notifyChannel.send({
+                        content: `@everyone 🚨 **NEW RAID REQUEST** 🚨\n\nRequested By: <@${userId}>\nRaid ID: #${raid.raidId}\nHelpers: 0/${raid.helperLimit}\nRaid Alert Channel: <#${targetChannelId}>\n\nCheck it out now in Akatsuki Clan!`,
+                        allowedMentions: { parse: ['everyone'] }
+                    });
                 }
 
                 await interaction.reply({ content: `Raid request submitted successfully and posted as #${raid.raidId}.`, flags: 64 });
