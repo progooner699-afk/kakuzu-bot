@@ -195,7 +195,11 @@ module.exports = {
                         await logChannel.send(`👤 <@${interaction.user.id}> has accepted a raid! Total Raids: ${result.totalRaids}`);
                     }
                 }
-                return interaction.reply({ content: "You have joined the raid as a helper.", flags: 64 });
+
+                return interaction.reply({
+                    content: `- \`Raid ID          |\` ${raid.raidId}\n- \`Status           |\` You have accepted this raid!\n- \`Raid Server Link |\` ${raid.serverLink}`,
+                    ephemeral: true
+                });
             }
 
             if (action === "leave") {
@@ -319,7 +323,7 @@ module.exports = {
                 }
 
                 const message = await targetChannel.send({
-                    content: `@everyone\n\n🚨 **NEW RAID REQUEST** 🚨\nCheck out the raid alert channel: <#${targetChannelId}>`,
+                    content: '@everyone',
                     embeds: [content],
                     components: [raidButtonRow],
                     allowedMentions: { parse: ['everyone'] }
@@ -337,15 +341,6 @@ module.exports = {
                     } catch (dmError) {
                         console.error('Failed to DM raid notification to members:', dmError);
                     }
-                }
-
-                const notifyChannelId = '1513243686027132938';
-                const notifyChannel = await interaction.client.channels.fetch(notifyChannelId).catch(() => null);
-                if (notifyChannel && notifyChannel.isTextBased()) {
-                    await notifyChannel.send({
-                        content: `@everyone 🚨 **NEW RAID REQUEST** 🚨\n\nRequested By: <@${userId}>\nRaid ID: #${raid.raidId}\nHelpers: 0/${raid.helperLimit}\nRaid Alert Channel: <#${targetChannelId}>\n\nCheck it out now in Akatsuki Clan!`,
-                        allowedMentions: { parse: ['everyone'] }
-                    });
                 }
 
                 await interaction.reply({ content: `Raid request submitted successfully and posted as #${raid.raidId}.`, flags: 64 });

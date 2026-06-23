@@ -283,8 +283,6 @@ function formatRaidMessage(raid) {
             { name: 'Helpers Needed', value: `\`${helperCount} / ${raid.helperLimit || 0}\``, inline: true },
             { name: 'Live Status', value: statusText, inline: true },
             { name: '\u200b', value: '\u200b', inline: false },
-            { name: 'Server Link', value: raid.serverLink ? `[Click to Join Server](${raid.serverLink})` : 'N/A', inline: false },
-            { name: '\u200b', value: '\u200b', inline: false },
             { name: 'Teamers Names', value: raid.teamers ? `\`${raid.teamers}\`` : '`None`', inline: true },
             { name: 'Enemy Clan Names', value: raid.enemyClanNames ? `\`${raid.enemyClanNames}\`` : '`None`', inline: true },
             { name: '\u200b', value: '\u200b', inline: false },
