@@ -432,7 +432,6 @@ module.exports = {
     formatRaidMessage,
     publishLeaderboard,
     syncLeaderboardMessage,
-    buildLeaderboardText,
     getLeaderboardEntries,
     closeAllRaids
 };
