@@ -101,10 +101,28 @@ async function getTopLeaderboard(limit = 15) {
     return rows;
 }
 
+async function getLeaderboardRows() {
+    const db = await getDb();
+    const stmt = db.prepare('SELECT userId, raidCount FROM leaderboard ORDER BY raidCount DESC, userId ASC');
+    const rows = [];
+    while (stmt.step()) {
+        rows.push(stmt.getAsObject());
+    }
+    stmt.free();
+    return rows;
+}
+
+async function getUserRank(userId) {
+    const rows = await getLeaderboardRows();
+    const index = rows.findIndex(row => row.userId === userId);
+    return index === -1 ? 0 : index + 1;
+}
+
 module.exports = {
     getRaidCount,
     incrementRaidCount,
     hasAcceptedRaid,
     markRaidAccepted,
-    getTopLeaderboard
+    getTopLeaderboard,
+    getUserRank
 };

@@ -231,6 +231,22 @@ function closeRaid(raidId) {
     return raid;
 }
 
+function closeAllRaids() {
+    const raids = loadRaids();
+    let closedCount = 0;
+
+    for (const raid of raids.raids) {
+        if (raid.status !== 'CLOSED') {
+            raid.status = 'CLOSED';
+            closedCount += 1;
+        }
+    }
+
+    raids.activeRaidByOwner = {};
+    saveRaids(raids);
+    return closedCount;
+}
+
 function updateRaidMessageReference(raidId, channelId, messageId) {
     const raids = loadRaids();
     const raid = raids.raids.find(item => item.raidId === raidId);
@@ -307,18 +323,25 @@ function formatRankLabel(rank) {
     return rank < 10 ? `Rank ${rank}  |` : `Rank ${rank} |`;
 }
 
-async function buildLeaderboardText() {
-    const topEntries = await leaderboardDb.getTopLeaderboard(15);
+function buildLeaderboardDescription(topEntries) {
     if (!topEntries.length) {
-        return '🏆 RAID HELPER LEADERBOARD 🏆\n\nNo accepted raid data yet.';
+        return '• `No accepted raid data yet.`';
     }
 
-    const rows = topEntries.map((entry, index) => {
+    return topEntries.map((entry, index) => {
         const rank = index + 1;
-        return `${formatRankLabel(rank)} <@${entry.userId}> - ${entry.raidCount} Raids`;
-    });
+        return `- \`${formatRankLabel(rank)}\` <@${entry.userId}> \`- ${entry.raidCount} Raids\``;
+    }).join('\n');
+}
 
-    return ['🏆 RAID HELPER LEADERBOARD 🏆', '', ...rows].join('\n');
+function buildLeaderboardEmbed(topEntries) {
+    const description = buildLeaderboardDescription(topEntries);
+    return new EmbedBuilder()
+        .setTitle('🏆 Raid Helper Leaderboard')
+        .setDescription(description)
+        .setColor(0x22b14c)
+        .setFooter({ text: `Updated ${new Date().toLocaleString()}` })
+        .setTimestamp();
 }
 
 function getLeaderboardEntries() {
@@ -334,12 +357,13 @@ async function publishLeaderboard(client) {
     if (!settings.lbChannel) return;
     const channel = await client.channels.fetch(settings.lbChannel).catch(() => null);
     if (!channel || !channel.isTextBased()) return;
-    const content = await buildLeaderboardText();
+    const topEntries = await leaderboardDb.getTopLeaderboard(15);
+    const embed = buildLeaderboardEmbed(topEntries);
     if (settings.leaderboardMessageId) {
         const existing = await channel.messages.fetch(settings.leaderboardMessageId).catch(() => null);
         if (existing) {
             try {
-                await existing.edit({ content });
+                await existing.edit({ content: null, embeds: [embed] });
                 return;
             } catch (error) {
                 if (error?.code === 10008) {
@@ -354,7 +378,7 @@ async function publishLeaderboard(client) {
             saveSettings(settings);
         }
     }
-    const message = await channel.send({ content });
+    const message = await channel.send({ embeds: [embed] });
     settings.leaderboardMessageId = message.id;
     saveSettings(settings);
 }
@@ -364,12 +388,13 @@ async function syncLeaderboardMessage(client) {
     if (!settings.lbChannel) return;
     const channel = await client.channels.fetch(settings.lbChannel).catch(() => null);
     if (!channel || !channel.isTextBased()) return;
-    const content = await buildLeaderboardText();
+    const topEntries = await leaderboardDb.getTopLeaderboard(15);
+    const embed = buildLeaderboardEmbed(topEntries);
     if (settings.leaderboardMessageId) {
         const existing = await channel.messages.fetch(settings.leaderboardMessageId).catch(() => null);
         if (existing) {
             try {
-                await existing.edit({ content });
+                await existing.edit({ content: null, embeds: [embed] });
                 return;
             } catch (error) {
                 if (error?.code === 10008) {
@@ -384,7 +409,7 @@ async function syncLeaderboardMessage(client) {
             saveSettings(settings);
         }
     }
-    const message = await channel.send({ content });
+    const message = await channel.send({ embeds: [embed] });
     settings.leaderboardMessageId = message.id;
     saveSettings(settings);
 }
@@ -408,5 +433,6 @@ module.exports = {
     publishLeaderboard,
     syncLeaderboardMessage,
     buildLeaderboardText,
-    getLeaderboardEntries
+    getLeaderboardEntries,
+    closeAllRaids
 };
