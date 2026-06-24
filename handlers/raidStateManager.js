@@ -160,6 +160,7 @@ function createRaid(options) {
         requesterId: options.requesterId,
         requesterTag: options.requesterTag,
         robloxUsername: normalizeText(options.robloxUsername),
+        robloxAvatarUrl: options.robloxAvatarUrl || null,
         serverLink: normalizeText(options.serverLink),
         region: normalizeText(options.region),
         enemyCount: Number(options.enemyCount) || 0,
@@ -291,6 +292,12 @@ function formatRaidMessage(raid) {
             { name: `Live Helpers (${helperCount}/${raid.helperLimit || 0})`, value: liveHelpersValue, inline: false }
         ])
         .setFooter({ text: `Requested by ${raid.requesterTag || raid.requesterId} • ${new Date(raid.createdAt).toLocaleString()}` });
+    
+    // Add Roblox avatar as thumbnail if available
+    if (raid.robloxAvatarUrl) {
+        embed.setThumbnail(raid.robloxAvatarUrl);
+    }
+    
     return embed;
 }
 

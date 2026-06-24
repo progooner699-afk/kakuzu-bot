@@ -8,6 +8,7 @@
     PermissionsBitField
 } = require("discord.js");
 const raidStateManager = require("../handlers/raidStateManager");
+const robloxApi = require("../handlers/robloxApi");
 const pendingRaidApplications = new Map();
 
 const RAID_CLOSE_ROLES = [
@@ -188,13 +189,14 @@ module.exports = {
                 } catch (error) {
                     console.error('Failed to publish leaderboard:', error);
                 }
-                const settings = raidStateManager.loadSettings();
-                if (settings.leaderboardLogChannel) {
-                    const logChannel = await interaction.client.channels.fetch(settings.leaderboardLogChannel).catch(() => null);
-                    if (logChannel && logChannel.isTextBased()) {
-                        await logChannel.send(`👤 <@${interaction.user.id}> has accepted a raid! Total Raids: ${result.totalRaids}`);
-                    }
-                }
+                // Commented out plain text messages to keep leaderboard channel clean
+                // const settings = raidStateManager.loadSettings();
+                // if (settings.leaderboardLogChannel) {
+                //     const logChannel = await interaction.client.channels.fetch(settings.leaderboardLogChannel).catch(() => null);
+                //     if (logChannel && logChannel.isTextBased()) {
+                //         await logChannel.send(`👤 <@${interaction.user.id}> has accepted a raid! Total Raids: ${result.totalRaids}`);
+                //     }
+                // }
 
                 return interaction.reply({
                     content: `- \`Raid ID          |\` ${raid.raidId}\n- \`Status           |\` You have accepted this raid!\n- \`Raid Server Link |\` ${raid.serverLink}`,
@@ -298,10 +300,20 @@ module.exports = {
                     return interaction.reply({ content: "All required fields must be filled in.", flags: 64 });
                 }
 
+                // Validate Roblox username and fetch avatar
+                const robloxValidation = await robloxApi.validateAndGetAvatar(robloxUsername);
+                if (!robloxValidation.success) {
+                    return interaction.reply({ 
+                        content: `❌ **Roblox Username Validation Failed**\n${robloxValidation.error}`, 
+                        flags: 64 
+                    });
+                }
+
                 const raid = raidStateManager.createRaid({
                     requesterId: userId,
                     requesterTag: interaction.user.tag,
                     robloxUsername,
+                    robloxAvatarUrl: robloxValidation.avatarUrl,
                     serverLink,
                     region,
                     enemyCount,
