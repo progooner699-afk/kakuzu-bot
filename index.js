@@ -7,7 +7,15 @@ const config = require('./config.json');
 const commandHandler = require('./handlers/commandHandler');
 const raidStateManager = require('./handlers/raidStateManager');
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+// FIXED: Added GuildMessages and MessageContent so commands can execute
+const client = new Client({ 
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent 
+    ] 
+});
+
 client.commands = new Collection();
 client.raidStateManager = raidStateManager;
 

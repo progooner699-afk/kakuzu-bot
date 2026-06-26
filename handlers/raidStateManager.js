@@ -9,9 +9,9 @@ const raidsPath = path.join(__dirname, '..', 'data', 'raids.json');
 const defaultSettings = {
     raidChannel: null,
     helpChannel: null,
-    lbChannel: null,
-    leaderboardLogChannel: null,
-    leaderboardMessageId: null
+    leaderboardChannel: null, 
+    leaderboardMessageId: null,
+    resultChannel: null
 };
 
 const defaultRaids = {
@@ -19,6 +19,8 @@ const defaultRaids = {
     raids: [],
     activeRaidByOwner: {},
     blacklist: {},
+    streakType: 'NONE',
+    streakCount: 0,
     leaderboard: {
         daily: {},
         weekly: {},
@@ -160,6 +162,8 @@ function createRaid(options) {
         requesterId: options.requesterId,
         requesterTag: options.requesterTag,
         robloxUsername: normalizeText(options.robloxUsername),
+        robloxDisplayName: normalizeText(options.robloxDisplayName || options.robloxUsername),
+        robloxUserId: options.robloxUserId || "1",
         robloxAvatarUrl: options.robloxAvatarUrl || null,
         serverLink: normalizeText(options.serverLink),
         region: normalizeText(options.region),
@@ -193,14 +197,23 @@ function updateRaidStatus(raid) {
     return raid;
 }
 
-async function addHelper(raidId, userId) {
+async function addHelper(raidId, userId, robloxData) {
     const raids = loadRaids();
     const raid = raids.raids.find(item => item.raidId === raidId);
     if (!raid || raid.status === 'CLOSED') return { success: false, message: 'Raid is closed.' };
-    if (raid.helpers.includes(userId)) return { success: false, message: 'You are already helping this raid.' };
+    
+    const isAlreadyHelping = raid.helpers.some(h => typeof h === 'string' ? h === userId : h.userId === userId);
+    if (isAlreadyHelping) return { success: false, message: 'You are already helping this raid.' };
     if (await leaderboardDb.hasAcceptedRaid(raidId, userId)) return { success: false, message: 'You have already accepted this raid alert.' };
     if (raid.helpers.length >= raid.helperLimit) return { success: false, message: 'Raid is already full.' };
-    raid.helpers.push(userId);
+    
+    raid.helpers.push({
+        userId: userId,
+        robloxUsername: robloxData.username,
+        robloxDisplayName: robloxData.displayName,
+        robloxUserId: robloxData.userId
+    });
+    
     updateRaidStatus(raid);
     saveRaids(raids);
     const totalRaids = await leaderboardDb.incrementRaidCount(userId);
@@ -212,8 +225,10 @@ function removeHelper(raidId, userId) {
     const raids = loadRaids();
     const raid = raids.raids.find(item => item.raidId === raidId);
     if (!raid || raid.status === 'CLOSED') return { success: false, message: 'Raid is closed.' };
-    const index = raid.helpers.indexOf(userId);
+    
+    const index = raid.helpers.findIndex(h => typeof h === 'string' ? h === userId : h.userId === userId);
     if (index === -1) return { success: false, message: 'You are not a helper on this raid.' };
+    
     raid.helpers.splice(index, 1);
     updateRaidStatus(raid);
     saveRaids(raids);
@@ -257,26 +272,28 @@ function updateRaidMessageReference(raidId, channelId, messageId) {
     saveRaids(raids);
 }
 
-function getHelperDisplay(raid) {
-    if (!raid.helpers || raid.helpers.length === 0) {
-        return '• None yet';
-    }
-    return raid.helpers.map(helperId => `• <@${helperId}>`).join('\n');
-}
-
 function formatRaidMessage(raid) {
     const helperCount = (raid.helpers && raid.helpers.length) || 0;
     const statusText = raid.status === 'OPEN' ? '🟢 `OPEN`' : raid.status === 'FULL' ? '🟠 `FULL`' : '🔴 `CLOSED`';
-
     const reasonText = raid.reason ? raid.reason : 'No details provided';
-    const liveHelpersValue = helperCount > 0 ? raid.helpers.map((h) => `• <@${h}>`).join('\n') : '• None yet';
+
+    const liveHelpersValue = helperCount > 0 
+        ? raid.helpers.map((h) => {
+            if (typeof h === 'string') return `• <@${h}>`;
+            return `• <@${h.userId}>\n  🎮 Roblox: [👑 ${h.robloxDisplayName} (@${h.robloxUsername})](https://www.roblox.com/users/${h.robloxUserId}/profile)`;
+          }).join('\n') 
+        : '• None yet';
+
+    const requesterProfileLink = raid.robloxUserId 
+        ? `\n[🔗 ${raid.robloxDisplayName || raid.robloxUsername} Profile](https://www.roblox.com/users/${raid.robloxUserId}/profile)`
+        : '';
 
     const embed = new EmbedBuilder()
         .setTitle('🚨 Raid Alert')
         .setColor(0xFFD700)
         .setDescription('This help request is currently active.')
         .addFields([
-            { name: 'Requested By', value: raid.requesterTag || `<@${raid.requesterId}>`, inline: true },
+            { name: 'Requested By', value: `${raid.requesterTag || `<@${raid.requesterId}>`}${requesterProfileLink}`, inline: true },
             { name: 'Time Requested', value: `\`${new Date(raid.createdAt).toLocaleString()}\``, inline: true },
             { name: 'Region', value: `\`${raid.region || 'Unknown'}\``, inline: true },
             { name: '\u200b', value: '\u200b', inline: false },
@@ -293,7 +310,6 @@ function formatRaidMessage(raid) {
         ])
         .setFooter({ text: `Requested by ${raid.requesterTag || raid.requesterId} • ${new Date(raid.createdAt).toLocaleString()}` });
     
-    // Add Roblox avatar as thumbnail if available
     if (raid.robloxAvatarUrl) {
         embed.setThumbnail(raid.robloxAvatarUrl);
     }
@@ -307,68 +323,45 @@ function getTopEntries(ranking, max = 5) {
         .slice(0, max);
 }
 
-function formatLeaderboardSection(title, ranking) {
-    const entries = getTopEntries(ranking);
-    if (!entries.length) {
-        return `${title}\n• No helpers yet`;
-    }
-    return [title, ...entries.map(([userId, count], index) => `${index + 1}. <@${userId}> — ${count}`)].join('\n');
-}
-
-function updateLeaderboard(userId) {
-    const raids = loadRaids();
-    resetLeaderboardsIfNeeded(raids);
-    raids.leaderboard.daily[userId] = (raids.leaderboard.daily[userId] || 0) + 1;
-    raids.leaderboard.weekly[userId] = (raids.leaderboard.weekly[userId] || 0) + 1;
-    raids.leaderboard.allTime[userId] = (raids.leaderboard.allTime[userId] || 0) + 1;
-    saveRaids(raids);
-}
-
-function formatRankLabel(rank) {
-    return rank < 10 ? `Rank ${rank}  |` : `Rank ${rank} |`;
-}
-
-function buildLeaderboardDescription(topEntries) {
-    if (!topEntries.length) {
-        return '• `No accepted raid data yet.`';
-    }
-
-    return topEntries.map((entry, index) => {
-        const rank = index + 1;
-        return `- \`${formatRankLabel(rank)}\` <@${entry.userId}> \`- ${entry.raidCount} Raids\``;
-    }).join('\n');
-}
-
 function buildLeaderboardEmbed(topEntries) {
-    const description = buildLeaderboardDescription(topEntries);
-    return new EmbedBuilder()
-        .setTitle('🏆 Raid Helper Leaderboard')
-        .setDescription(description)
-        .setColor(0x22b14c)
-        .setFooter({ text: `Updated ${new Date().toLocaleString()}` })
+    const embed = new EmbedBuilder()
+        .setTitle('🏆 RAID RESPONSE LEADERBOARD 🏆')
+        .setDescription('Top operators ranked by confirmed raid deployment assists!')
+        .setColor(0x00FFCC)
         .setTimestamp();
-}
 
-function getLeaderboardEntries() {
-    const raids = loadRaids();
-    resetLeaderboardsIfNeeded(raids);
-    return Object.entries(raids.leaderboard.allTime || {})
-        .map(([userId, count]) => ({ userId, count }))
-        .sort((a, b) => b.count - a.count || a.userId.localeCompare(b.userId));
+    if (topEntries.length === 0) {
+        embed.setDescription('🏆 **RAID RESPONSE LEADERBOARD** 🏆\n\n*No deployment records tracked yet.*');
+        return embed;
+    }
+
+    const rows = topEntries.map((entry, index) => {
+        let medal = '🔹';
+        if (index === 0) medal = '🥇';
+        else if (index === 1) medal = '🥈';
+        else if (index === 2) medal = '🥉';
+        return `\`${medal} #${String(index + 1).padEnd(2)}\` | <@${entry.userId}> – **${entry.count}** Assists`;
+    });
+
+    embed.setDescription(`🏆 **RAID RESPONSE LEADERBOARD** 🏆\n\n${rows.join('\n')}`);
+    return embed;
 }
 
 async function publishLeaderboard(client) {
     const settings = loadSettings();
-    if (!settings.lbChannel) return;
-    const channel = await client.channels.fetch(settings.lbChannel).catch(() => null);
+    if (!settings.leaderboardChannel) return;
+
+    const channel = await client.channels.fetch(settings.leaderboardChannel).catch(() => null);
     if (!channel || !channel.isTextBased()) return;
+    
     const topEntries = await leaderboardDb.getTopLeaderboard(15);
     const embed = buildLeaderboardEmbed(topEntries);
+    
     if (settings.leaderboardMessageId) {
         const existing = await channel.messages.fetch(settings.leaderboardMessageId).catch(() => null);
         if (existing) {
             try {
-                await existing.edit({ content: null, embeds: [embed] });
+                await existing.edit({ embeds: [embed] });
                 return;
             } catch (error) {
                 if (error?.code === 10008) {
@@ -383,40 +376,14 @@ async function publishLeaderboard(client) {
             saveSettings(settings);
         }
     }
+    
     const message = await channel.send({ embeds: [embed] });
     settings.leaderboardMessageId = message.id;
     saveSettings(settings);
 }
 
 async function syncLeaderboardMessage(client) {
-    const settings = loadSettings();
-    if (!settings.lbChannel) return;
-    const channel = await client.channels.fetch(settings.lbChannel).catch(() => null);
-    if (!channel || !channel.isTextBased()) return;
-    const topEntries = await leaderboardDb.getTopLeaderboard(15);
-    const embed = buildLeaderboardEmbed(topEntries);
-    if (settings.leaderboardMessageId) {
-        const existing = await channel.messages.fetch(settings.leaderboardMessageId).catch(() => null);
-        if (existing) {
-            try {
-                await existing.edit({ content: null, embeds: [embed] });
-                return;
-            } catch (error) {
-                if (error?.code === 10008) {
-                    settings.leaderboardMessageId = null;
-                    saveSettings(settings);
-                } else {
-                    throw error;
-                }
-            }
-        } else {
-            settings.leaderboardMessageId = null;
-            saveSettings(settings);
-        }
-    }
-    const message = await channel.send({ embeds: [embed] });
-    settings.leaderboardMessageId = message.id;
-    saveSettings(settings);
+    await publishLeaderboard(client);
 }
 
 module.exports = {
@@ -437,6 +404,5 @@ module.exports = {
     formatRaidMessage,
     publishLeaderboard,
     syncLeaderboardMessage,
-    getLeaderboardEntries,
     closeAllRaids
 };

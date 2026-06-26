@@ -1,9 +1,11 @@
 {
     "raidChannel": "1513243686027132938",
     "helpChannel": "1513242734201274490",
+    "leaderboardChannel": "1513243330220392568",
+    "leaderboardMessageId": "1520000483995947160",
+    "resultChannel": "1498712512034766879",
     "lbChannel": "1513243330220392568",
-    "leaderboardMessageId": "1513252053701361734",
-    "leaderboardLogChannel": "1513243330220392568",
     "infoMessageId": "",
-    "infoChannel": ""
+    "infoChannel": "",
+    "leaderboardLogChannel": "1513243330220392568"
 }

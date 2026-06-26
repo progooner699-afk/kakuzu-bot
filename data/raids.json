@@ -1,5 +1,5 @@
 {
-    "lastRaidId": 6,
+    "lastRaidId": 17,
     "raids": [
         {
             "raidId": 1,
@@ -87,7 +87,7 @@
         },
         {
             "raidId": 5,
-            "status": "OPEN",
+            "status": "CLOSED",
             "requesterId": "1392856295807389756",
             "requesterTag": "yourdad043",
             "robloxUsername": "DWA",
@@ -127,9 +127,312 @@
             "messageId": "1513250869997600788",
             "channelId": "1513243686027132938",
             "createdAt": 1780857683442
+        },
+        {
+            "raidId": 7,
+            "status": "CLOSED",
+            "requesterId": "1392856295807389756",
+            "requesterTag": "yourdad043",
+            "robloxUsername": "yourdad043",
+            "robloxAvatarUrl": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-8B83FB0FC0C0604A6C4A2C257A13A4E4-Png/150/150/AvatarHeadshot/Png/noFilter",
+            "serverLink": "dwad",
+            "region": "wadwa",
+            "enemyCount": 4,
+            "teamers": "Mxxylo",
+            "teamersCount": 1,
+            "enemyClanNames": "awda",
+            "enemyClanPresent": "NO",
+            "reason": "dwawa",
+            "helperLimit": 4,
+            "helpers": [],
+            "messageId": "1519570652351434804",
+            "channelId": "1513243686027132938",
+            "createdAt": 1782364486997
+        },
+        {
+            "raidId": 8,
+            "status": "CLOSED",
+            "requesterId": "1392856295807389756",
+            "requesterTag": "yourdad043",
+            "robloxUsername": "yourdad043",
+            "robloxAvatarUrl": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-8B83FB0FC0C0604A6C4A2C257A13A4E4-Png/150/150/AvatarHeadshot/Png/noFilter",
+            "serverLink": "dadw",
+            "region": "dwaaw",
+            "enemyCount": 4,
+            "teamers": "dwa",
+            "teamersCount": 1,
+            "enemyClanNames": "dwa",
+            "enemyClanPresent": "NO",
+            "reason": "dwa",
+            "helperLimit": 4,
+            "helpers": [
+                "1460608632487153717"
+            ],
+            "messageId": "1519574846525280328",
+            "channelId": "1513243686027132938",
+            "createdAt": 1782365487152
+        },
+        {
+            "raidId": 9,
+            "status": "CLOSED",
+            "requesterId": "1392856295807389756",
+            "requesterTag": "yourdad043",
+            "robloxUsername": "yourdad043",
+            "robloxAvatarUrl": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-8B83FB0FC0C0604A6C4A2C257A13A4E4-Png/150/150/AvatarHeadshot/Png/noFilter",
+            "serverLink": "dwadwa",
+            "region": "wad",
+            "enemyCount": 5,
+            "teamers": "55",
+            "teamersCount": 1,
+            "enemyClanNames": "55",
+            "enemyClanPresent": "NO",
+            "reason": "55",
+            "helperLimit": 5,
+            "helpers": [
+                "721227341422002238"
+            ],
+            "messageId": "1519919593932718121",
+            "channelId": "1513243686027132938",
+            "createdAt": 1782447684006
+        },
+        {
+            "raidId": 10,
+            "status": "CLOSED",
+            "requesterId": "1392856295807389756",
+            "requesterTag": "yourdad043",
+            "robloxUsername": "yourdad043",
+            "robloxAvatarUrl": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-8B83FB0FC0C0604A6C4A2C257A13A4E4-Png/150/150/AvatarHeadshot/Png/noFilter",
+            "serverLink": "awdawd",
+            "region": "awda",
+            "enemyCount": 4,
+            "teamers": "55",
+            "teamersCount": 1,
+            "enemyClanNames": "55",
+            "enemyClanPresent": "NO",
+            "reason": "55",
+            "helperLimit": 8,
+            "helpers": [
+                "721227341422002238",
+                "1392856295807389756"
+            ],
+            "messageId": "1519921398594928672",
+            "channelId": "1513243686027132938",
+            "createdAt": 1782448114287
+        },
+        {
+            "raidId": 11,
+            "status": "CLOSED",
+            "requesterId": "721227341422002238",
+            "requesterTag": "ganesh040996",
+            "robloxUsername": "GaneshOP727",
+            "robloxAvatarUrl": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-54EB4954D62CEDE14A3C661D6B99F8FD-Png/150/150/AvatarHeadshot/Png/noFilter",
+            "serverLink": "Niggachadgay",
+            "region": "Niggeria",
+            "enemyCount": 9,
+            "teamers": "Gayboy1 gayboy2 gayboy3",
+            "teamersCount": 1,
+            "enemyClanNames": "Ftl",
+            "enemyClanPresent": "YES",
+            "reason": "Hey want missionary",
+            "helperLimit": 9,
+            "helpers": [
+                "721227341422002238",
+                "1392856295807389756"
+            ],
+            "messageId": "1519923355052937288",
+            "channelId": "1513243686027132938",
+            "createdAt": 1782448580762
+        },
+        {
+            "raidId": 12,
+            "status": "CLOSED",
+            "requesterId": "1392856295807389756",
+            "requesterTag": "yourdad043",
+            "robloxUsername": "yourdad043",
+            "robloxDisplayName": "yourdad043",
+            "robloxUserId": "9118094076",
+            "robloxAvatarUrl": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-8B83FB0FC0C0604A6C4A2C257A13A4E4-Png/150/150/AvatarHeadshot/Png/noFilter",
+            "serverLink": "nah just testing",
+            "region": "asia",
+            "enemyCount": 5,
+            "teamers": "noughty shourya",
+            "teamersCount": 1,
+            "enemyClanNames": "akatsuki",
+            "enemyClanPresent": "YES",
+            "reason": "he riding my cock",
+            "helperLimit": 5,
+            "helpers": [
+                {
+                    "userId": "1481913094941839480",
+                    "robloxUsername": "Its_HeAvenly2579",
+                    "robloxDisplayName": "Celestial",
+                    "robloxUserId": "9960732240"
+                }
+            ],
+            "messageId": "1519973995066425387",
+            "channelId": "1513243686027132938",
+            "createdAt": 1782460653700
+        },
+        {
+            "raidId": 13,
+            "status": "CLOSED",
+            "requesterId": "1434765533189902376",
+            "requesterTag": "croponside",
+            "robloxUsername": "stabeloid",
+            "robloxDisplayName": "Astaroth",
+            "robloxUserId": "10179383986",
+            "robloxAvatarUrl": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-02DF745A0DB8C22F0470E68857BCA5D9-Png/150/150/AvatarHeadshot/Png/noFilter",
+            "serverLink": "https://www.roblox.com/share?code=_198x6wl160ihrgw9kx20z55wo9p4z5dx7oyxvmt5e1mnmeyo2r&type=ExperienceInvite",
+            "region": "India",
+            "enemyCount": 4,
+            "teamers": "Cappy,disk boy,prometheus culprate",
+            "teamersCount": 3,
+            "enemyClanNames": "Idk",
+            "enemyClanPresent": "NO",
+            "reason": "They teaming and being toxic",
+            "helperLimit": 5,
+            "helpers": [
+                {
+                    "userId": "1392856295807389756",
+                    "robloxUsername": "yourdad043",
+                    "robloxDisplayName": "yourdad043",
+                    "robloxUserId": "9118094076"
+                },
+                {
+                    "userId": "1481913094941839480",
+                    "robloxUsername": "Its_HeAvenly2579",
+                    "robloxDisplayName": "Celestial",
+                    "robloxUserId": "9960732240"
+                },
+                {
+                    "userId": "1434765533189902376",
+                    "robloxUsername": "stabeloid",
+                    "robloxDisplayName": "Astaroth",
+                    "robloxUserId": "10179383986"
+                }
+            ],
+            "messageId": "1519979089870721038",
+            "channelId": "1513243686027132938",
+            "createdAt": 1782461868249
+        },
+        {
+            "raidId": 14,
+            "status": "CLOSED",
+            "requesterId": "1392856295807389756",
+            "requesterTag": "yourdad043",
+            "robloxUsername": "yourdad043",
+            "robloxDisplayName": "yourdad043",
+            "robloxUserId": "9118094076",
+            "robloxAvatarUrl": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-8B83FB0FC0C0604A6C4A2C257A13A4E4-Png/150/150/AvatarHeadshot/Png/noFilter",
+            "serverLink": "just testing",
+            "region": "just testing",
+            "enemyCount": 5,
+            "teamers": "yourdad043",
+            "teamersCount": 1,
+            "enemyClanNames": "hah",
+            "enemyClanPresent": "NO",
+            "reason": "wadwa",
+            "helperLimit": 5,
+            "helpers": [
+                {
+                    "userId": "1392856295807389756",
+                    "robloxUsername": "yourdad043",
+                    "robloxDisplayName": "yourdad043",
+                    "robloxUserId": "9118094076"
+                }
+            ],
+            "messageId": "1519990048395759758",
+            "channelId": "1513243686027132938",
+            "createdAt": 1782464481289
+        },
+        {
+            "raidId": 15,
+            "status": "CLOSED",
+            "requesterId": "1392856295807389756",
+            "requesterTag": "yourdad043",
+            "robloxUsername": "yourdad043",
+            "robloxDisplayName": "yourdad043",
+            "robloxUserId": "9118094076",
+            "robloxAvatarUrl": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-8B83FB0FC0C0604A6C4A2C257A13A4E4-Png/150/150/AvatarHeadshot/Png/noFilter",
+            "serverLink": "dawd",
+            "region": "wadwa",
+            "enemyCount": 4,
+            "teamers": "4",
+            "teamersCount": 1,
+            "enemyClanNames": "4",
+            "enemyClanPresent": "NO",
+            "reason": "4",
+            "helperLimit": 4,
+            "helpers": [],
+            "messageId": "1519992829731143824",
+            "channelId": "1513243686027132938",
+            "createdAt": 1782465143596
+        },
+        {
+            "raidId": 16,
+            "status": "CLOSED",
+            "requesterId": "1392856295807389756",
+            "requesterTag": "yourdad043",
+            "robloxUsername": "yourdad043",
+            "robloxDisplayName": "yourdad043",
+            "robloxUserId": "9118094076",
+            "robloxAvatarUrl": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-8B83FB0FC0C0604A6C4A2C257A13A4E4-Png/150/150/AvatarHeadshot/Png/noFilter",
+            "serverLink": "dwada",
+            "region": "wadaw45",
+            "enemyCount": 4,
+            "teamers": "4",
+            "teamersCount": 1,
+            "enemyClanNames": "4",
+            "enemyClanPresent": "NO",
+            "reason": "4",
+            "helperLimit": 4,
+            "helpers": [
+                {
+                    "userId": "1392856295807389756",
+                    "robloxUsername": "yourdad043",
+                    "robloxDisplayName": "yourdad043",
+                    "robloxUserId": "9118094076"
+                }
+            ],
+            "messageId": "1519995502840512523",
+            "channelId": "1513243686027132938",
+            "createdAt": 1782465781669
+        },
+        {
+            "raidId": 17,
+            "status": "CLOSED",
+            "requesterId": "1392856295807389756",
+            "requesterTag": "yourdad043",
+            "robloxUsername": "yourdad043",
+            "robloxDisplayName": "yourdad043",
+            "robloxUserId": "9118094076",
+            "robloxAvatarUrl": "https://tr.rbxcdn.com/30DAY-AvatarHeadshot-8B83FB0FC0C0604A6C4A2C257A13A4E4-Png/150/150/AvatarHeadshot/Png/noFilter",
+            "serverLink": "nah sorry gusy just testign  u can mute server",
+            "region": "mute server for now if u not comfy",
+            "enemyCount": 7,
+            "teamers": "6",
+            "teamersCount": 1,
+            "enemyClanNames": "6",
+            "enemyClanPresent": "NO",
+            "reason": "6",
+            "helperLimit": 7,
+            "helpers": [
+                {
+                    "userId": "1392856295807389756",
+                    "robloxUsername": "yourdad043",
+                    "robloxDisplayName": "yourdad043",
+                    "robloxUserId": "9118094076"
+                }
+            ],
+            "messageId": "1519999834864746597",
+            "channelId": "1513243686027132938",
+            "createdAt": 1782466813663
         }
     ],
+    "activeRaidByOwner": {},
     "blacklist": {},
+    "streakType": "WIN",
+    "streakCount": 1,
     "leaderboard": {
         "daily": {},
         "weekly": {},
@@ -137,7 +440,7 @@
             "1392856295807389756": 3,
             "1281898860003983395": 1
         },
-        "dailyReset": 1780963200000,
-        "weeklyReset": 1781481600000
+        "dailyReset": 1782518400000,
+        "weeklyReset": 1782691200000
     }
 }

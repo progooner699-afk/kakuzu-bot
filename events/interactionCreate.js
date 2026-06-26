@@ -5,17 +5,20 @@
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
-    PermissionsBitField
+    PermissionsBitField,
+    EmbedBuilder
 } = require("discord.js");
 const raidStateManager = require("../handlers/raidStateManager");
 const robloxApi = require("../handlers/robloxApi");
 const pendingRaidApplications = new Map();
 
+// Whitelisted roles updated with Supreme Leader included
 const RAID_CLOSE_ROLES = [
     'Administrator',
     'Management Supervisor',
     'Community Manager',
-    'Senior Moderator'
+    'Senior Moderator',
+    '💣 ‖ SUPREME LEADER'
 ];
 
 function canCloseRaid(member, raid) {
@@ -159,8 +162,20 @@ module.exports = {
                 return interaction.showModal(modal);
             }
 
-            const [prefix, action, idString] = customId.split("_");
-            const raidId = Number(idString);
+            const parts = customId.split("_");
+            const prefix = parts[0];
+            const action = parts[1];
+            
+            let raidId;
+            let outcome = null;
+
+            if (action === "outcome") {
+                outcome = parts[2];
+                raidId = Number(parts[3]);
+            } else {
+                raidId = Number(parts[2]);
+            }
+
             if (prefix !== "raid" || Number.isNaN(raidId)) return;
 
             const raid = raidStateManager.getRaidById(raidId);
@@ -172,36 +187,19 @@ module.exports = {
                 if (raid.status === "CLOSED") {
                     return interaction.reply({ content: "This raid is closed and cannot accept helpers.", flags: 64 });
                 }
-                const result = await raidStateManager.addHelper(raidId, interaction.user.id);
-                if (!result.success) {
-                    return interaction.reply({ content: result.message, flags: 64 });
-                }
-                const updated = result.raid;
-                const content = raidStateManager.formatRaidMessage(updated);
-                const row = createRaidButtons(updated, interaction.member);
-                const channel = await interaction.client.channels.fetch(updated.channelId).catch(() => null);
-                if (channel) {
-                    const message = await channel.messages.fetch(updated.messageId).catch(() => null);
-                    if (message) await message.edit({ embeds: [content], components: [row] });
-                }
-                try {
-                    await raidStateManager.publishLeaderboard(interaction.client);
-                } catch (error) {
-                    console.error('Failed to publish leaderboard:', error);
-                }
-                // Commented out plain text messages to keep leaderboard channel clean
-                // const settings = raidStateManager.loadSettings();
-                // if (settings.leaderboardLogChannel) {
-                //     const logChannel = await interaction.client.channels.fetch(settings.leaderboardLogChannel).catch(() => null);
-                //     if (logChannel && logChannel.isTextBased()) {
-                //         await logChannel.send(`👤 <@${interaction.user.id}> has accepted a raid! Total Raids: ${result.totalRaids}`);
-                //     }
-                // }
 
-                return interaction.reply({
-                    content: `- \`Raid ID          |\` ${raid.raidId}\n- \`Status           |\` You have accepted this raid!\n- \`Raid Server Link |\` ${raid.serverLink}`,
-                    ephemeral: true
-                });
+                const acceptModal = new ModalBuilder()
+                    .setCustomId(`raid_acceptmodal_${raidId}`)
+                    .setTitle("Join Raid Deployment Squad");
+
+                const robloxInput = new TextInputBuilder()
+                    .setCustomId("helperRobloxUsername")
+                    .setLabel("Enter your active Roblox Username")
+                    .setStyle(TextInputStyle.Short)
+                    .setRequired(true);
+
+                acceptModal.addComponents(new ActionRowBuilder().addComponents(robloxInput));
+                return interaction.showModal(acceptModal);
             }
 
             if (action === "leave") {
@@ -217,18 +215,161 @@ module.exports = {
                     const message = await channel.messages.fetch(updated.messageId).catch(() => null);
                     if (message) await message.edit({ embeds: [content], components: [row] });
                 }
+
+                try {
+                    await raidStateManager.publishLeaderboard(interaction.client);
+                } catch (error) {
+                    console.error('Failed to update leaderboard on leave:', error);
+                }
+
                 return interaction.reply({ content: "You have left the raid.", flags: 64 });
             }
 
             if (action === "close") {
                 const member = interaction.member;
                 if (!canCloseRaid(member, raid)) {
-                    return interaction.reply({ content: "Only the raid requester or a staff member with Administrator, Management Supervisor, Community Manager, or Senior Moderator permissions can close this raid.", flags: 64 });
+                    return interaction.reply({ content: "Only the raid requester or an authorized staff member can close this raid.", flags: 64 });
                 }
-                const updated = raidStateManager.closeRaid(raidId);
-                if (!updated) {
-                    return interaction.reply({ content: "Unable to close the raid.", flags: 64 });
+
+                const outcomeRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId(`raid_outcome_win_${raidId}`).setLabel('🟢 Win').setStyle(ButtonStyle.Success),
+                    new ButtonBuilder().setCustomId(`raid_outcome_whooped_${raidId}`).setLabel('🔥 Whooped').setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder().setCustomId(`raid_outcome_loss_${raidId}`).setLabel('🔴 Loss').setStyle(ButtonStyle.Danger),
+                    new ButtonBuilder().setCustomId(`raid_outcome_cantsay_${raidId}`).setLabel('🤷 Can\'t Say').setStyle(ButtonStyle.Secondary)
+                );
+
+                return interaction.reply({
+                    content: '📊 **Select the final raid outcome to compile streaks and log metrics:**',
+                    components: [outcomeRow],
+                    flags: 64
+                });
+            }
+
+            if (action === "outcome") {
+                const activeRaid = raidStateManager.getRaidById(raidId);
+                if (!activeRaid || activeRaid.status === 'CLOSED') {
+                    return interaction.reply({ content: '❌ This raid record has already been locked.', flags: 64 });
                 }
+
+                raidStateManager.closeRaid(raidId);
+                activeRaid.status = 'CLOSED';
+
+                const settings = raidStateManager.loadSettings();
+                // FIX: Adjusted to correctly call loadRaids from the state manager import
+                const raidsData = raidStateManager.loadRaids();
+
+                if (!raidsData.streakType) raidsData.streakType = 'NONE';
+                if (!raidsData.streakCount) raidsData.streakCount = 0;
+
+                let resultTitle = '';
+                let resultColor = 0xbf0000;
+                let descriptionText = '';
+
+                if (outcome === 'win' || outcome === 'whooped') {
+                    if (raidsData.streakType === 'WIN') {
+                        raidsData.streakCount += 1;
+                    } else {
+                        raidsData.streakType = 'WIN';
+                        raidsData.streakCount = 1;
+                    }
+
+                    if (outcome === 'whooped') {
+                        resultTitle = '🔥 OBLITERATION DEPLOYMENT (WHOOPED) 🔥';
+                        resultColor = 0xff0055;
+                        descriptionText = `Our combat deployment completely **WHOOPED** the opposition forces! A flawless victory.`;
+                    } else {
+                        resultTitle = '🏆 OPERATION VICTORY 🏆';
+                        resultColor = 0x00ff66;
+                        descriptionText = `Our active deployment successfully secured a decisive combat victory!`;
+                    }
+                } else if (outcome === 'loss') {
+                    if (raidsData.streakType === 'LOSS') {
+                        raidsData.streakCount += 1;
+                    } else {
+                        raidsData.streakType = 'LOSS';
+                        raidsData.streakCount = 1;
+                    }
+                    resultTitle = '❌ DEPLOYMENT LOSS ❌';
+                    resultColor = 0xff3333;
+                    descriptionText = `Our combat crew suffered an operational defeat against enemy forces during deployment.`;
+                } else {
+                    resultTitle = '⚖️ INDECISIVE CONCLUSION / CAN\'T SAY ⚖️';
+                    resultColor = 0x888888;
+                    descriptionText = `The combat operation concluded indeterminately, or was cancelled mid-deployment.`;
+                }
+
+                raidStateManager.saveRaids(raidsData);
+
+                const streakMessage = raidsData.streakCount > 0 
+                    ? `**Current Streak:** ${raidsData.streakType === 'WIN' ? '🔥' : '💀'} ${raidsData.streakCount} Matches consecutive!`
+                    : '**Current Streak:** None tracking';
+
+                const reportCardEmbed = new EmbedBuilder()
+                    .setTitle(resultTitle)
+                    .setDescription(`${descriptionText}\n\n${streakMessage}`)
+                    .setColor(resultColor)
+                    .addFields([
+                        { name: 'Operation Registry', value: `\`#${activeRaid.raidId}\``, inline: true },
+                        { name: 'Squad Leader', value: `<@${activeRaid.requesterId}>`, inline: true },
+                        { name: 'Region Server', value: `\`${activeRaid.region || 'Unknown'}\``, inline: true },
+                        { name: 'Hostile Count', value: `\`${activeRaid.enemyCount || 0}\``, inline: true },
+                        { name: 'Hostile Grouping', value: activeRaid.enemyClanNames ? `\`${activeRaid.enemyClanNames}\`` : '`None`', inline: true },
+                        { name: 'Deployment Squad Roster', value: activeRaid.helpers.length > 0 ? activeRaid.helpers.map(h => typeof h === 'string' ? `<@${h}>` : `<@${h.userId}>`).join(', ') : 'No operators deployed.', inline: false }
+                    ])
+                    .setTimestamp();
+
+                if (settings.resultChannel) {
+                    const targetResultChannel = await interaction.client.channels.fetch(settings.resultChannel).catch(() => null);
+                    if (targetResultChannel && targetResultChannel.isTextBased()) {
+                        await targetResultChannel.send({ embeds: [reportCardEmbed] });
+                    }
+                }
+
+                const alertChannel = await interaction.client.channels.fetch(activeRaid.channelId).catch(() => null);
+                if (alertChannel) {
+                    const baseAlertMsg = await alertChannel.messages.fetch(activeRaid.messageId).catch(() => null);
+                    if (baseAlertMsg) {
+                        const updatedAlertEmbed = raidStateManager.formatRaidMessage(activeRaid);
+                        const cleanClosedRow = createRaidButtons(activeRaid, interaction.member);
+                        await baseAlertMsg.edit({ embeds: [updatedAlertEmbed], components: [cleanClosedRow] }).catch(() => null);
+                    }
+                }
+
+                // Wipes out outcome option panel buttons so users can't spam them again
+                await interaction.update({ content: `✅ Combat operation logs compiled as **${outcome.toUpperCase()}**!`, components: [] });
+                return raidStateManager.publishLeaderboard(interaction.client);
+            }
+        }
+
+        if (interaction.isModalSubmit()) {
+            if (interaction.customId.startsWith("raid_acceptmodal_")) {
+                const targetRaidId = Number(interaction.customId.split("_")[2]);
+                const helperUsername = interaction.fields.getTextInputValue("helperRobloxUsername");
+
+                const currentRaid = raidStateManager.getRaidById(targetRaidId);
+                if (!currentRaid || currentRaid.status === "CLOSED") {
+                    return interaction.reply({ content: "This raid operation is no longer active or closed.", flags: 64 });
+                }
+
+                const robloxValidation = await robloxApi.validateAndGetAvatar(helperUsername);
+                if (!robloxValidation.success) {
+                    return interaction.reply({ 
+                        content: `❌ **Roblox Username Validation Failed**\n${robloxValidation.error}`, 
+                        flags: 64 
+                    });
+                }
+
+                const result = await raidStateManager.addHelper(targetRaidId, interaction.user.id, {
+                    username: helperUsername,
+                    displayName: robloxValidation.displayName || helperUsername,
+                    userId: robloxValidation.userId || "1"
+                });
+
+                if (!result.success) {
+                    return interaction.reply({ content: result.message, flags: 64 });
+                }
+
+                const updated = result.raid;
                 const content = raidStateManager.formatRaidMessage(updated);
                 const row = createRaidButtons(updated, interaction.member);
                 const channel = await interaction.client.channels.fetch(updated.channelId).catch(() => null);
@@ -236,11 +377,19 @@ module.exports = {
                     const message = await channel.messages.fetch(updated.messageId).catch(() => null);
                     if (message) await message.edit({ embeds: [content], components: [row] });
                 }
-                return interaction.reply({ content: "Raid has been closed.", flags: 64 });
-            }
-        }
 
-        if (interaction.isModalSubmit()) {
+                try {
+                    await raidStateManager.publishLeaderboard(interaction.client);
+                } catch (error) {
+                    console.error('Failed to publish leaderboard live updates:', error);
+                }
+
+                return interaction.reply({
+                    content: `✅ **Raid Request Accepted!**\n- \`Raid ID:\` #${currentRaid.raidId}\n- \`Server:\` ${currentRaid.serverLink}`,
+                    flags: 64
+                });
+            }
+
             if (interaction.customId === "raid_application_step1") {
                 const userId = interaction.user.id;
                 if (!raidStateManager.canCreateRaid(userId)) {
@@ -300,7 +449,6 @@ module.exports = {
                     return interaction.reply({ content: "All required fields must be filled in.", flags: 64 });
                 }
 
-                // Validate Roblox username and fetch avatar
                 const robloxValidation = await robloxApi.validateAndGetAvatar(robloxUsername);
                 if (!robloxValidation.success) {
                     return interaction.reply({ 
@@ -313,6 +461,8 @@ module.exports = {
                     requesterId: userId,
                     requesterTag: interaction.user.tag,
                     robloxUsername,
+                    robloxDisplayName: robloxValidation.displayName || robloxUsername,
+                    robloxUserId: robloxValidation.userId || "1",
                     robloxAvatarUrl: robloxValidation.avatarUrl,
                     serverLink,
                     region,
@@ -333,6 +483,20 @@ module.exports = {
                 if (!targetChannel || !targetChannel.isTextBased()) {
                     return interaction.reply({ content: "Raid could not be posted because the raid channel is not set or is unavailable.", flags: 64 });
                 }
+
+                const completionEmbed = new EmbedBuilder()
+                    .setTitle('🚀 Raid Request Successfully Launched!')
+                    .setDescription(`Operator <@${userId}> has successfully deployed a combat request!`)
+                    .addFields([
+                        { name: 'Raid Registry ID', value: `\`#${raid.raidId}\``, inline: true },
+                        { name: 'Roblox Identity', value: `\`${robloxUsername}\``, inline: true },
+                        { name: 'Target Region', value: `\`${region}\``, inline: true }
+                    ])
+                    .setColor(0x00ff66)
+                    .setTimestamp();
+
+                // Sets launch confirmation message back to fully ephemeral with a native dismiss button!
+                await interaction.reply({ embeds: [completionEmbed], flags: 64 });
 
                 const message = await targetChannel.send({
                     content: '@everyone',
@@ -355,7 +519,6 @@ module.exports = {
                     }
                 }
 
-                await interaction.reply({ content: `Raid request submitted successfully and posted as #${raid.raidId}.`, flags: 64 });
                 return raidStateManager.publishLeaderboard(interaction.client);
             }
         }
