@@ -2,6 +2,7 @@
 const path = require('path');
 const { EmbedBuilder } = require('discord.js');
 const leaderboardDb = require('./leaderboardDb');
+const robloxApi = require('./robloxApi');
 
 const settingsPath = path.join(__dirname, '..', 'data', 'settings.json');
 const raidsPath = path.join(__dirname, '..', 'data', 'raids.json');
@@ -29,6 +30,9 @@ const defaultRaids = {
         weeklyReset: 0
     }
 };
+
+const profileCache = new Map();
+const PROFILE_CACHE_TTL = 10 * 60 * 1000;
 
 function ensureDataFiles() {
     const dataDir = path.join(__dirname, '..', 'data');
@@ -327,28 +331,138 @@ function getTopEntries(ranking, max = 5) {
         .slice(0, max);
 }
 
-function buildLeaderboardEmbed(topEntries) {
+function getRaidProfileContext(userId) {
+    const raids = loadRaids();
+    for (const raid of raids.raids) {
+        if (raid.requesterId === userId) {
+            if (raid.robloxDisplayName || raid.robloxUserId) {
+                return {
+                    robloxDisplayName: raid.robloxDisplayName || 'Not Linked',
+                    robloxUserId: raid.robloxUserId || null,
+                    robloxUsername: raid.robloxUsername || null
+                };
+            }
+        }
+
+        if (Array.isArray(raid.helpers)) {
+            const helper = raid.helpers.find(item => {
+                if (typeof item === 'string') return item === userId;
+                return item && item.userId === userId;
+            });
+            if (helper) {
+                return {
+                    robloxDisplayName: helper.robloxDisplayName || helper.robloxUsername || 'Not Linked',
+                    robloxUserId: helper.robloxUserId || null,
+                    robloxUsername: helper.robloxUsername || null
+                };
+            }
+        }
+    }
+    return null;
+}
+
+async function getLeaderboardUserProfile(client, userId) {
+    const cached = profileCache.get(userId);
+    if (cached && Date.now() - cached.fetchedAt < PROFILE_CACHE_TTL) {
+        return cached;
+    }
+
+    let discordUser = null;
+    try {
+        discordUser = await client.users.fetch(userId).catch(() => null);
+    } catch (error) {
+        console.error('Failed to fetch Discord user for leaderboard:', error);
+    }
+
+    const context = getRaidProfileContext(userId);
+    let robloxDisplayName = 'Not Linked';
+    let robloxUserId = null;
+    let avatarUrl = null;
+
+    if (context?.robloxUserId) {
+        robloxUserId = context.robloxUserId;
+        robloxDisplayName = context.robloxDisplayName || robloxDisplayName;
+    } else if (context?.robloxUsername) {
+        const validation = await robloxApi.validateRobloxUser(context.robloxUsername).catch(() => null);
+        if (validation?.success) {
+            robloxUserId = validation.userId;
+            robloxDisplayName = validation.displayName || context.robloxDisplayName || 'Not Linked';
+        }
+    }
+
+    if (robloxUserId) {
+        const avatarResult = await robloxApi.getRobloxAvatarUrl(robloxUserId).catch(() => null);
+        if (avatarResult?.success) {
+            avatarUrl = avatarResult.avatarUrl;
+        }
+    }
+
+    const profile = {
+        userId,
+        discordMention: discordUser ? `<@${userId}>` : 'Unknown User',
+        discordName: discordUser?.displayName || discordUser?.username || 'Unknown User',
+        robloxDisplayName,
+        robloxUserId,
+        avatarUrl,
+        fetchedAt: Date.now()
+    };
+
+    profileCache.set(userId, profile);
+    return profile;
+}
+
+async function buildLeaderboardEmbed(client, topEntries) {
     const embed = new EmbedBuilder()
-        .setTitle('🏆 RAID RESPONSE LEADERBOARD 🏆')
-        .setDescription('Top operators ranked by confirmed raid deployment assists!')
-        .setColor(0x00FFCC)
+        .setTitle('🏆 Raid Leaderboard')
+        .setDescription('Top 20 Most Active Raiders')
+        .setColor(0x00AEEF)
+        .setFooter({ text: 'Updates Automatically' })
         .setTimestamp();
 
-    if (topEntries.length === 0) {
-        embed.setDescription('🏆 **RAID RESPONSE LEADERBOARD** 🏆\n\n*No deployment records tracked yet.*');
+    if (!Array.isArray(topEntries) || topEntries.length === 0) {
+        embed.setDescription('Top 20 Most Active Raiders\n\n• No raid data tracked yet.');
         return embed;
     }
 
-    const rows = topEntries.map((entry, index) => {
-        let medal = '🔹';
-        if (index === 0) medal = '🥇';
-        else if (index === 1) medal = '🥈';
-        else if (index === 2) medal = '🥉';
-        return `\`${medal} #${String(index + 1).padEnd(2)}\` | <@${entry.userId}> – **${entry.count}** Assists`;
-    });
+    const sections = [];
+    for (let index = 0; index < Math.min(topEntries.length, 20); index += 1) {
+        const entry = topEntries[index];
+        const rank = index + 1;
+        const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '🏅';
+        const profile = await getLeaderboardUserProfile(client, entry.userId);
+        const discordLabel = profile.discordMention || profile.discordName || 'Unknown User';
+        const robloxLabel = profile.robloxDisplayName || 'Not Linked';
+        const avatarLine = profile.avatarUrl
+            ? `🖼️ Roblox Avatar: [Open Avatar](${profile.avatarUrl})`
+            : '🖼️ Roblox Avatar: Default Clan Avatar';
 
-    embed.setDescription(`🏆 **RAID RESPONSE LEADERBOARD** 🏆\n\n${rows.join('\n')}`);
+        sections.push(
+            [
+                '━━━━━━━━━━━━━━━━━━',
+                `${medal} **Rank #${rank}**`,
+                `👤 **Discord:** ${discordLabel}`,
+                `🎮 **Roblox:** ${robloxLabel}`,
+                `⚔️ **Raids:** **${entry.raidCount || 0}**`,
+                avatarLine,
+                ''
+            ].join('\n')
+        );
+    }
+
+    const rankOneProfile = sections.length > 0 ? await getLeaderboardUserProfile(client, topEntries[0].userId) : null;
+    if (rankOneProfile?.avatarUrl) {
+        embed.setThumbnail(rankOneProfile.avatarUrl);
+    } else if (client?.user?.displayAvatarURL) {
+        embed.setThumbnail(client.user.displayAvatarURL({ size: 256 }));
+    }
+
+    embed.setDescription(`Top 20 Most Active Raiders\n\n${sections.join('\n')}`);
     return embed;
+}
+
+async function buildLeaderboardEmbeds(client, topEntries = null) {
+    const entries = topEntries || await leaderboardDb.getTopLeaderboard(20);
+    return [await buildLeaderboardEmbed(client, entries)];
 }
 
 async function publishLeaderboard(client) {
@@ -358,14 +472,14 @@ async function publishLeaderboard(client) {
     const channel = await client.channels.fetch(settings.leaderboardChannel).catch(() => null);
     if (!channel || !channel.isTextBased()) return;
     
-    const topEntries = await leaderboardDb.getTopLeaderboard(15);
-    const embed = buildLeaderboardEmbed(topEntries);
+    const topEntries = await leaderboardDb.getTopLeaderboard(20);
+    const embeds = await buildLeaderboardEmbeds(client, topEntries);
     
     if (settings.leaderboardMessageId) {
         const existing = await channel.messages.fetch(settings.leaderboardMessageId).catch(() => null);
         if (existing) {
             try {
-                await existing.edit({ embeds: [embed] });
+                await existing.edit({ embeds });
                 return;
             } catch (error) {
                 if (error?.code === 10008) {
@@ -381,7 +495,7 @@ async function publishLeaderboard(client) {
         }
     }
     
-    const message = await channel.send({ embeds: [embed] });
+    const message = await channel.send({ embeds });
     settings.leaderboardMessageId = message.id;
     saveSettings(settings);
 }
@@ -408,5 +522,6 @@ module.exports = {
     formatRaidMessage,
     publishLeaderboard,
     syncLeaderboardMessage,
-    closeAllRaids
+    closeAllRaids,
+    buildLeaderboardEmbeds
 };
