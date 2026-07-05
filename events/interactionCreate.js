@@ -6,11 +6,22 @@
     TextInputBuilder,
     TextInputStyle,
     PermissionsBitField,
-    EmbedBuilder
+    EmbedBuilder,
+    StringSelectMenuBuilder,
+    StringSelectMenuOptionBuilder
 } = require("discord.js");
 const raidStateManager = require("../handlers/raidStateManager");
 const robloxApi = require("../handlers/robloxApi");
 const pendingRaidApplications = new Map();
+const pendingRegionSelections = new Map();
+
+const REGION_ROLE_IDS = {
+    NA: '1516664149793439775',
+    SA: '1516664182194307082',
+    ASIA: '1516663854354923620',
+    EU: '1516664062438674462',
+    AUST: '1522551121615523910'
+};
 
 // Whitelisted roles updated with Supreme Leader included
 const RAID_CLOSE_ROLES = [
@@ -26,6 +37,22 @@ function canCloseRaid(member, raid) {
     if (member.id === raid.requesterId) return true;
     if (member.permissions.has(PermissionsBitField.Flags.Administrator)) return true;
     return member.roles.cache.some(role => RAID_CLOSE_ROLES.includes(role.name));
+}
+
+function normalizeRegion(region) {
+    const value = String(region || '').trim().toUpperCase();
+    if (value === 'AS') return 'ASIA';
+    if (value === 'EUROPE') return 'EU';
+    if (value === 'US' || value === 'USA' || value === 'NORTH AMERICA') return 'NA';
+    if (value === 'SOUTH AMERICA') return 'SA';
+    if (value === 'AUS' || value === 'AUSTRALIA') return 'AUST';
+    return value;
+}
+
+function getRegionRoleInfo(region) {
+    const normalized = normalizeRegion(region);
+    const roleId = REGION_ROLE_IDS[normalized] || null;
+    return roleId ? { roleId, mention: `<@&${roleId}>` } : { roleId: null, mention: null };
 }
 
 function createRaidButtons(raid, member = null) {
@@ -74,10 +101,11 @@ module.exports = {
             return;
         }
 
-        if (interaction.isButton()) {
-            const customId = interaction.customId;
-            
-            if (customId === "request_raid") {
+        if (interaction.isStringSelectMenu()) {
+            if (interaction.customId === "raid_region_select") {
+                const region = interaction.values[0];
+                pendingRegionSelections.set(interaction.user.id, region);
+
                 const modal = new ModalBuilder()
                     .setCustomId("raid_application_step1")
                     .setTitle("Raid Request Application – Step 1");
@@ -99,13 +127,6 @@ module.exports = {
                     ),
                     new ActionRowBuilder().addComponents(
                         new TextInputBuilder()
-                            .setCustomId("region")
-                            .setLabel("Region")
-                            .setStyle(TextInputStyle.Short)
-                            .setRequired(true)
-                    ),
-                    new ActionRowBuilder().addComponents(
-                        new TextInputBuilder()
                             .setCustomId("enemyCount")
                             .setLabel("Enemy Count")
                             .setStyle(TextInputStyle.Short)
@@ -121,6 +142,31 @@ module.exports = {
                 );
 
                 return interaction.showModal(modal);
+            }
+        }
+
+        if (interaction.isButton()) {
+            const customId = interaction.customId;
+            
+            if (customId === "request_raid") {
+                const regionSelect = new StringSelectMenuBuilder()
+                    .setCustomId("raid_region_select")
+                    .setPlaceholder("Select a region")
+                    .setMinValues(1)
+                    .setMaxValues(1)
+                    .addOptions(
+                        new StringSelectMenuOptionBuilder().setLabel("NA").setValue("NA"),
+                        new StringSelectMenuOptionBuilder().setLabel("SA").setValue("SA"),
+                        new StringSelectMenuOptionBuilder().setLabel("ASIA").setValue("ASIA"),
+                        new StringSelectMenuOptionBuilder().setLabel("EU").setValue("EU"),
+                        new StringSelectMenuOptionBuilder().setLabel("AUST").setValue("AUST")
+                    );
+
+                return interaction.reply({
+                    content: "Select the raid region from the dropdown below.",
+                    components: [new ActionRowBuilder().addComponents(regionSelect)],
+                    flags: 64
+                });
             }
 
             if (customId === "raid_step2_continue") {
@@ -255,7 +301,6 @@ module.exports = {
                 activeRaid.status = 'CLOSED';
 
                 const settings = raidStateManager.loadSettings();
-                // FIX: Adjusted to correctly call loadRaids from the state manager import
                 const raidsData = raidStateManager.loadRaids();
 
                 if (!raidsData.streakType) raidsData.streakType = 'NONE';
@@ -304,26 +349,45 @@ module.exports = {
                     ? `**Current Streak:** ${raidsData.streakType === 'WIN' ? '🔥' : '💀'} ${raidsData.streakCount} Matches consecutive!`
                     : '**Current Streak:** None tracking';
 
-                const reportCardEmbed = new EmbedBuilder()
-                    .setTitle(resultTitle)
-                    .setDescription(`${descriptionText}\n\n${streakMessage}`)
-                    .setColor(resultColor)
-                    .addFields([
-                        { name: 'Operation Registry', value: `\`#${activeRaid.raidId}\``, inline: true },
-                        { name: 'Squad Leader', value: `<@${activeRaid.requesterId}>`, inline: true },
-                        { name: 'Region Server', value: `\`${activeRaid.region || 'Unknown'}\``, inline: true },
-                        { name: 'Hostile Count', value: `\`${activeRaid.enemyCount || 0}\``, inline: true },
-                        { name: 'Hostile Grouping', value: activeRaid.enemyClanNames ? `\`${activeRaid.enemyClanNames}\`` : '`None`', inline: true },
-                        { name: 'Deployment Squad Roster', value: activeRaid.helpers.length > 0 ? activeRaid.helpers.map(h => typeof h === 'string' ? `<@${h}>` : `<@${h.userId}>`).join(', ') : 'No operators deployed.', inline: false }
-                    ])
-                    .setTimestamp();
+                const buildReportCardEmbed = (attachments = []) => {
+                    const embed = new EmbedBuilder()
+                        .setTitle(resultTitle)
+                        .setDescription(`${descriptionText}\n\n${streakMessage}`)
+                        .setColor(resultColor)
+                        .addFields([
+                            { name: 'Operation Registry', value: `\`#${activeRaid.raidId}\``, inline: true },
+                            { name: 'Squad Leader', value: `<@${activeRaid.requesterId}>`, inline: true },
+                            { name: 'Region Server', value: `\`${activeRaid.region || 'Unknown'}\``, inline: true },
+                            { name: 'Hostile Count', value: `\`${activeRaid.enemyCount || 0}\``, inline: true },
+                            { name: 'Hostile Grouping', value: activeRaid.enemyClanNames ? `\`${activeRaid.enemyClanNames}\`` : '`None`', inline: true },
+                            { name: 'Deployment Squad Roster', value: activeRaid.helpers.length > 0 ? activeRaid.helpers.map(h => typeof h === 'string' ? `<@${h}>` : `<@${h.userId}>`).join(', ') : 'No operators deployed.', inline: false }
+                        ])
+                        .setTimestamp();
 
-                if (settings.resultChannel) {
-                    const targetResultChannel = await interaction.client.channels.fetch(settings.resultChannel).catch(() => null);
-                    if (targetResultChannel && targetResultChannel.isTextBased()) {
-                        await targetResultChannel.send({ embeds: [reportCardEmbed] });
+                    if (attachments.length > 0) {
+                        const picsValue = attachments.slice(0, 8).map((url, index) => `${index + 1}. ${url}`).join('\n');
+                        embed.addFields({ name: 'Pics', value: picsValue.length > 1024 ? `${picsValue.slice(0, 1020)}...` : picsValue, inline: false });
+                        embed.setImage(attachments[0]);
+                    } else {
+                        embed.addFields({ name: 'Pics', value: 'No pictures uploaded.', inline: false });
                     }
-                }
+
+                    return embed;
+                };
+
+                const sendResultEmbed = async (attachments = []) => {
+                    if (settings.resultChannel) {
+                        const targetResultChannel = await interaction.client.channels.fetch(settings.resultChannel).catch(() => null);
+                        if (targetResultChannel && targetResultChannel.isTextBased()) {
+                            const regionRoleInfo = getRegionRoleInfo(activeRaid.region);
+                            await targetResultChannel.send({
+                                content: regionRoleInfo.mention || undefined,
+                                embeds: [buildReportCardEmbed(attachments)],
+                                allowedMentions: regionRoleInfo.roleId ? { roles: [regionRoleInfo.roleId] } : undefined
+                            });
+                        }
+                    }
+                };
 
                 const alertChannel = await interaction.client.channels.fetch(activeRaid.channelId).catch(() => null);
                 if (alertChannel) {
@@ -335,9 +399,32 @@ module.exports = {
                     }
                 }
 
-                // Wipes out outcome option panel buttons so users can't spam them again
                 await interaction.update({ content: `✅ Combat operation logs compiled as **${outcome.toUpperCase()}**!`, components: [] });
-                return raidStateManager.publishLeaderboard(interaction.client);
+                await interaction.followUp({ content: '📸 Upload any pictures or files for this raid result. If you do not upload anything within 30 seconds, the result will be sent automatically.', ephemeral: true });
+
+                const uploadedUrls = [];
+                const collector = interaction.channel.createMessageCollector({
+                    filter: (msg) => msg.author.id === interaction.user.id && msg.channelId === interaction.channelId,
+                    time: 30000,
+                    max: 20
+                });
+
+                collector.on('collect', (msg) => {
+                    if (msg.attachments.size > 0) {
+                        for (const attachment of msg.attachments.values()) {
+                            uploadedUrls.push(attachment.url);
+                        }
+                        return;
+                    }
+                    collector.stop('done');
+                });
+
+                collector.on('end', async () => {
+                    await sendResultEmbed(uploadedUrls);
+                    await raidStateManager.publishLeaderboard(interaction.client);
+                });
+
+                return;
             }
         }
 
@@ -396,12 +483,18 @@ module.exports = {
                     return interaction.reply({ content: "You already have an open raid or you are blocked from creating new raids.", flags: 64 });
                 }
 
+                const region = pendingRegionSelections.get(userId);
+                if (!region) {
+                    pendingRegionSelections.delete(userId);
+                    return interaction.reply({ content: "Please select a region before continuing.", flags: 64 });
+                }
+
                 const partial = {
                     requesterId: userId,
                     requesterTag: interaction.user.tag,
                     robloxUsername: interaction.fields.getTextInputValue("robloxUsername"),
                     serverLink: interaction.fields.getTextInputValue("serverLink"),
-                    region: interaction.fields.getTextInputValue("region"),
+                    region,
                     enemyCount: interaction.fields.getTextInputValue("enemyCount"),
                     helperLimit: interaction.fields.getTextInputValue("helperLimit")
                 };
@@ -477,6 +570,7 @@ module.exports = {
                 const settings = raidStateManager.loadSettings();
                 const content = raidStateManager.formatRaidMessage(raid);
                 const raidButtonRow = createRaidButtons(raid, interaction.member);
+                const regionRoleInfo = getRegionRoleInfo(raid.region);
                 const targetChannelId = settings.raidChannel || interaction.channelId;
                 const targetChannel = await interaction.client.channels.fetch(targetChannelId).catch(() => null);
 
@@ -499,10 +593,10 @@ module.exports = {
                 await interaction.reply({ embeds: [completionEmbed], flags: 64 });
 
                 const message = await targetChannel.send({
-                    content: '@everyone',
+                    content: regionRoleInfo.mention || undefined,
                     embeds: [content],
                     components: [raidButtonRow],
-                    allowedMentions: { parse: ['everyone'] }
+                    allowedMentions: regionRoleInfo.roleId ? { roles: [regionRoleInfo.roleId] } : undefined
                 });
                 raidStateManager.updateRaidMessageReference(raid.raidId, targetChannel.id, message.id);
 
