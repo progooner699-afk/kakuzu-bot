@@ -235,11 +235,15 @@ function removeHelper(raidId, userId) {
     return { success: true, raid };
 }
 
-function closeRaid(raidId) {
+function closeRaid(raidId, options = {}) {
     const raids = loadRaids();
     const raid = raids.raids.find(item => item.raidId === raidId);
     if (!raid) return null;
     raid.status = 'CLOSED';
+    raid.closedBy = options.closedBy || null;
+    raid.closedByTag = options.closedByTag || null;
+    raid.closeReason = options.closeReason || null;
+    raid.closedAt = Date.now();
     if (raids.activeRaidByOwner[raid.requesterId] === raid.raidId) {
         delete raids.activeRaidByOwner[raid.requesterId];
     }
