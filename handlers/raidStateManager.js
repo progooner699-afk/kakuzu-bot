@@ -10,7 +10,8 @@ const raidsPath = path.join(__dirname, '..', 'data', 'raids.json');
 const defaultSettings = {
     raidChannel: null,
     helpChannel: null,
-    leaderboardChannel: null, 
+    leaderboardChannel: null,
+    lbChannel: null,
     leaderboardMessageId: null,
     resultChannel: null
 };
@@ -51,7 +52,14 @@ function loadSettings() {
     ensureDataFiles();
     const raw = fs.readFileSync(settingsPath, 'utf8');
     const settings = JSON.parse(raw);
-    return Object.assign({}, defaultSettings, settings);
+    const merged = Object.assign({}, defaultSettings, settings);
+    if (!merged.leaderboardChannel && merged.lbChannel) {
+        merged.leaderboardChannel = merged.lbChannel;
+    }
+    if (!merged.lbChannel && merged.leaderboardChannel) {
+        merged.lbChannel = merged.leaderboardChannel;
+    }
+    return merged;
 }
 
 function saveSettings(settings) {
@@ -467,9 +475,10 @@ async function buildLeaderboardEmbeds(client, topEntries = null) {
 
 async function publishLeaderboard(client) {
     const settings = loadSettings();
-    if (!settings.leaderboardChannel) return;
+    const leaderboardChannelId = settings.leaderboardChannel || settings.lbChannel;
+    if (!leaderboardChannelId) return;
 
-    const channel = await client.channels.fetch(settings.leaderboardChannel).catch(() => null);
+    const channel = await client.channels.fetch(leaderboardChannelId).catch(() => null);
     if (!channel || !channel.isTextBased()) return;
     
     const topEntries = await leaderboardDb.getTopLeaderboard(20);

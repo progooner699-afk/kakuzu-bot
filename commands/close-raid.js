@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const raidStateManager = require('../handlers/raidStateManager');
 
 module.exports = {
@@ -29,7 +29,10 @@ module.exports = {
         }
 
         const member = interaction.member;
-        const canClose = member && (member.id === raid.requesterId || member.permissions?.has('Administrator'));
+        const canClose = member && (
+            member.id === raid.requesterId ||
+            member.permissions?.has(PermissionFlagsBits.Administrator)
+        );
         if (!canClose) {
             return interaction.reply({ content: 'Access Denied: Only the Raid Leader or an Administrator can close this.', ephemeral: true });
         }

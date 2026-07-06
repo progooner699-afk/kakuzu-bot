@@ -93,9 +93,9 @@ module.exports = {
             } catch (error) {
                 console.error('Command execution error:', error);
                 if (!interaction.replied && !interaction.deferred) {
-                    await interaction.reply({ content: 'An error occurred while executing that command.', ephemeral: true });
+                    await interaction.reply({ content: 'An error occurred while executing that command.', flags: 64 }).catch(() => null);
                 } else {
-                    await interaction.followUp({ content: 'An error occurred while executing that command.', ephemeral: true });
+                    await interaction.followUp({ content: 'An error occurred while executing that command.', flags: 64 }).catch(() => null);
                 }
             }
             return;
@@ -166,7 +166,7 @@ module.exports = {
                     content: "Select the raid region from the dropdown below.",
                     components: [new ActionRowBuilder().addComponents(regionSelect)],
                     flags: 64
-                });
+                }).catch(() => null);
             }
 
             if (customId === "raid_step2_continue") {
@@ -226,12 +226,12 @@ module.exports = {
 
             const raid = raidStateManager.getRaidById(raidId);
             if (!raid) {
-                return interaction.reply({ content: "Raid not found.", flags: 64 });
+                return interaction.reply({ content: "Raid not found.", flags: 64 }).catch(() => null);
             }
 
             if (action === "accept") {
                 if (raid.status === "CLOSED") {
-                    return interaction.reply({ content: "This raid is closed and cannot accept helpers.", flags: 64 });
+                    return interaction.reply({ content: "This raid is closed and cannot accept helpers.", flags: 64 }).catch(() => null);
                 }
 
                 const acceptModal = new ModalBuilder()
@@ -245,7 +245,7 @@ module.exports = {
                     .setRequired(true);
 
                 acceptModal.addComponents(new ActionRowBuilder().addComponents(robloxInput));
-                return interaction.showModal(acceptModal);
+                return interaction.showModal(acceptModal).catch(() => null);
             }
 
             if (action === "leave") {
@@ -268,13 +268,13 @@ module.exports = {
                     console.error('Failed to update leaderboard on leave:', error);
                 }
 
-                return interaction.reply({ content: "You have left the raid.", flags: 64 });
+                return interaction.reply({ content: "You have left the raid.", flags: 64 }).catch(() => null);
             }
 
             if (action === "close") {
                 const member = interaction.member;
                 if (!canCloseRaid(member, raid)) {
-                    return interaction.reply({ content: "Only the raid requester or an authorized staff member can close this raid.", flags: 64 });
+                    return interaction.reply({ content: "Only the raid requester or an authorized staff member can close this raid.", flags: 64 }).catch(() => null);
                 }
 
                 const outcomeRow = new ActionRowBuilder().addComponents(
@@ -288,13 +288,13 @@ module.exports = {
                     content: '📊 **Select the final raid outcome to compile streaks and log metrics:**',
                     components: [outcomeRow],
                     flags: 64
-                });
+                }).catch(() => null);
             }
 
             if (action === "outcome") {
                 const activeRaid = raidStateManager.getRaidById(raidId);
                 if (!activeRaid || activeRaid.status === 'CLOSED') {
-                    return interaction.reply({ content: '❌ This raid record has already been locked.', flags: 64 });
+                    return interaction.reply({ content: '❌ This raid record has already been locked.', flags: 64 }).catch(() => null);
                 }
 
                 raidStateManager.closeRaid(raidId);
@@ -435,7 +435,7 @@ module.exports = {
 
                 const currentRaid = raidStateManager.getRaidById(targetRaidId);
                 if (!currentRaid || currentRaid.status === "CLOSED") {
-                    return interaction.reply({ content: "This raid operation is no longer active or closed.", flags: 64 });
+                    return interaction.reply({ content: "This raid operation is no longer active or closed.", flags: 64 }).catch(() => null);
                 }
 
                 const robloxValidation = await robloxApi.validateAndGetAvatar(helperUsername);
@@ -474,19 +474,19 @@ module.exports = {
                 return interaction.reply({
                     content: `✅ **Raid Request Accepted!**\n- \`Raid ID:\` #${currentRaid.raidId}\n- \`Server:\` ${currentRaid.serverLink}`,
                     flags: 64
-                });
+                }).catch(() => null);
             }
 
             if (interaction.customId === "raid_application_step1") {
                 const userId = interaction.user.id;
                 if (!raidStateManager.canCreateRaid(userId)) {
-                    return interaction.reply({ content: "You already have an open raid or you are blocked from creating new raids.", flags: 64 });
+                    return interaction.reply({ content: "You already have an open raid or you are blocked from creating new raids.", flags: 64 }).catch(() => null);
                 }
 
                 const region = pendingRegionSelections.get(userId);
                 if (!region) {
                     pendingRegionSelections.delete(userId);
-                    return interaction.reply({ content: "Please select a region before continuing.", flags: 64 });
+                    return interaction.reply({ content: "Please select a region before continuing.", flags: 64 }).catch(() => null);
                 }
 
                 const partial = {
@@ -511,7 +511,7 @@ module.exports = {
                     content: "✅ Step 1 saved! Click the button below to continue.",
                     components: [row],
                     flags: 64
-                });
+                }).catch(() => null);
             }
 
             if (interaction.customId === "raid_application_step2") {
@@ -519,7 +519,7 @@ module.exports = {
                 const partial = pendingRaidApplications.get(userId);
                 pendingRaidApplications.delete(userId);
                 if (!partial) {
-                    return interaction.reply({ content: "Raid application expired. Please start over.", flags: 64 });
+                    return interaction.reply({ content: "Raid application expired. Please start over.", flags: 64 }).catch(() => null);
                 }
 
                 const robloxUsername = partial.robloxUsername;
@@ -533,13 +533,13 @@ module.exports = {
                 const reason = interaction.fields.getTextInputValue("reason");
 
                 if (Number.isNaN(enemyCount) || enemyCount <= 2) {
-                    return interaction.reply({ content: "Enemy count must be a number greater than 2.", flags: 64 });
+                    return interaction.reply({ content: "Enemy count must be a number greater than 2.", flags: 64 }).catch(() => null);
                 }
                 if (Number.isNaN(helperLimit) || helperLimit < 1 || helperLimit > 20) {
-                    return interaction.reply({ content: "Helpers needed must be a number between 1 and 20.", flags: 64 });
+                    return interaction.reply({ content: "Helpers needed must be a number between 1 and 20.", flags: 64 }).catch(() => null);
                 }
                 if (!robloxUsername || !serverLink || !region || !reason) {
-                    return interaction.reply({ content: "All required fields must be filled in.", flags: 64 });
+                    return interaction.reply({ content: "All required fields must be filled in.", flags: 64 }).catch(() => null);
                 }
 
                 const robloxValidation = await robloxApi.validateAndGetAvatar(robloxUsername);
@@ -575,7 +575,7 @@ module.exports = {
                 const targetChannel = await interaction.client.channels.fetch(targetChannelId).catch(() => null);
 
                 if (!targetChannel || !targetChannel.isTextBased()) {
-                    return interaction.reply({ content: "Raid could not be posted because the raid channel is not set or is unavailable.", flags: 64 });
+                    return interaction.reply({ content: "Raid could not be posted because the raid channel is not set or is unavailable.", flags: 64 }).catch(() => null);
                 }
 
                 const completionEmbed = new EmbedBuilder()
@@ -590,7 +590,7 @@ module.exports = {
                     .setTimestamp();
 
                 // Sets launch confirmation message back to fully ephemeral with a native dismiss button!
-                await interaction.reply({ embeds: [completionEmbed], flags: 64 });
+                await interaction.reply({ embeds: [completionEmbed], flags: 64 }).catch(() => null);
 
                 const message = await targetChannel.send({
                     content: regionRoleInfo.mention || undefined,
