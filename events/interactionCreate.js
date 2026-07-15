@@ -12,6 +12,7 @@
 } = require("discord.js");
 const raidStateManager = require("../handlers/raidStateManager");
 const robloxApi = require("../handlers/robloxApi");
+const verificationDb = require("../handlers/verificationDb");
 const pendingRaidApplications = new Map();
 const pendingRegionSelections = new Map();
 
@@ -148,6 +149,46 @@ module.exports = {
         if (interaction.isButton()) {
             const customId = interaction.customId;
             
+            // Verification: Submit Info button
+            if (customId === "verify_submit_info") {
+                const modal = new ModalBuilder()
+                    .setCustomId("verify_modal_submit")
+                    .setTitle("TSB Info Collector - Verification Form");
+
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId("verify_roblox_username")
+                            .setLabel("Roblox Username")
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId("verify_roblox_ps_link")
+                            .setLabel("Roblox Private Server (PS) Link")
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId("verify_kill_count")
+                            .setLabel("Kill Counts")
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId("verify_friend_list_link")
+                            .setLabel("Friend List Image Link (Screenshot URL)")
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                    )
+                );
+
+                return interaction.showModal(modal);
+            }
+
             if (customId === "request_raid") {
                 const regionSelect = new StringSelectMenuBuilder()
                     .setCustomId("raid_region_select")
@@ -429,6 +470,50 @@ module.exports = {
         }
 
         if (interaction.isModalSubmit()) {
+            // Verification: Modal form submission
+            if (interaction.customId === "verify_modal_submit") {
+                const robloxUsername = interaction.fields.getTextInputValue("verify_roblox_username");
+                const robloxPsLink = interaction.fields.getTextInputValue("verify_roblox_ps_link");
+                const killCount = interaction.fields.getTextInputValue("verify_kill_count");
+                const friendListLink = interaction.fields.getTextInputValue("verify_friend_list_link");
+
+                // Save verification data
+                await verificationDb.markVerified(interaction.user.id, {
+                    robloxUsername,
+                    robloxPsLink,
+                    killCount,
+                    friendListLink
+                });
+
+                // Send the profile embed to the configured info channel
+                const settings = raidStateManager.loadSettings();
+                if (settings.infoChannel) {
+                    const targetChannel = await interaction.client.channels.fetch(settings.infoChannel).catch(() => null);
+                    if (targetChannel && targetChannel.isTextBased()) {
+                        const profileEmbed = new EmbedBuilder()
+                            .setTitle('NEW VERIFICATION RECEIVED')
+                            .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
+                            .addFields([
+                                { name: 'Discord User', value: `<@${interaction.user.id}>`, inline: false },
+                                { name: 'Roblox User', value: `[${robloxUsername}](https://www.roblox.com/users/${robloxUsername}/profile)`, inline: false },
+                                { name: 'Private Server Link', value: `[Click to Join Private Server](${robloxPsLink})`, inline: false },
+                                { name: 'Kill Count', value: killCount, inline: false },
+                                { name: 'Status', value: 'STATUS: VERIFIED ✅', inline: false }
+                            ])
+                            .setImage(friendListLink)
+                            .setFooter({ text: `Kakuzu Verification System • ${new Date().toLocaleString()}` })
+                            .setColor(0x00FF00);
+
+                        await targetChannel.send({ embeds: [profileEmbed] });
+                    }
+                }
+
+                return interaction.reply({
+                    content: '✅ **Verification Successful!** Your information has been submitted and you are now verified.',
+                    flags: 64
+                }).catch(() => null);
+            }
+
             if (interaction.customId.startsWith("raid_acceptmodal_")) {
                 const targetRaidId = Number(interaction.customId.split("_")[2]);
                 const helperUsername = interaction.fields.getTextInputValue("helperRobloxUsername");

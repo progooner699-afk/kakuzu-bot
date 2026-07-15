@@ -7,12 +7,13 @@ const config = require('./config.json');
 const commandHandler = require('./handlers/commandHandler');
 const raidStateManager = require('./handlers/raidStateManager');
 
-// FIXED: Added GuildMessages and MessageContent so commands can execute
+// FIXED: Added GuildMessages, MessageContent and GuildMembers for verification DMs
 const client = new Client({ 
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent 
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers
     ] 
 });
 

@@ -13,7 +13,8 @@ const defaultSettings = {
     leaderboardChannel: null,
     lbChannel: null,
     leaderboardMessageId: null,
-    resultChannel: null
+    resultChannel: null,
+    infoChannel: null
 };
 
 const defaultRaids = {

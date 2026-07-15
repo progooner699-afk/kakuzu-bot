@@ -4,43 +4,36 @@
  */
 
 /**
- * Validates a Roblox username and fetches user data using Roblox POST endpoint
+ * Validates a Roblox username and fetches user data
  * @param {string} username - The Roblox username to validate
  * @returns {Promise<{success: boolean, userId: string, displayName: string, error?: string}>}
  */
 async function validateRobloxUser(username) {
     try {
-        const response = await fetch('https://users.roblox.com/v1/usernames/users', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                usernames: [username],
-                excludeBannedUsers: true
-            })
-        });
+        const response = await fetch(
+            `https://users.roblox.com/v1/users/search?keyword=${encodeURIComponent(username)}&limit=1`
+        );
 
         if (!response.ok) {
             return { success: false, error: `Roblox API error: ${response.status}` };
         }
 
         const data = await response.json();
-        
+
+        // Check if any users were found
         if (!data.data || data.data.length === 0) {
             return { success: false, error: `Roblox username "${username}" not found. Please verify the spelling.` };
         }
 
-        return { 
-            success: true, 
-            userId: data.data[0].id.toString(), 
-            username: data.data[0].name, 
-            displayName: data.data[0].displayName 
+        const user = data.data[0];
+        return {
+            success: true,
+            userId: user.id.toString(),
+            displayName: user.displayName
         };
-
     } catch (error) {
-        console.error("Roblox API Error:", error);
-        return { success: false, error: 'Internal API Fetch Failure' };
+        console.error('Roblox user validation error:', error);
+        return { success: false, error: 'Failed to validate Roblox username. Please try again.' };
     }
 }
 
@@ -61,6 +54,7 @@ async function getRobloxAvatarUrl(userId) {
 
         const data = await response.json();
 
+        // Check if we got avatar data
         if (!data.data || data.data.length === 0) {
             return { success: false, error: 'Could not fetch avatar image' };
         }
@@ -83,11 +77,13 @@ async function getRobloxAvatarUrl(userId) {
  * @returns {Promise<{success: boolean, userId?: string, displayName?: string, avatarUrl?: string, error?: string}>}
  */
 async function validateAndGetAvatar(username) {
+    // Step 1: Validate username and get user ID
     const userValidation = await validateRobloxUser(username);
     if (!userValidation.success) {
         return userValidation;
     }
 
+    // Step 2: Fetch avatar URL using the user ID
     const avatarResult = await getRobloxAvatarUrl(userValidation.userId);
     if (!avatarResult.success) {
         return avatarResult;
