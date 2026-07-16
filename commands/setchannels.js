@@ -4,7 +4,7 @@ const raidStateManager = require('../handlers/raidStateManager');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('setchannels')
-        .setDescription('Configure the raid, help, and leaderboard channels.')
+        .setDescription('Configure the raid alert and raid result channels.')
         .addChannelOption(option =>
             option
                 .setName('raid_channel')
@@ -13,34 +13,23 @@ module.exports = {
         )
         .addChannelOption(option =>
             option
-                .setName('help_channel')
-                .setDescription('Help request channel')
-                .setRequired(true)
-        )
-        .addChannelOption(option =>
-            option
-                .setName('leaderboard_channel')
-                .setDescription('Leaderboard channel')
+                .setName('result_channel')
+                .setDescription('Channel where raid result embeds will be posted')
                 .setRequired(true)
         )
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     async execute(interaction) {
         const raidChannel = interaction.options.getChannel('raid_channel').id;
-        const helpChannel = interaction.options.getChannel('help_channel').id;
-        const leaderboardChannel = interaction.options.getChannel('leaderboard_channel').id;
+        const resultChannel = interaction.options.getChannel('result_channel').id;
 
         const settings = raidStateManager.loadSettings();
         settings.raidChannel = raidChannel;
-        settings.helpChannel = helpChannel;
-        settings.leaderboardChannel = leaderboardChannel;
-        settings.lbChannel = leaderboardChannel;
+        settings.resultChannel = resultChannel;
 
         raidStateManager.saveSettings(settings);
         await interaction.reply({
-            content: 'Channels configured successfully. Raid alerts, help requests, and leaderboard updates are now enabled.',
+            content: 'Channels configured successfully. Raid alerts will be posted in <#' + raidChannel + '> and raid result embeds will be sent to <#' + resultChannel + '>.',
             flags: 64
         });
-
-        await raidStateManager.publishLeaderboard(interaction.client);
     }
 };

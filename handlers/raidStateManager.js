@@ -1,7 +1,6 @@
 ﻿const fs = require('fs');
 const path = require('path');
 const { EmbedBuilder } = require('discord.js');
-const leaderboardDb = require('./leaderboardDb');
 const robloxApi = require('./robloxApi');
 
 const settingsPath = path.join(__dirname, '..', 'data', 'settings.json');
@@ -9,12 +8,8 @@ const raidsPath = path.join(__dirname, '..', 'data', 'raids.json');
 
 const defaultSettings = {
     raidChannel: null,
-    helpChannel: null,
-    leaderboardChannel: null, 
-    leaderboardMessageId: null,
     resultChannel: null,
-    infoChannel: null,
-    lbChannel: null
+    infoChannel: null
 };
 
 const defaultRaids = {
@@ -23,18 +18,8 @@ const defaultRaids = {
     activeRaidByOwner: {},
     blacklist: {},
     streakType: 'NONE',
-    streakCount: 0,
-    leaderboard: {
-        daily: {},
-        weekly: {},
-        allTime: {},
-        dailyReset: 0,
-        weeklyReset: 0
-    }
+    streakCount: 0
 };
-
-const profileCache = new Map();
-const PROFILE_CACHE_TTL = 10 * 60 * 1000;
 
 function ensureDataFiles() {
     const dataDir = path.join(__dirname, '..', 'data');
@@ -65,8 +50,6 @@ function loadRaids() {
     const raw = fs.readFileSync(raidsPath, 'utf8');
     const raids = JSON.parse(raw);
     
-    // Ensure nested objects exist with defaults
-    raids.leaderboard = Object.assign({}, defaultRaids.leaderboard, raids.leaderboard || {});
     raids.activeRaidByOwner = Object.assign({}, defaultRaids.activeRaidByOwner, raids.activeRaidByOwner || {});
     
     const loadedRaids = Object.assign({}, defaultRaids, raids);
@@ -98,32 +81,6 @@ function getActiveRaidByOwner(userId) {
 
 function hasActiveRaid(userId) {
     return Boolean(getActiveRaidByOwner(userId));
-}
-
-function getNextDailyReset() {
-    const now = new Date();
-    const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0));
-    return next.getTime();
-}
-
-function getNextWeeklyReset() {
-    const now = new Date();
-    const day = now.getUTCDay();
-    const diff = ((8 - day) % 7) || 7;
-    const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + diff, 0, 0, 0, 0));
-    return next.getTime();
-}
-
-function resetLeaderboardsIfNeeded(raids) {
-    const now = Date.now();
-    if (!raids.leaderboard.dailyReset || now >= raids.leaderboard.dailyReset) {
-        raids.leaderboard.daily = {};
-        raids.leaderboard.dailyReset = getNextDailyReset();
-    }
-    if (!raids.leaderboard.weeklyReset || now >= raids.leaderboard.weeklyReset) {
-        raids.leaderboard.weekly = {};
-        raids.leaderboard.weeklyReset = getNextWeeklyReset();
-    }
 }
 
 function normalizeText(input) {
@@ -162,7 +119,6 @@ function createRaid(options) {
         throw new Error('User already has an active raid or is blocked from creating new raids.');
     }
     const raids = loadRaids();
-    resetLeaderboardsIfNeeded(raids);
     const nextId = raids.lastRaidId + 1;
     const teamersCount = getTeamersCount(options.teamers);
     const raid = {
@@ -218,7 +174,6 @@ async function addHelper(raidId, userId, robloxData) {
     
     const isAlreadyHelping = raid.helpers.some(h => typeof h === 'string' ? h === userId : h.userId === userId);
     if (isAlreadyHelping) return { success: false, message: 'You are already helping this raid.' };
-    if (await leaderboardDb.hasAcceptedRaid(raidId, userId)) return { success: false, message: 'You have already accepted this raid alert.' };
     if (raid.helpers.length >= raid.helperLimit) return { success: false, message: 'Raid is already full.' };
     
     raid.helpers.push({
@@ -230,9 +185,7 @@ async function addHelper(raidId, userId, robloxData) {
     
     updateRaidStatus(raid);
     saveRaids(raids);
-    const totalRaids = await leaderboardDb.incrementRaidCount(userId);
-    await leaderboardDb.markRaidAccepted(raidId, userId);
-    return { success: true, raid, totalRaids };
+    return { success: true, raid };
 }
 
 function removeHelper(raidId, userId) {
@@ -335,185 +288,6 @@ function formatRaidMessage(raid) {
     return embed;
 }
 
-function getTopEntries(ranking, max = 5) {
-    return Object.entries(ranking)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, max);
-}
-
-function getRaidProfileContext(userId) {
-    const raids = loadRaids();
-    for (const raid of raids.raids) {
-        if (raid.requesterId === userId) {
-            if (raid.robloxDisplayName || raid.robloxUserId) {
-                return {
-                    robloxDisplayName: raid.robloxDisplayName || 'Not Linked',
-                    robloxUserId: raid.robloxUserId || null,
-                    robloxUsername: raid.robloxUsername || null
-                };
-            }
-        }
-
-        if (Array.isArray(raid.helpers)) {
-            const helper = raid.helpers.find(item => {
-                if (typeof item === 'string') return item === userId;
-                return item && item.userId === userId;
-            });
-            if (helper) {
-                return {
-                    robloxDisplayName: helper.robloxDisplayName || helper.robloxUsername || 'Not Linked',
-                    robloxUserId: helper.robloxUserId || null,
-                    robloxUsername: helper.robloxUsername || null
-                };
-            }
-        }
-    }
-    return null;
-}
-
-async function getLeaderboardUserProfile(client, userId) {
-    const cached = profileCache.get(userId);
-    if (cached && Date.now() - cached.fetchedAt < PROFILE_CACHE_TTL) {
-        return cached;
-    }
-
-    let discordUser = null;
-    try {
-        discordUser = await client.users.fetch(userId).catch(() => null);
-    } catch (error) {
-        console.error('Failed to fetch Discord user for leaderboard:', error);
-    }
-
-    const context = getRaidProfileContext(userId);
-    let robloxDisplayName = 'Not Linked';
-    let robloxUserId = null;
-    let avatarUrl = null;
-
-    if (context?.robloxUserId) {
-        robloxUserId = context.robloxUserId;
-        robloxDisplayName = context.robloxDisplayName || robloxDisplayName;
-    } else if (context?.robloxUsername) {
-        const validation = await robloxApi.validateRobloxUser(context.robloxUsername).catch(() => null);
-        if (validation?.success) {
-            robloxUserId = validation.userId;
-            robloxDisplayName = validation.displayName || context.robloxDisplayName || 'Not Linked';
-        }
-    }
-
-    if (robloxUserId) {
-        const avatarResult = await robloxApi.getRobloxAvatarUrl(robloxUserId).catch(() => null);
-        if (avatarResult?.success) {
-            avatarUrl = avatarResult.avatarUrl;
-        }
-    }
-
-    const profile = {
-        userId,
-        discordMention: discordUser ? `<@${userId}>` : 'Unknown User',
-        discordName: discordUser?.displayName || discordUser?.username || 'Unknown User',
-        robloxDisplayName,
-        robloxUserId,
-        avatarUrl,
-        fetchedAt: Date.now()
-    };
-
-    profileCache.set(userId, profile);
-    return profile;
-}
-
-async function buildLeaderboardEmbed(client, topEntries) {
-    const embed = new EmbedBuilder()
-        .setTitle('🏆 Raid Leaderboard')
-        .setDescription('Top 20 Most Active Raiders')
-        .setColor(0x00AEEF)
-        .setFooter({ text: 'Updates Automatically' })
-        .setTimestamp();
-
-    if (!Array.isArray(topEntries) || topEntries.length === 0) {
-        embed.setDescription('Top 20 Most Active Raiders\n\n• No raid data tracked yet.');
-        return embed;
-    }
-
-    const sections = [];
-    for (let index = 0; index < Math.min(topEntries.length, 20); index += 1) {
-        const entry = topEntries[index];
-        const rank = index + 1;
-        const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '🏅';
-        const profile = await getLeaderboardUserProfile(client, entry.userId);
-        const discordLabel = profile.discordMention || profile.discordName || 'Unknown User';
-        const robloxLabel = profile.robloxDisplayName || 'Not Linked';
-        const avatarLine = profile.avatarUrl
-            ? `🖼️ Roblox Avatar: [Open Avatar](${profile.avatarUrl})`
-            : '🖼️ Roblox Avatar: Default Clan Avatar';
-
-        sections.push(
-            [
-                '━━━━━━━━━━━━━━━━━━',
-                `${medal} **Rank #${rank}**`,
-                `👤 **Discord:** ${discordLabel}`,
-                `🎮 **Roblox:** ${robloxLabel}`,
-                `⚔️ **Raids:** **${entry.raidCount || 0}**`,
-                avatarLine,
-                ''
-            ].join('\n')
-        );
-    }
-
-    const rankOneProfile = sections.length > 0 ? await getLeaderboardUserProfile(client, topEntries[0].userId) : null;
-    if (rankOneProfile?.avatarUrl) {
-        embed.setThumbnail(rankOneProfile.avatarUrl);
-    } else if (client?.user?.displayAvatarURL) {
-        embed.setThumbnail(client.user.displayAvatarURL({ size: 256 }));
-    }
-
-    embed.setDescription(`Top 20 Most Active Raiders\n\n${sections.join('\n')}`);
-    return embed;
-}
-
-async function buildLeaderboardEmbeds(client, topEntries = null) {
-    const entries = topEntries || await leaderboardDb.getTopLeaderboard(20);
-    return [await buildLeaderboardEmbed(client, entries)];
-}
-
-async function publishLeaderboard(client) {
-    const settings = loadSettings();
-    if (!settings.leaderboardChannel) return;
-
-    const channel = await client.channels.fetch(settings.leaderboardChannel).catch(() => null);
-    if (!channel || !channel.isTextBased()) return;
-    
-    const topEntries = await leaderboardDb.getTopLeaderboard(20);
-    const embeds = await buildLeaderboardEmbeds(client, topEntries);
-    
-    if (settings.leaderboardMessageId) {
-        const existing = await channel.messages.fetch(settings.leaderboardMessageId).catch(() => null);
-        if (existing) {
-            try {
-                await existing.edit({ embeds });
-                return;
-            } catch (error) {
-                if (error?.code === 10008) {
-                    settings.leaderboardMessageId = null;
-                    saveSettings(settings);
-                } else {
-                    throw error;
-                }
-            }
-        } else {
-            settings.leaderboardMessageId = null;
-            saveSettings(settings);
-        }
-    }
-    
-    const message = await channel.send({ embeds });
-    settings.leaderboardMessageId = message.id;
-    saveSettings(settings);
-}
-
-async function syncLeaderboardMessage(client) {
-    await publishLeaderboard(client);
-}
-
 module.exports = {
     ensureDataFiles,
     loadSettings,
@@ -530,8 +304,5 @@ module.exports = {
     closeRaid,
     updateRaidMessageReference,
     formatRaidMessage,
-    publishLeaderboard,
-    syncLeaderboardMessage,
-    closeAllRaids,
-    buildLeaderboardEmbeds
+    closeAllRaids
 };

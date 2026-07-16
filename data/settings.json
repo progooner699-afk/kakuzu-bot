@@ -1,9 +1,5 @@
 {
     "raidChannel": null,
-    "helpChannel": null,
-    "leaderboardChannel": null,
-    "leaderboardMessageId": null,
     "resultChannel": null,
-    "infoChannel": null,
-    "lbChannel": null
+    "infoChannel": null
 }

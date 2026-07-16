@@ -303,12 +303,6 @@ module.exports = {
                     if (message) await message.edit({ embeds: [content], components: [row] });
                 }
 
-                try {
-                    await raidStateManager.publishLeaderboard(interaction.client);
-                } catch (error) {
-                    console.error('Failed to update leaderboard on leave:', error);
-                }
-
                 return interaction.reply({ content: "You have left the raid.", flags: 64 }).catch(() => null);
             }
 
@@ -464,7 +458,6 @@ module.exports = {
 
                 collector.on('end', async () => {
                     await sendResultEmbed(uploadedUrls);
-                    await raidStateManager.publishLeaderboard(interaction.client);
                 });
 
                 return;
@@ -561,12 +554,6 @@ module.exports = {
                 if (channel) {
                     const message = await channel.messages.fetch(updated.messageId).catch(() => null);
                     if (message) await message.edit({ embeds: [content], components: [row] });
-                }
-
-                try {
-                    await raidStateManager.publishLeaderboard(interaction.client);
-                } catch (error) {
-                    console.error('Failed to publish leaderboard live updates:', error);
                 }
 
                 return interaction.reply({
@@ -687,7 +674,6 @@ module.exports = {
                     .setColor(0x00ff66)
                     .setTimestamp();
 
-                // Sets launch confirmation message back to fully ephemeral with a native dismiss button!
                 await interaction.reply({ embeds: [completionEmbed], flags: 64 }).catch(() => null);
 
                 const message = await targetChannel.send({
@@ -700,8 +686,6 @@ module.exports = {
 
                 // Removed mass DM to all guild members - this caused rate limits and potential bot bans.
                 // Instead, the raid alert is posted in the configured raid channel with role mentions.
-
-                return raidStateManager.publishLeaderboard(interaction.client);
             }
         }
     }
