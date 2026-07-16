@@ -24,14 +24,11 @@ module.exports = {
             return interaction.reply({ content: 'Raid not found.', ephemeral: true });
         }
 
-        if (!raidStateManager.canCreateRaid || typeof raidStateManager.canCreateRaid !== 'function') {
-            return interaction.reply({ content: 'The raid manager is unavailable right now.', ephemeral: true });
-        }
-
         const member = interaction.member;
         const canClose = member && (
             member.id === raid.requesterId ||
-            member.permissions?.has(PermissionFlagsBits.Administrator)
+            member.permissions?.has(PermissionFlagsBits.Administrator) ||
+            member.roles.cache.some(role => ['Administrator', 'Management Supervisor', 'Community Manager', 'Senior Moderator', '💣 ‖ SUPREME LEADER'].includes(role.name))
         );
         if (!canClose) {
             return interaction.reply({ content: 'Access Denied: Only the Raid Leader or an Administrator can close this.', ephemeral: true });

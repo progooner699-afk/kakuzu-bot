@@ -3,5 +3,7 @@
     "helpChannel": null,
     "leaderboardChannel": null,
     "leaderboardMessageId": null,
-    "resultChannel": null
+    "resultChannel": null,
+    "infoChannel": null,
+    "lbChannel": null
 }

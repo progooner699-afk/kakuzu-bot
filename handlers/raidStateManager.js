@@ -10,11 +10,11 @@ const raidsPath = path.join(__dirname, '..', 'data', 'raids.json');
 const defaultSettings = {
     raidChannel: null,
     helpChannel: null,
-    leaderboardChannel: null,
-    lbChannel: null,
+    leaderboardChannel: null, 
     leaderboardMessageId: null,
     resultChannel: null,
-    infoChannel: null
+    infoChannel: null,
+    lbChannel: null
 };
 
 const defaultRaids = {
@@ -53,14 +53,7 @@ function loadSettings() {
     ensureDataFiles();
     const raw = fs.readFileSync(settingsPath, 'utf8');
     const settings = JSON.parse(raw);
-    const merged = Object.assign({}, defaultSettings, settings);
-    if (!merged.leaderboardChannel && merged.lbChannel) {
-        merged.leaderboardChannel = merged.lbChannel;
-    }
-    if (!merged.lbChannel && merged.leaderboardChannel) {
-        merged.lbChannel = merged.leaderboardChannel;
-    }
-    return merged;
+    return Object.assign({}, defaultSettings, settings);
 }
 
 function saveSettings(settings) {
@@ -71,8 +64,11 @@ function loadRaids() {
     ensureDataFiles();
     const raw = fs.readFileSync(raidsPath, 'utf8');
     const raids = JSON.parse(raw);
+    
+    // Ensure nested objects exist with defaults
     raids.leaderboard = Object.assign({}, defaultRaids.leaderboard, raids.leaderboard || {});
     raids.activeRaidByOwner = Object.assign({}, defaultRaids.activeRaidByOwner, raids.activeRaidByOwner || {});
+    
     const loadedRaids = Object.assign({}, defaultRaids, raids);
     rebuildActiveRaidByOwner(loadedRaids);
     return loadedRaids;
@@ -83,7 +79,7 @@ function saveRaids(raids) {
 }
 
 function rebuildActiveRaidByOwner(raids) {
-    raids.activeRaidByOwner = {};
+    if (!raids.activeRaidByOwner) raids.activeRaidByOwner = {};
     for (const raid of raids.raids) {
         if (raid.requesterId && raid.status && raid.status !== 'CLOSED') {
             raids.activeRaidByOwner[raid.requesterId] = raid.raidId;
@@ -214,6 +210,11 @@ async function addHelper(raidId, userId, robloxData) {
     const raids = loadRaids();
     const raid = raids.raids.find(item => item.raidId === raidId);
     if (!raid || raid.status === 'CLOSED') return { success: false, message: 'Raid is closed.' };
+    
+    // Prevent raid requester from accepting their own raid
+    if (raid.requesterId === userId) {
+        return { success: false, message: 'You cannot accept your own raid request.' };
+    }
     
     const isAlreadyHelping = raid.helpers.some(h => typeof h === 'string' ? h === userId : h.userId === userId);
     if (isAlreadyHelping) return { success: false, message: 'You are already helping this raid.' };
@@ -476,10 +477,9 @@ async function buildLeaderboardEmbeds(client, topEntries = null) {
 
 async function publishLeaderboard(client) {
     const settings = loadSettings();
-    const leaderboardChannelId = settings.leaderboardChannel || settings.lbChannel;
-    if (!leaderboardChannelId) return;
+    if (!settings.leaderboardChannel) return;
 
-    const channel = await client.channels.fetch(leaderboardChannelId).catch(() => null);
+    const channel = await client.channels.fetch(settings.leaderboardChannel).catch(() => null);
     if (!channel || !channel.isTextBased()) return;
     
     const topEntries = await leaderboardDb.getTopLeaderboard(20);

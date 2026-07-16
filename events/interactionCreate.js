@@ -441,7 +441,7 @@ module.exports = {
                 }
 
                 await interaction.update({ content: `✅ Combat operation logs compiled as **${outcome.toUpperCase()}**!`, components: [] });
-                await interaction.followUp({ content: '📸 Upload any pictures or files for this raid result. If you do not upload anything within 30 seconds, the result will be sent automatically.', ephemeral: true });
+                await interaction.followUp({ content: '📸 Upload any pictures or files for this raid result. Reply with `done` when finished, or just wait 30 seconds. The result will be sent automatically after.', ephemeral: true });
 
                 const uploadedUrls = [];
                 const collector = interaction.channel.createMessageCollector({
@@ -455,9 +455,11 @@ module.exports = {
                         for (const attachment of msg.attachments.values()) {
                             uploadedUrls.push(attachment.url);
                         }
-                        return;
                     }
-                    collector.stop('done');
+                    const content = msg.content?.toLowerCase().trim();
+                    if (content === 'done') {
+                        collector.stop('done');
+                    }
                 });
 
                 collector.on('end', async () => {
@@ -696,18 +698,8 @@ module.exports = {
                 });
                 raidStateManager.updateRaidMessageReference(raid.raidId, targetChannel.id, message.id);
 
-                if (interaction.guild) {
-                    try {
-                        await interaction.guild.members.fetch();
-                        const dmText = '🚨 EMERGENCY RAID NOTIFICATION 🚨\n\nakatsuki';
-                        for (const member of interaction.guild.members.cache.values()) {
-                            if (member.user.bot) continue;
-                            member.send(dmText).catch(() => null);
-                        }
-                    } catch (dmError) {
-                        console.error('Failed to DM raid notification to members:', dmError);
-                    }
-                }
+                // Removed mass DM to all guild members - this caused rate limits and potential bot bans.
+                // Instead, the raid alert is posted in the configured raid channel with role mentions.
 
                 return raidStateManager.publishLeaderboard(interaction.client);
             }
