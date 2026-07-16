@@ -477,6 +477,9 @@ module.exports = {
                 const killCount = interaction.fields.getTextInputValue("verify_kill_count");
                 const friendListLink = interaction.fields.getTextInputValue("verify_friend_list_link");
 
+                // Validate the Roblox username and get user data
+                const robloxValidation = await robloxApi.validateAndGetAvatar(robloxUsername);
+
                 // Save verification data
                 await verificationDb.markVerified(interaction.user.id, {
                     robloxUsername,
@@ -495,7 +498,7 @@ module.exports = {
                             .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
                             .addFields([
                                 { name: 'Discord User', value: `<@${interaction.user.id}>`, inline: false },
-                                { name: 'Roblox User', value: `[${robloxUsername}](https://www.roblox.com/users/${robloxUsername}/profile)`, inline: false },
+                                { name: 'Roblox User', value: robloxValidation.success ? `[${robloxUsername}](https://www.roblox.com/users/${robloxValidation.userId}/profile)` : `\`${robloxUsername}\``, inline: false },
                                 { name: 'Private Server Link', value: `[Click to Join Private Server](${robloxPsLink})`, inline: false },
                                 { name: 'Kill Count', value: killCount, inline: false },
                                 { name: 'Status', value: 'STATUS: VERIFIED ✅', inline: false }
@@ -504,12 +507,20 @@ module.exports = {
                             .setFooter({ text: `Kakuzu Verification System • ${new Date().toLocaleString()}` })
                             .setColor(0x00FF00);
 
+                        if (robloxValidation.success && robloxValidation.avatarUrl) {
+                            profileEmbed.setThumbnail(robloxValidation.avatarUrl);
+                        }
+
                         await targetChannel.send({ embeds: [profileEmbed] });
                     }
                 }
 
+                const replyContent = robloxValidation.success 
+                    ? '✅ **Verification Successful!** Your information has been submitted and you are now verified.'
+                    : `✅ **Verification Submitted!** Your information has been saved. Note: Could not validate Roblox username (${robloxValidation.error}). You can still proceed.`;
+
                 return interaction.reply({
-                    content: '✅ **Verification Successful!** Your information has been submitted and you are now verified.',
+                    content: replyContent,
                     flags: 64
                 }).catch(() => null);
             }

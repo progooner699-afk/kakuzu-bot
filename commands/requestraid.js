@@ -8,8 +8,8 @@ module.exports = {
         const buttonRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('request_raid')
-                .setLabel('Request Raid')
-                .setStyle(ButtonStyle.Primary)
+                .setLabel('🚨 Request Raid')
+                .setStyle(ButtonStyle.Danger)
         );
 
         await interaction.reply({

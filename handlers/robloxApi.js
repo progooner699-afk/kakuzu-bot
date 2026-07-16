@@ -4,14 +4,25 @@
  */
 
 /**
- * Validates a Roblox username and fetches user data
+ * Validates a Roblox username using the more reliable username resolution endpoint
  * @param {string} username - The Roblox username to validate
  * @returns {Promise<{success: boolean, userId: string, displayName: string, error?: string}>}
  */
 async function validateRobloxUser(username) {
     try {
+        // Use the dedicated username resolution endpoint for exact matches
         const response = await fetch(
-            `https://users.roblox.com/v1/users/search?keyword=${encodeURIComponent(username)}&limit=1`
+            `https://users.roblox.com/v1/usernames/users`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    usernames: [username.trim()],
+                    excludeBannedUsers: true
+                })
+            }
         );
 
         if (!response.ok) {
@@ -20,16 +31,20 @@ async function validateRobloxUser(username) {
 
         const data = await response.json();
 
-        // Check if any users were found
+        // Check if user was found
         if (!data.data || data.data.length === 0) {
             return { success: false, error: `Roblox username "${username}" not found. Please verify the spelling.` };
         }
 
         const user = data.data[0];
+        if (!user || !user.id) {
+            return { success: false, error: `Could not resolve Roblox username "${username}".` };
+        }
+
         return {
             success: true,
             userId: user.id.toString(),
-            displayName: user.displayName
+            displayName: user.displayName || user.name || username
         };
     } catch (error) {
         console.error('Roblox user validation error:', error);
