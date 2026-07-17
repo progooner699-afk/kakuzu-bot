@@ -469,10 +469,7 @@ module.exports = {
             if (interaction.customId === 'announcement_modal') {
                 const title = interaction.fields.getTextInputValue('ann_title');
                 const description = interaction.fields.getTextInputValue('ann_description');
-                const field1Title = interaction.fields.getTextInputValue('ann_field1_title');
-                const field1Value = interaction.fields.getTextInputValue('ann_field1_value');
-                const field2Title = interaction.fields.getTextInputValue('ann_field2_title');
-                const field2Value = interaction.fields.getTextInputValue('ann_field2_value');
+                const ping = interaction.fields.getTextInputValue('ann_ping');
                 const bannerUrl = interaction.fields.getTextInputValue('ann_banner');
 
                 const embed = new EmbedBuilder()
@@ -480,18 +477,21 @@ module.exports = {
                     .setDescription(description)
                     .setColor(0x9B59B6) // Purple sleek color
                     .setTimestamp()
-                    .setFooter({ text: `Announcement by ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL({ size: 64 }) })
-                    .addFields(
-                        { name: field1Title, value: field1Value, inline: false },
-                        { name: field2Title, value: field2Value, inline: false }
-                    );
+                    .setFooter({ text: `Announcement by ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL({ size: 64 }) });
 
                 // Add banner/logo as thumbnail (top right) if provided
                 if (bannerUrl && bannerUrl.trim() !== '') {
                     embed.setThumbnail(bannerUrl.trim());
                 }
 
-                await interaction.reply({ embeds: [embed] });
+                const payload = { embeds: [embed] };
+
+                // Add ping content if provided
+                if (ping && ping.trim() !== '') {
+                    payload.content = ping.trim();
+                }
+
+                await interaction.reply(payload);
                 return;
             }
 
