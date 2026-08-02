@@ -795,9 +795,9 @@ module.exports = {
                 const embed = new EmbedBuilder()
                     .setTitle(title)
                     .setDescription(description)
-                    .setColor(0x9B59B6) // Purple sleek color
+                    .setColor(0x2B2D31) // Discord dark gray (rules/information channel aesthetic)
                     .setTimestamp()
-                    .setFooter({ text: `Announcement by ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL({ size: 64 }) });
+                    .setFooter({ text: `Announced by ${interaction.user.username}`, iconURL: interaction.user.displayAvatarURL({ size: 64 }) });
 
                 // Add banner/logo as thumbnail (top right) if provided
                 if (bannerUrl && bannerUrl.trim() !== '') {
