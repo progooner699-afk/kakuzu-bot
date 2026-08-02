@@ -232,13 +232,15 @@ module.exports = {
 
                 // Update the embed in the logs channel to show accepted (no buttons)
                 const verificationData = await verificationDb.getVerificationData(targetUserId);
+                const targetUserInfo = await interaction.client.users.fetch(targetUserId).catch(() => null);
+                const targetUserTag = targetUserInfo?.tag || `<@${targetUserId}>`;
                 const robloxDisplayName = verificationData?.roblox_display_name || verificationData?.roblox_username || 'Unknown';
                 const robloxUsernameVal = verificationData?.roblox_username || 'Unknown';
                 const robloxUserIdVal = verificationData?.roblox_user_id || null;
                 const robloxAvatarUrlVal = verificationData?.roblox_avatar_url || null;
 
                 const acceptCodeBlock = [
-                    `DISCORD USER: ${interaction.user.tag}`,
+                    `DISCORD USER: ${targetUserTag}`,
                     `ROBLOX USER: ${robloxDisplayName} (@${robloxUsernameVal})${robloxUserIdVal ? ` [ID: ${robloxUserIdVal}]` : ''}`,
                     `ROBLOX PS LINK: ${verificationData?.roblox_ps_link || 'N/A'}`,
                     `KILL COUNT: ${verificationData?.kill_count || 'N/A'}`,
@@ -278,7 +280,7 @@ module.exports = {
                         const resultChannel = await interaction.client.channels.fetch(resultSettings.verificationResultChannel).catch(() => null);
                         if (resultChannel && resultChannel.isTextBased()) {
                             const resultCodeBlock = [
-                                `DISCORD USER: ${interaction.user.tag}`,
+                                `DISCORD USER: ${targetUserTag}`,
                                 `ROBLOX USER: ${robloxDisplayName} (@${robloxUsernameVal})${robloxUserIdVal ? ` [ID: ${robloxUserIdVal}]` : ''}`,
                                 `STATUS: ACCEPTED ✅`,
                                 `REVIEWED BY: ${interaction.user.tag}`
@@ -696,13 +698,15 @@ module.exports = {
 
                 // Update the embed to show rejected
                 const verificationData = await verificationDb.getVerificationData(targetUserId);
+                const targetUserInfo = await interaction.client.users.fetch(targetUserId).catch(() => null);
+                const targetUserTag = targetUserInfo?.tag || `<@${targetUserId}>`;
                 const robloxDisplayName = verificationData?.roblox_display_name || verificationData?.roblox_username || 'Unknown';
                 const robloxUsernameVal = verificationData?.roblox_username || 'Unknown';
                 const robloxUserIdVal = verificationData?.roblox_user_id || null;
                 const robloxAvatarUrlVal = verificationData?.roblox_avatar_url || null;
 
                 const rejectCodeBlock = [
-                    `DISCORD USER: ${interaction.user.tag}`,
+                    `DISCORD USER: ${targetUserTag}`,
                     `ROBLOX USER: ${robloxDisplayName} (@${robloxUsernameVal})${robloxUserIdVal ? ` [ID: ${robloxUserIdVal}]` : ''}`,
                     `ROBLOX PS LINK: ${verificationData?.roblox_ps_link || 'N/A'}`,
                     `KILL COUNT: ${verificationData?.kill_count || 'N/A'}`,
@@ -764,7 +768,7 @@ module.exports = {
                         const resultChannel = await interaction.client.channels.fetch(resultSettings.verificationResultChannel).catch(() => null);
                         if (resultChannel && resultChannel.isTextBased()) {
                             const resultCodeBlock = [
-                                `DISCORD USER: ${interaction.user.tag}`,
+                                `DISCORD USER: ${targetUserTag}`,
                                 `ROBLOX USER: ${robloxDisplayName} (@${robloxUsernameVal})${robloxUserIdVal ? ` [ID: ${robloxUserIdVal}]` : ''}`,
                                 `STATUS: REJECTED ❌`,
                                 `REVIEWED BY: ${interaction.user.tag}`,

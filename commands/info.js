@@ -45,7 +45,7 @@ module.exports = {
                 },
                 {
                     name: '👑 DEVELOPER',
-                    value: '`niggachad / yourdad043`',
+                    value: '`yourdad043`',
                     inline: true
                 },
                 {
