@@ -1,5 +1,10 @@
 {
     "raidChannel": null,
+    "helpChannel": null,
+    "leaderboardChannel": null,
+    "leaderboardMessageId": null,
     "resultChannel": null,
-    "infoChannel": null
+    "infoChannel": "1531974653541748847",
+    "verificationResultChannel": "1527017754241138849",
+    "lockedPingRoleId": "1526990741170163906"
 }
