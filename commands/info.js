@@ -8,30 +8,29 @@ module.exports = {
         const embed = new EmbedBuilder()
             .setTitle('⚡ KAKUZU // SYSTEM INFO')
             .setDescription(
-                '```\n' +
-                'NAME: Kakuzu\n' +
-                'DESCRIPTION: Kakuzu is a custom-built moderation and raid management system designed exclusively for Akatsuki Clan and its allied clans.\n' +
-                '```'
+                'Kakuzu is a **custom-built moderation & raid management system** ' +
+                'designed exclusively for **Akatsuki Clan** and its **allied clans**. ' +
+                'Engineered for precision, built for dominance. 🎯'
             )
             .addFields([
                 {
-                    name: '🔧 MODULES',
+                    name: '🧩 MODULES',
                     value: [
-                        '• Moderation System',
-                        '• Raid Applications',
-                        '• Raid Alerts',
-                        '• Auto Role Assignment',
-                        '• Daily Leaderboard',
-                        '• Weekly Leaderboard',
-                        '• Monthly Leaderboard',
-                        '• Raid Activity Tracking',
-                        '• Clan Management Utilities'
+                        '• 🛡️ Moderation System',
+                        '• ⚔️ Raid Applications',
+                        '• 🚨 Raid Alerts',
+                        '• 🤖 Auto Role Assignment',
+                        '• 📈 Daily Leaderboard',
+                        '• 📊 Weekly Leaderboard',
+                        '• 📅 Monthly Leaderboard',
+                        '• 🔥 Raid Activity Tracking',
+                        '• 🗂️ Clan Management Utilities'
                     ].join('\n'),
                     inline: false
                 },
                 {
                     name: '🎯 PURPOSE',
-                    value: 'To streamline raid requests, manage member activity, improve clan coordination, and maintain server organization.',
+                    value: 'Streamline raid requests, manage member activity, enhance clan coordination, and keep the server perfectly organized.',
                     inline: false
                 },
                 {

@@ -625,8 +625,17 @@ module.exports = {
                 await interaction.update({ content: `✅ Combat operation logs compiled as **${outcome.toUpperCase()}**!`, components: [] });
                 await interaction.followUp({ content: '📸 Upload any pictures or files for this raid result. Reply with `done` when finished, or just wait 30 seconds. The result will be sent automatically after.', ephemeral: true });
 
+                // Resolve a reliable channel reference to prevent null-channel collector errors
+                const collectorChannel = interaction.channel || await interaction.client.channels.fetch(interaction.channelId).catch(() => null);
+
                 const uploadedUrls = [];
-                const collector = interaction.channel.createMessageCollector({
+
+                if (!collectorChannel || !collectorChannel.isTextBased()) {
+                    await sendResultEmbed(uploadedUrls);
+                    return;
+                }
+
+                const collector = collectorChannel.createMessageCollector({
                     filter: (msg) => msg.author.id === interaction.user.id && msg.channelId === interaction.channelId,
                     time: 30000,
                     max: 20

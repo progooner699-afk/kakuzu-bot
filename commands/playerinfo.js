@@ -14,22 +14,32 @@ module.exports = {
         }
 
         const embed = new EmbedBuilder()
-            .setTitle('TSB Info Collector - Verification Portal')
+            .setTitle('🛡️ TSB INFO COLLECTOR // VERIFICATION PORTAL')
             .setDescription(
-                '⚠️ **NOTE:** This system is designed to collect essential player data and verify your identity to ensure security. Any false information will result in an immediate bounty on your head. We must assure you are not from an enemy clan.\n\n' +
-                '**Required Information to Gather:**\n' +
-                '1. Roblox Username\n' +
-                '2. Roblox Private Server (PS) Link\n' +
-                '3. Kill Counts\n' +
-                '4. Screenshot of your Roblox Friend List (to verify clan safety)'
+                'Welcome, operative! ⚡ Before you can access clan-exclusive content and raid operations, ' +
+                'we need to **verify your identity** and confirm you are not affiliated with any enemy clan.\n\n' +
+                '📍 **Why is this required?**\n' +
+                '> This system protects our community by collecting essential player data and securing ' +
+                'our ranks against potential **spies and infiltrators**. 🕵️‍♂️\n\n' +
+                '🚨 **IMPORTANT NOTICE**\n' +
+                '> Providing **false information** will result in an **immediate bounty** placed on your head. ' +
+                'We take clan security **very seriously** — honesty is mandatory.\n\n' +
+                '📋 **Required Information to Submit:**\n' +
+                '> 1️⃣ **Roblox Username** — Your active Roblox identity\n' +
+                '> 2️⃣ **Private Server (PS) Link** — Your personal server invite\n' +
+                '> 3️⃣ **Kill Counts** — Your verified battlefield stats\n' +
+                '> 4️⃣ **Friend List Screenshot** — To confirm clan safety\n\n' +
+                '✅ Click the button below to begin. The process takes less than **2 minutes**!'
             )
-            .setColor(0xFF0000)
-            .setFooter({ text: 'Kakuzu Verification System' });
+            .setColor(0x9B59B6) // Sleek purple theme
+            .setThumbnail(interaction.guild.iconURL({ size: 256 }))
+            .setFooter({ text: 'Kakuzu Verification & Raid System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
+            .setTimestamp();
 
         const submitButton = new ButtonBuilder()
             .setCustomId('verify_submit_info')
-            .setLabel('Submit Info')
-            .setStyle(ButtonStyle.Danger);
+            .setLabel('✅ Submit Info')
+            .setStyle(ButtonStyle.Primary);
 
         const row = new ActionRowBuilder().addComponents(submitButton);
 
