@@ -12,10 +12,7 @@ const defaultSettings = {
     helpChannel: null,
     leaderboardChannel: null, 
     leaderboardMessageId: null,
-    resultChannel: null,
-    infoChannel: null,
-    verificationResultChannel: null,
-    lockedPingRoleId: null
+    resultChannel: null
 };
 
 const defaultRaids = {

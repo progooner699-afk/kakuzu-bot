@@ -9,7 +9,7 @@ module.exports = {
             .setTitle('⚡ KAKUZU // SYSTEM INFO')
             .setDescription(
                 'Kakuzu is a **custom-built moderation & raid management system** ' +
-                'designed exclusively for **Akatsuki Clan** and its **allied clans**. ' +
+                'designed exclusively for **BLED ORGANIZATION** and its **allied clans**. ' +
                 'Engineered for precision, built for dominance. 🎯'
             )
             .addFields([
@@ -35,7 +35,7 @@ module.exports = {
                 },
                 {
                     name: '🔐 ACCESS',
-                    value: 'Akatsuki Clan & Authorized Allied Clans',
+                    value: 'BLED & Authorized Allied Clans',
                     inline: true
                 },
                 {
@@ -45,12 +45,12 @@ module.exports = {
                 },
                 {
                     name: '👑 DEVELOPER',
-                    value: '`nigachad / yourdad043`',
+                    value: '`niggachad / yourdad043`',
                     inline: true
                 },
                 {
                     name: '🏗️ BUILD',
-                    value: '`Akatsuki Clan Edition`',
+                    value: '`bled Edition`',
                     inline: false
                 }
             ])

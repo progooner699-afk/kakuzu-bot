@@ -24,7 +24,7 @@ module.exports = {
                 '🚨 **IMPORTANT NOTICE**\n' +
                 '> Providing **false information** will result in an **immediate bounty** placed on your head. ' +
                 'We take clan security **very seriously** — honesty is mandatory.\n\n' +
-                '📋 **Required Information to Submit:**\n' +
+                '📋 **Information to Submit (all optional):**\n' +
                 '> 1️⃣ **Roblox Username** — Your active Roblox identity\n' +
                 '> 2️⃣ **Private Server (PS) Link** — Your personal server invite\n' +
                 '> 3️⃣ **Kill Counts** — Your verified battlefield stats\n' +

@@ -349,28 +349,29 @@ module.exports = {
                             .setCustomId("verify_roblox_username")
                             .setLabel("Roblox Username")
                             .setStyle(TextInputStyle.Short)
-                            .setRequired(true)
+                            .setRequired(false)
                     ),
                     new ActionRowBuilder().addComponents(
                         new TextInputBuilder()
                             .setCustomId("verify_roblox_ps_link")
                             .setLabel("Roblox Private Server (PS) Link")
                             .setStyle(TextInputStyle.Short)
-                            .setRequired(true)
+                            .setRequired(false)
                     ),
                     new ActionRowBuilder().addComponents(
                         new TextInputBuilder()
                             .setCustomId("verify_kill_count")
                             .setLabel("Kill Counts")
                             .setStyle(TextInputStyle.Short)
-                            .setRequired(true)
+                            .setRequired(false)
                     ),
                     new ActionRowBuilder().addComponents(
                         new TextInputBuilder()
                             .setCustomId("verify_friend_list_link")
-                            .setLabel("Friend List Image Link (Screenshot URL)")
+                            .setLabel("Friend List Image Link (Screenshot URL) - Optional")
                             .setStyle(TextInputStyle.Short)
-                            .setRequired(true)
+                            .setPlaceholder("Paste a screenshot URL here (optional - can be left blank)")
+                            .setRequired(false)
                     )
                 );
 
@@ -826,33 +827,44 @@ module.exports = {
 
             // Verification: Modal form submission
             if (interaction.customId === "verify_modal_submit") {
-                const robloxUsername = interaction.fields.getTextInputValue("verify_roblox_username");
-                const robloxPsLink = interaction.fields.getTextInputValue("verify_roblox_ps_link");
-                const killCount = interaction.fields.getTextInputValue("verify_kill_count");
-                const friendListLink = interaction.fields.getTextInputValue("verify_friend_list_link");
+                // Safely get optional field values (won't throw if left blank)
+                const getFieldValue = (customId) => {
+                    try {
+                        return interaction.fields.getTextInputValue(customId) || '';
+                    } catch {
+                        return '';
+                    }
+                };
 
-                // Validate the Roblox username and get user data
-                const robloxValidation = await robloxApi.validateAndGetAvatar(robloxUsername);
+                const robloxUsername = getFieldValue("verify_roblox_username");
+                const robloxPsLink = getFieldValue("verify_roblox_ps_link");
+                const killCount = getFieldValue("verify_kill_count");
+                const friendListLink = getFieldValue("verify_friend_list_link") || 'N/A';
+
+                // Validate the Roblox username and get user data (only if provided)
+                const robloxValidation = robloxUsername
+                    ? await robloxApi.validateAndGetAvatar(robloxUsername)
+                    : { success: false, error: 'No username provided' };
 
                 // Save verification data as pending (including roblox profile data)
                 await verificationDb.markVerified(interaction.user.id, {
-                    robloxUsername,
-                    robloxDisplayName: robloxValidation.success ? robloxValidation.displayName : robloxUsername,
+                    robloxUsername: robloxUsername || null,
+                    robloxDisplayName: robloxValidation.success ? robloxValidation.displayName : (robloxUsername || null),
                     robloxUserId: robloxValidation.success ? robloxValidation.userId : null,
                     robloxAvatarUrl: robloxValidation.success ? robloxValidation.avatarUrl : null,
-                    robloxPsLink,
-                    killCount,
-                    friendListLink
+                    robloxPsLink: robloxPsLink || null,
+                    killCount: killCount || null,
+                    friendListLink: friendListLink === 'N/A' ? null : friendListLink
                 });
 
                 // Build the code block text like the raid request embed
-                const robloxDisplayName = robloxValidation.success ? robloxValidation.displayName : robloxUsername;
+                const robloxDisplayName = robloxValidation.success ? robloxValidation.displayName : (robloxUsername || 'N/A');
                 const robloxUserId = robloxValidation.success ? robloxValidation.userId : null;
                 const codeBlockText = [
                     `DISCORD USER: ${interaction.user.tag}`,
-                    `ROBLOX USER: ${robloxDisplayName} (@${robloxUsername})${robloxUserId ? ` [ID: ${robloxUserId}]` : ''}`,
-                    `ROBLOX PS LINK: ${robloxPsLink}`,
-                    `KILL COUNT: ${killCount}`,
+                    `ROBLOX USER: ${robloxDisplayName}${robloxUsername ? ` (@${robloxUsername})` : ''}${robloxUserId ? ` [ID: ${robloxUserId}]` : ''}`,
+                    `ROBLOX PS LINK: ${robloxPsLink || 'N/A'}`,
+                    `KILL COUNT: ${killCount || 'N/A'}`,
                     `FRIEND LIST LINK: ${friendListLink}`,
                     `STATUS: PENDING REVIEW`
                 ].join('\n');
