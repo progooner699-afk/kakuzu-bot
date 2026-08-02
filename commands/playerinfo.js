@@ -72,8 +72,8 @@ module.exports = {
             .setFooter({ text: 'Kakuzu Verification & Raid System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
             .setTimestamp();
 
-        // Saitama anime GIF for aesthetics (verified working URL)
-        embed.setImage('https://media.giphy.com/media/3o7aD2saalBwwftBIY/giphy.gif');
+        // NOTE: External GIF/video URLs removed for security.
+        // The bot's own avatar is used as the thumbnail (set above).
 
         const submitButton = new ButtonBuilder()
             .setCustomId('verify_submit_info')
