@@ -827,84 +827,95 @@ module.exports = {
 
             // Verification: Modal form submission
             if (interaction.customId === "verify_modal_submit") {
-                // Safely get optional field values (won't throw if left blank)
-                const getFieldValue = (customId) => {
-                    try {
-                        return interaction.fields.getTextInputValue(customId) || '';
-                    } catch {
-                        return '';
-                    }
-                };
+                // Acknowledge the interaction immediately to prevent timeout
+                await interaction.deferReply({ flags: 64 }).catch(() => null);
 
-                const robloxUsername = getFieldValue("verify_roblox_username");
-                const robloxPsLink = getFieldValue("verify_roblox_ps_link");
-                const killCount = getFieldValue("verify_kill_count");
-                const friendListLink = getFieldValue("verify_friend_list_link") || 'N/A';
-
-                // Validate the Roblox username and get user data (only if provided)
-                const robloxValidation = robloxUsername
-                    ? await robloxApi.validateAndGetAvatar(robloxUsername)
-                    : { success: false, error: 'No username provided' };
-
-                // Save verification data as pending (including roblox profile data)
-                await verificationDb.markVerified(interaction.user.id, {
-                    robloxUsername: robloxUsername || null,
-                    robloxDisplayName: robloxValidation.success ? robloxValidation.displayName : (robloxUsername || null),
-                    robloxUserId: robloxValidation.success ? robloxValidation.userId : null,
-                    robloxAvatarUrl: robloxValidation.success ? robloxValidation.avatarUrl : null,
-                    robloxPsLink: robloxPsLink || null,
-                    killCount: killCount || null,
-                    friendListLink: friendListLink === 'N/A' ? null : friendListLink
-                });
-
-                // Build the code block text like the raid request embed
-                const robloxDisplayName = robloxValidation.success ? robloxValidation.displayName : (robloxUsername || 'N/A');
-                const robloxUserId = robloxValidation.success ? robloxValidation.userId : null;
-                const codeBlockText = [
-                    `DISCORD USER: ${interaction.user.tag}`,
-                    `ROBLOX USER: ${robloxDisplayName}${robloxUsername ? ` (@${robloxUsername})` : ''}${robloxUserId ? ` [ID: ${robloxUserId}]` : ''}`,
-                    `ROBLOX PS LINK: ${robloxPsLink || 'N/A'}`,
-                    `KILL COUNT: ${killCount || 'N/A'}`,
-                    `FRIEND LIST LINK: ${friendListLink}`,
-                    `STATUS: PENDING REVIEW`
-                ].join('\n');
-
-                // Send the pending verification embed to the configured info channel with Accept/Deny buttons
-                const settings = raidStateManager.loadSettings();
-                if (settings.infoChannel) {
-                    const targetChannel = await interaction.client.channels.fetch(settings.infoChannel).catch(() => null);
-                    if (targetChannel && targetChannel.isTextBased()) {
-                        const profileEmbed = new EmbedBuilder()
-                            .setTitle('🆕 NEW PENDING VERIFICATION')
-                            .setDescription(`\`\`\`text\n${codeBlockText}\n\`\`\``)
-                            .setFooter({ text: `Kakuzu Verification System • ${new Date().toLocaleString()}` })
-                            .setColor(0xFFA500); // Orange for pending
-
-                        // Use Roblox avatar as thumbnail
-                        if (robloxValidation.success && robloxValidation.avatarUrl) {
-                            profileEmbed.setThumbnail(robloxValidation.avatarUrl);
-                        } else {
-                            profileEmbed.setThumbnail(interaction.user.displayAvatarURL({ size: 256 }));
+                try {
+                    // Safely get optional field values (won't throw if left blank)
+                    const getFieldValue = (customId) => {
+                        try {
+                            return interaction.fields.getTextInputValue(customId) || '';
+                        } catch {
+                            return '';
                         }
+                    };
 
-                        // Only set image if friendListLink is a valid URL
-                        if (friendListLink && friendListLink.match(/^https?:\/\/.+/i)) {
-                            profileEmbed.setImage(friendListLink);
+                    const robloxUsername = getFieldValue("verify_roblox_username");
+                    const robloxPsLink = getFieldValue("verify_roblox_ps_link");
+                    const killCount = getFieldValue("verify_kill_count");
+                    const friendListLink = getFieldValue("verify_friend_list_link") || 'N/A';
+
+                    // Validate the Roblox username and get user data (only if provided)
+                    const robloxValidation = robloxUsername
+                        ? await robloxApi.validateAndGetAvatar(robloxUsername)
+                        : { success: false, error: 'No username provided' };
+
+                    // Save verification data as pending (including roblox profile data)
+                    await verificationDb.markVerified(interaction.user.id, {
+                        robloxUsername: robloxUsername || null,
+                        robloxDisplayName: robloxValidation.success ? robloxValidation.displayName : (robloxUsername || null),
+                        robloxUserId: robloxValidation.success ? robloxValidation.userId : null,
+                        robloxAvatarUrl: robloxValidation.success ? robloxValidation.avatarUrl : null,
+                        robloxPsLink: robloxPsLink || null,
+                        killCount: killCount || null,
+                        friendListLink: friendListLink === 'N/A' ? null : friendListLink
+                    });
+
+                    // Build the code block text like the raid request embed
+                    const robloxDisplayName = robloxValidation.success ? robloxValidation.displayName : (robloxUsername || 'N/A');
+                    const robloxUserId = robloxValidation.success ? robloxValidation.userId : null;
+                    const codeBlockText = [
+                        `DISCORD USER: ${interaction.user.tag}`,
+                        `ROBLOX USER: ${robloxDisplayName}${robloxUsername ? ` (@${robloxUsername})` : ''}${robloxUserId ? ` [ID: ${robloxUserId}]` : ''}`,
+                        `ROBLOX PS LINK: ${robloxPsLink || 'N/A'}`,
+                        `KILL COUNT: ${killCount || 'N/A'}`,
+                        `FRIEND LIST LINK: ${friendListLink}`,
+                        `STATUS: PENDING REVIEW`
+                    ].join('\n');
+
+                    // Send the pending verification embed to the configured info channel with Accept/Deny buttons
+                    const settings = raidStateManager.loadSettings();
+                    if (settings.infoChannel) {
+                        const targetChannel = await interaction.client.channels.fetch(settings.infoChannel).catch(() => null);
+                        if (targetChannel && targetChannel.isTextBased()) {
+                            const profileEmbed = new EmbedBuilder()
+                                .setTitle('🆕 NEW PENDING VERIFICATION')
+                                .setDescription(`\`\`\`text\n${codeBlockText}\n\`\`\``)
+                                .setFooter({ text: `Kakuzu Verification System • ${new Date().toLocaleString()}` })
+                                .setColor(0xFFA500); // Orange for pending
+
+                            // Use Roblox avatar as thumbnail
+                            if (robloxValidation.success && robloxValidation.avatarUrl) {
+                                profileEmbed.setThumbnail(robloxValidation.avatarUrl);
+                            } else {
+                                profileEmbed.setThumbnail(interaction.user.displayAvatarURL({ size: 256 }));
+                            }
+
+                            // Only set image if friendListLink is a valid URL
+                            if (friendListLink && friendListLink.match(/^https?:\/\/.+/i)) {
+                                profileEmbed.setImage(friendListLink);
+                            }
+
+                            const actionRow = createVerificationActionButtons(interaction.user.id);
+                            await targetChannel.send({ embeds: [profileEmbed], components: [actionRow] }).catch(() => null);
                         }
-
-                        const actionRow = createVerificationActionButtons(interaction.user.id);
-                        await targetChannel.send({ embeds: [profileEmbed], components: [actionRow] });
                     }
+
+                    const replyContent = robloxValidation.success 
+                        ? '✅ **Verification Submitted!** Your information has been sent to moderators for review. You will receive a DM once a decision is made.'
+                        : `✅ **Verification Submitted!** Your information has been saved and sent to moderators for review. Note: Could not validate Roblox username (${robloxValidation.error}). You will receive a DM once a decision is made.`;
+
+                    return interaction.followUp({
+                        content: replyContent,
+                        flags: 64
+                    }).catch(() => null);
+                } catch (error) {
+                    console.error('Verification modal submit error:', error);
+                    return interaction.followUp({
+                        content: '❌ **An error occurred while processing your verification.** Please try again.',
+                        flags: 64
+                    }).catch(() => null);
                 }
-
-                const replyContent = robloxValidation.success 
-                    ? '✅ **Verification Submitted!** Your information has been sent to moderators for review. You will receive a DM once a decision is made.'
-                    : `✅ **Verification Submitted!** Your information has been saved and sent to moderators for review. Note: Could not validate Roblox username (${robloxValidation.error}). You will receive a DM once a decision is made.`;
-
-                return interaction.reply({
-                    content: replyContent,
-                    flags: 64
-                }).catch(() => null);
             }
 
             if (interaction.customId.startsWith("raid_acceptmodal_")) {
