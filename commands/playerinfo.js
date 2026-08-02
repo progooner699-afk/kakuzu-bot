@@ -68,12 +68,12 @@ module.exports = {
                 '   The process takes less than 2 minutes!\n' +
                 '```'
             )
-            .setThumbnail(interaction.guild.iconURL({ size: 256 }))
+            .setThumbnail(interaction.guild.iconURL({ size: 256 }) || interaction.client.user.displayAvatarURL({ size: 256 }))
             .setFooter({ text: 'Kakuzu Verification & Raid System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
             .setTimestamp();
 
-        // Saitama anime video for aesthetics (verified working URL)
-        embed.setVideo('https://media.giphy.com/media/3o7aD2saalBwwftBIY/giphy.mp4');
+        // Saitama anime GIF for aesthetics (verified working URL)
+        embed.setImage('https://media.giphy.com/media/3o7aD2saalBwwftBIY/giphy.gif');
 
         const submitButton = new ButtonBuilder()
             .setCustomId('verify_submit_info')
