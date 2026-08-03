@@ -370,9 +370,9 @@ module.exports = {
                     new ActionRowBuilder().addComponents(
                         new TextInputBuilder()
                             .setCustomId("verify_friend_list_link")
-                            .setLabel("Friend List Image Link (Screenshot URL) - Optional")
+                            .setLabel("Friend List Screenshot URL (Optional)")
                             .setStyle(TextInputStyle.Short)
-                            .setPlaceholder("Paste a screenshot URL here (optional - can be left blank)")
+                            .setPlaceholder("Paste a screenshot URL here (optional)")
                             .setRequired(false)
                     )
                 );
@@ -1058,11 +1058,16 @@ module.exports = {
                 const content = raidStateManager.formatRaidMessage(raid);
                 const raidButtonRow = createRaidButtons(raid, interaction.member);
                 const regionRoleInfo = getRegionRoleInfo(raid.region);
-                const targetChannelId = settings.raidChannel || interaction.channelId;
-                const targetChannel = await interaction.client.channels.fetch(targetChannelId).catch(() => null);
+
+                // Require an explicitly configured raid channel. Do NOT fallback to the command channel.
+                if (!settings.raidChannel) {
+                    return interaction.reply({ content: '❌ Raid channel is not configured. Please run `/setchannels` and set the `raid_channel` first (Raid Alert channel).', flags: 64 }).catch(() => null);
+                }
+
+                const targetChannel = await interaction.client.channels.fetch(settings.raidChannel).catch(() => null);
 
                 if (!targetChannel || !targetChannel.isTextBased()) {
-                    return interaction.reply({ content: "Raid could not be posted because the raid channel is not set or is unavailable.", flags: 64 }).catch(() => null);
+                    return interaction.reply({ content: '❌ Configured raid channel is unavailable or not a text channel. Please reconfigure it with `/setchannels`.', flags: 64 }).catch(() => null);
                 }
 
                 const completionEmbed = new EmbedBuilder()
