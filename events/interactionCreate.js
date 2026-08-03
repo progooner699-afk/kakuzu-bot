@@ -7,6 +7,7 @@
     TextInputStyle,
     PermissionsBitField,
     EmbedBuilder,
+    ChannelType,
     StringSelectMenuBuilder,
     StringSelectMenuOptionBuilder
 } = require("discord.js");
@@ -626,25 +627,88 @@ module.exports = {
                 }
 
                 await interaction.update({ content: `✅ Combat operation logs compiled as **${outcome.toUpperCase()}**!`, components: [] });
-                await interaction.followUp({ content: '📸 Upload any pictures or files for this raid result. Reply with `done` when finished, or just wait 30 seconds. The result will be sent automatically after.', ephemeral: true });
 
-                // Resolve a reliable channel reference to prevent null-channel collector errors
+                // Try to create a temporary upload channel for 60 seconds where participants
+                // can upload pictures. If channel creation fails, fall back to the old in-channel collector.
+                let uploadedUrls = [];
+                const guild = interaction.guild;
+                let tempChannel = null;
+
+                try {
+                    const parentId = interaction.channel?.parentId || null;
+                    tempChannel = await guild.channels.create({
+                        name: `raid-uploads-${activeRaid.raidId}`,
+                        type: ChannelType.GuildText,
+                        parent: parentId || undefined,
+                        topic: `Temporary upload channel for raid #${activeRaid.raidId}. Will be removed after collection.`
+                    });
+
+                    // Notify users where to upload (ephemeral instruction plus a message in the temp channel)
+                    await interaction.followUp({ content: `📸 Upload any pictures or files for this raid result in ${tempChannel} now. Reply with \`done\` in that channel when finished, or wait 60 seconds. The result will be posted to the configured result channel automatically.`, ephemeral: true }).catch(() => null);
+
+                    await tempChannel.send({ content: `📸 **Upload pictures for Raid #${activeRaid.raidId} here.**
+Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 seconds and the bot will post whatever was uploaded.` }).catch(() => null);
+
+                    const collector = tempChannel.createMessageCollector({
+                        filter: (msg) => {
+                            // Accept attachments from anyone; accept the `done` command from the user who closed the raid
+                            if (msg.content?.toLowerCase().trim() === 'done' && msg.author.id === interaction.user.id) return true;
+                            return msg.attachments && msg.attachments.size > 0;
+                        },
+                        time: 60000,
+                        max: 100
+                    });
+
+                    collector.on('collect', (msg) => {
+                        if (msg.attachments && msg.attachments.size > 0) {
+                            for (const attachment of msg.attachments.values()) {
+                                uploadedUrls.push(attachment.url);
+                            }
+                        }
+                        if (msg.content?.toLowerCase().trim() === 'done' && msg.author.id === interaction.user.id) {
+                            collector.stop('done_by_user');
+                        }
+                    });
+
+                    collector.on('end', async () => {
+                        try {
+                            await sendResultEmbed(uploadedUrls);
+                        } catch (err) {
+                            console.warn('Failed to send result embed after collection:', err?.message || err);
+                        }
+
+                        // Attempt to delete the temporary channel after a short delay
+                        setTimeout(async () => {
+                            try {
+                                if (tempChannel && !tempChannel.deleted) await tempChannel.delete('Temporary raid upload channel expired');
+                            } catch (err) {
+                                // ignore deletion errors
+                            }
+                        }, 2000);
+                    });
+
+                    return;
+                } catch (error) {
+                    console.warn('Could not create temporary upload channel, falling back to in-channel collector:', error?.message || error);
+                    // Fallthrough to the legacy behavior below
+                }
+
+                // Legacy fallback: collect in the interaction channel (30s) from the raid-closer only
+                await interaction.followUp({ content: '📸 Upload any pictures or files for this raid result in this channel. Reply with `done` when finished, or just wait 30 seconds. The result will be sent automatically after.', ephemeral: true }).catch(() => null);
+
                 const collectorChannel = interaction.channel || await interaction.client.channels.fetch(interaction.channelId).catch(() => null);
-
-                const uploadedUrls = [];
-
                 if (!collectorChannel || !collectorChannel.isTextBased()) {
                     await sendResultEmbed(uploadedUrls);
                     return;
                 }
 
-                const collector = collectorChannel.createMessageCollector({
+                const legacyCollector = collectorChannel.createMessageCollector({
                     filter: (msg) => msg.author.id === interaction.user.id && msg.channelId === interaction.channelId,
                     time: 30000,
                     max: 20
                 });
 
-                collector.on('collect', (msg) => {
+                legacyCollector.on('collect', (msg) => {
                     if (msg.attachments.size > 0) {
                         for (const attachment of msg.attachments.values()) {
                             uploadedUrls.push(attachment.url);
@@ -652,11 +716,11 @@ module.exports = {
                     }
                     const content = msg.content?.toLowerCase().trim();
                     if (content === 'done') {
-                        collector.stop('done');
+                        legacyCollector.stop('done');
                     }
                 });
 
-                collector.on('end', async () => {
+                legacyCollector.on('end', async () => {
                     await sendResultEmbed(uploadedUrls);
                 });
 
