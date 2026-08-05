@@ -20,11 +20,15 @@ async function run() {
     const rest = new REST({ version: '10' }).setToken(token);
 
     try {
-        const route = config.guildId
-            ? Routes.applicationGuildCommands(config.clientId, config.guildId)
-            : Routes.applicationCommands(config.clientId);
+        // Allow forcing global (application) commands via env var GLOBAL_COMMANDS=true
+        const useGlobal = process.env.GLOBAL_COMMANDS === 'true';
+        const route = useGlobal
+            ? Routes.applicationCommands(config.clientId)
+            : (config.guildId
+                ? Routes.applicationGuildCommands(config.clientId, config.guildId)
+                : Routes.applicationCommands(config.clientId));
 
-        console.log('🔄 Registering slash command layouts to Discord...');
+        console.log(`🔄 Registering slash command layouts to Discord (${useGlobal ? 'GLOBAL' : (config.guildId ? `GUILD ${config.guildId}` : 'GLOBAL')} mode)...`);
         await rest.put(route, { body: commands });
         console.log('✅ Slash commands deployed successfully.');
     } catch (error) {
