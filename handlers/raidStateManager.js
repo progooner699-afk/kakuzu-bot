@@ -4,15 +4,18 @@ const { EmbedBuilder } = require('discord.js');
 const leaderboardDb = require('./leaderboardDb');
 const robloxApi = require('./robloxApi');
 
-const settingsPath = path.join(__dirname, '..', 'data', 'settings.json');
-const raidsPath = path.join(__dirname, '..', 'data', 'raids.json');
+const baseDataDir = path.join(__dirname, '..', 'data');
+const guildsDataDir = path.join(baseDataDir, 'guilds');
 
 const defaultSettings = {
     raidChannel: null,
     helpChannel: null,
-    leaderboardChannel: null, 
+    leaderboardChannel: null,
     leaderboardMessageId: null,
-    resultChannel: null
+    resultChannel: null,
+    infoChannel: null,
+    lockedPingRoleId: null,
+    verificationResultChannel: null
 };
 
 const defaultRaids = {
@@ -34,11 +37,35 @@ const defaultRaids = {
 const profileCache = new Map();
 const PROFILE_CACHE_TTL = 10 * 60 * 1000;
 
+function getGuildDataDir(guildId) {
+    return path.join(guildsDataDir, guildId);
+}
+
+function getSettingsPath(guildId) {
+    return path.join(getGuildDataDir(guildId), 'settings.json');
+}
+
+function getRaidsPath(guildId) {
+    return path.join(getGuildDataDir(guildId), 'raids.json');
+}
+
 function ensureDataFiles() {
-    const dataDir = path.join(__dirname, '..', 'data');
-    if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
+    if (!fs.existsSync(baseDataDir)) {
+        fs.mkdirSync(baseDataDir, { recursive: true });
     }
+    if (!fs.existsSync(guildsDataDir)) {
+        fs.mkdirSync(guildsDataDir, { recursive: true });
+    }
+}
+
+function ensureGuildDataFiles(guildId) {
+    ensureDataFiles();
+    const guildDir = getGuildDataDir(guildId);
+    if (!fs.existsSync(guildDir)) {
+        fs.mkdirSync(guildDir, { recursive: true });
+    }
+    const settingsPath = getSettingsPath(guildId);
+    const raidsPath = getRaidsPath(guildId);
     if (!fs.existsSync(settingsPath)) {
         fs.writeFileSync(settingsPath, JSON.stringify(defaultSettings, null, 4));
     }
@@ -47,20 +74,20 @@ function ensureDataFiles() {
     }
 }
 
-function loadSettings() {
-    ensureDataFiles();
-    const raw = fs.readFileSync(settingsPath, 'utf8');
+function loadSettings(guildId) {
+    ensureGuildDataFiles(guildId);
+    const raw = fs.readFileSync(getSettingsPath(guildId), 'utf8');
     const settings = JSON.parse(raw);
     return Object.assign({}, defaultSettings, settings);
 }
 
-function saveSettings(settings) {
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 4));
+function saveSettings(guildId, settings) {
+    fs.writeFileSync(getSettingsPath(guildId), JSON.stringify(settings, null, 4));
 }
 
-function loadRaids() {
-    ensureDataFiles();
-    const raw = fs.readFileSync(raidsPath, 'utf8');
+function loadRaids(guildId) {
+    ensureGuildDataFiles(guildId);
+    const raw = fs.readFileSync(getRaidsPath(guildId), 'utf8');
     const raids = JSON.parse(raw);
     raids.leaderboard = Object.assign({}, defaultRaids.leaderboard, raids.leaderboard || {});
     raids.activeRaidByOwner = Object.assign({}, defaultRaids.activeRaidByOwner, raids.activeRaidByOwner || {});
@@ -69,8 +96,8 @@ function loadRaids() {
     return loadedRaids;
 }
 
-function saveRaids(raids) {
-    fs.writeFileSync(raidsPath, JSON.stringify(raids, null, 4));
+function saveRaids(guildId, raids) {
+    fs.writeFileSync(getRaidsPath(guildId), JSON.stringify(raids, null, 4));
 }
 
 function rebuildActiveRaidByOwner(raids) {
@@ -82,8 +109,8 @@ function rebuildActiveRaidByOwner(raids) {
     }
 }
 
-function getActiveRaidByOwner(userId) {
-    const raids = loadRaids();
+function getActiveRaidByOwner(userId, guildId) {
+    const raids = loadRaids(guildId);
     const raidId = raids.activeRaidByOwner[userId];
     if (raidId) {
         return raids.raids.find(item => item.raidId === raidId) || null;
@@ -91,8 +118,8 @@ function getActiveRaidByOwner(userId) {
     return raids.raids.find(raid => raid.requesterId === userId && raid.status !== 'CLOSED') || null;
 }
 
-function hasActiveRaid(userId) {
-    return Boolean(getActiveRaidByOwner(userId));
+function hasActiveRaid(userId, guildId) {
+    return Boolean(getActiveRaidByOwner(userId, guildId));
 }
 
 function getNextDailyReset() {
@@ -137,26 +164,26 @@ function parseBooleanYesNo(value) {
     return 'NO';
 }
 
-function canCreateRaid(userId) {
-    return !hasActiveRaid(userId) && !isBlacklisted(userId);
+function canCreateRaid(userId, guildId) {
+    return !hasActiveRaid(userId, guildId) && !isBlacklisted(userId, guildId);
 }
 
-function isBlacklisted(userId) {
-    const raids = loadRaids();
+function isBlacklisted(userId, guildId) {
+    const raids = loadRaids(guildId);
     return Boolean(raids.blacklist[userId]);
 }
 
-function blacklistUser(userId, reason = 'Misuse of raid system') {
-    const raids = loadRaids();
+function blacklistUser(userId, reason = 'Misuse of raid system', guildId) {
+    const raids = loadRaids(guildId);
     raids.blacklist[userId] = { reason, timestamp: Date.now() };
-    saveRaids(raids);
+    saveRaids(guildId, raids);
 }
 
 function createRaid(options) {
-    if (!canCreateRaid(options.requesterId)) {
+    if (!canCreateRaid(options.requesterId, options.guildId)) {
         throw new Error('User already has an active raid or is blocked from creating new raids.');
     }
-    const raids = loadRaids();
+    const raids = loadRaids(options.guildId);
     resetLeaderboardsIfNeeded(raids);
     const nextId = raids.lastRaidId + 1;
     const teamersCount = getTeamersCount(options.teamers);
@@ -186,12 +213,12 @@ function createRaid(options) {
     raids.lastRaidId = nextId;
     raids.raids.push(raid);
     raids.activeRaidByOwner[raid.requesterId] = raid.raidId;
-    saveRaids(raids);
+    saveRaids(options.guildId, raids);
     return raid;
 }
 
-function getRaidById(raidId) {
-    const raids = loadRaids();
+function getRaidById(raidId, guildId) {
+    const raids = loadRaids(guildId);
     return raids.raids.find(raid => raid.raidId === raidId) || null;
 }
 
@@ -201,14 +228,14 @@ function updateRaidStatus(raid) {
     return raid;
 }
 
-async function addHelper(raidId, userId, robloxData) {
-    const raids = loadRaids();
+async function addHelper(raidId, userId, robloxData, guildId) {
+    const raids = loadRaids(guildId);
     const raid = raids.raids.find(item => item.raidId === raidId);
     if (!raid || raid.status === 'CLOSED') return { success: false, message: 'Raid is closed.' };
     
     const isAlreadyHelping = raid.helpers.some(h => typeof h === 'string' ? h === userId : h.userId === userId);
     if (isAlreadyHelping) return { success: false, message: 'You are already helping this raid.' };
-    if (await leaderboardDb.hasAcceptedRaid(raidId, userId)) return { success: false, message: 'You have already accepted this raid alert.' };
+    if (await leaderboardDb.hasAcceptedRaid(raidId, userId, guildId)) return { success: false, message: 'You have already accepted this raid alert.' };
     if (raid.helpers.length >= raid.helperLimit) return { success: false, message: 'Raid is already full.' };
     
     raid.helpers.push({
@@ -219,14 +246,14 @@ async function addHelper(raidId, userId, robloxData) {
     });
     
     updateRaidStatus(raid);
-    saveRaids(raids);
-    const totalRaids = await leaderboardDb.incrementRaidCount(userId);
-    await leaderboardDb.markRaidAccepted(raidId, userId);
+    saveRaids(guildId, raids);
+    const totalRaids = await leaderboardDb.incrementRaidCount(userId, guildId);
+    await leaderboardDb.markRaidAccepted(raidId, userId, guildId);
     return { success: true, raid, totalRaids };
 }
 
-function removeHelper(raidId, userId) {
-    const raids = loadRaids();
+function removeHelper(raidId, userId, guildId) {
+    const raids = loadRaids(guildId);
     const raid = raids.raids.find(item => item.raidId === raidId);
     if (!raid || raid.status === 'CLOSED') return { success: false, message: 'Raid is closed.' };
     
@@ -235,12 +262,12 @@ function removeHelper(raidId, userId) {
     
     raid.helpers.splice(index, 1);
     updateRaidStatus(raid);
-    saveRaids(raids);
+    saveRaids(guildId, raids);
     return { success: true, raid };
 }
 
-function closeRaid(raidId, options = {}) {
-    const raids = loadRaids();
+function closeRaid(raidId, options = {}, guildId) {
+    const raids = loadRaids(guildId);
     const raid = raids.raids.find(item => item.raidId === raidId);
     if (!raid) return null;
     raid.status = 'CLOSED';
@@ -251,12 +278,12 @@ function closeRaid(raidId, options = {}) {
     if (raids.activeRaidByOwner[raid.requesterId] === raid.raidId) {
         delete raids.activeRaidByOwner[raid.requesterId];
     }
-    saveRaids(raids);
+    saveRaids(guildId, raids);
     return raid;
 }
 
-function closeAllRaids() {
-    const raids = loadRaids();
+function closeAllRaids(guildId) {
+    const raids = loadRaids(guildId);
     let closedCount = 0;
 
     for (const raid of raids.raids) {
@@ -267,17 +294,17 @@ function closeAllRaids() {
     }
 
     raids.activeRaidByOwner = {};
-    saveRaids(raids);
+    saveRaids(guildId, raids);
     return closedCount;
 }
 
-function updateRaidMessageReference(raidId, channelId, messageId) {
-    const raids = loadRaids();
+function updateRaidMessageReference(raidId, channelId, messageId, guildId) {
+    const raids = loadRaids(guildId);
     const raid = raids.raids.find(item => item.raidId === raidId);
     if (!raid) return;
     raid.channelId = channelId;
     raid.messageId = messageId;
-    saveRaids(raids);
+    saveRaids(guildId, raids);
 }
 
 function formatRaidMessage(raid) {
@@ -331,8 +358,8 @@ function getTopEntries(ranking, max = 5) {
         .slice(0, max);
 }
 
-function getRaidProfileContext(userId) {
-    const raids = loadRaids();
+function getRaidProfileContext(userId, guildId) {
+    const raids = loadRaids(guildId);
     for (const raid of raids.raids) {
         if (raid.requesterId === userId) {
             if (raid.robloxDisplayName || raid.robloxUserId) {
@@ -361,8 +388,9 @@ function getRaidProfileContext(userId) {
     return null;
 }
 
-async function getLeaderboardUserProfile(client, userId) {
-    const cached = profileCache.get(userId);
+async function getLeaderboardUserProfile(client, userId, guildId) {
+    const cacheKey = `${guildId}:${userId}`;
+    const cached = profileCache.get(cacheKey);
     if (cached && Date.now() - cached.fetchedAt < PROFILE_CACHE_TTL) {
         return cached;
     }
@@ -374,7 +402,7 @@ async function getLeaderboardUserProfile(client, userId) {
         console.error('Failed to fetch Discord user for leaderboard:', error);
     }
 
-    const context = getRaidProfileContext(userId);
+    const context = getRaidProfileContext(userId, guildId);
     let robloxDisplayName = 'Not Linked';
     let robloxUserId = null;
     let avatarUrl = null;
@@ -411,7 +439,7 @@ async function getLeaderboardUserProfile(client, userId) {
     return profile;
 }
 
-async function buildLeaderboardEmbed(client, topEntries) {
+async function buildLeaderboardEmbed(client, topEntries, guildId) {
     const embed = new EmbedBuilder()
         .setTitle('🏆 Raid Leaderboard')
         .setDescription('Top 20 Most Active Raiders')
@@ -429,7 +457,7 @@ async function buildLeaderboardEmbed(client, topEntries) {
         const entry = topEntries[index];
         const rank = index + 1;
         const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '🏅';
-        const profile = await getLeaderboardUserProfile(client, entry.userId);
+        const profile = await getLeaderboardUserProfile(client, entry.userId, guildId);
         const discordLabel = profile.discordMention || profile.discordName || 'Unknown User';
         const robloxLabel = profile.robloxDisplayName || 'Not Linked';
         const avatarLine = profile.avatarUrl
@@ -449,7 +477,7 @@ async function buildLeaderboardEmbed(client, topEntries) {
         );
     }
 
-    const rankOneProfile = sections.length > 0 ? await getLeaderboardUserProfile(client, topEntries[0].userId) : null;
+    const rankOneProfile = sections.length > 0 ? await getLeaderboardUserProfile(client, topEntries[0].userId, guildId) : null;
     if (rankOneProfile?.avatarUrl) {
         embed.setThumbnail(rankOneProfile.avatarUrl);
     } else if (client?.user?.displayAvatarURL) {
@@ -460,20 +488,20 @@ async function buildLeaderboardEmbed(client, topEntries) {
     return embed;
 }
 
-async function buildLeaderboardEmbeds(client, topEntries = null) {
-    const entries = topEntries || await leaderboardDb.getTopLeaderboard(20);
-    return [await buildLeaderboardEmbed(client, entries)];
+async function buildLeaderboardEmbeds(client, topEntries = null, guildId) {
+    const entries = topEntries || await leaderboardDb.getTopLeaderboard(20, guildId);
+    return [await buildLeaderboardEmbed(client, entries, guildId)];
 }
 
-async function publishLeaderboard(client) {
-    const settings = loadSettings();
+async function publishLeaderboard(client, guildId) {
+    const settings = loadSettings(guildId);
     if (!settings.leaderboardChannel) return;
 
     const channel = await client.channels.fetch(settings.leaderboardChannel).catch(() => null);
     if (!channel || !channel.isTextBased()) return;
     
-    const topEntries = await leaderboardDb.getTopLeaderboard(20);
-    const embeds = await buildLeaderboardEmbeds(client, topEntries);
+    const topEntries = await leaderboardDb.getTopLeaderboard(20, guildId);
+    const embeds = await buildLeaderboardEmbeds(client, topEntries, guildId);
     
     if (settings.leaderboardMessageId) {
         const existing = await channel.messages.fetch(settings.leaderboardMessageId).catch(() => null);
@@ -484,24 +512,24 @@ async function publishLeaderboard(client) {
             } catch (error) {
                 if (error?.code === 10008) {
                     settings.leaderboardMessageId = null;
-                    saveSettings(settings);
+                    saveSettings(guildId, settings);
                 } else {
                     throw error;
                 }
             }
         } else {
             settings.leaderboardMessageId = null;
-            saveSettings(settings);
+            saveSettings(guildId, settings);
         }
     }
     
     const message = await channel.send({ embeds });
     settings.leaderboardMessageId = message.id;
-    saveSettings(settings);
+    saveSettings(guildId, settings);
 }
 
-async function syncLeaderboardMessage(client) {
-    await publishLeaderboard(client);
+async function syncLeaderboardMessage(client, guildId) {
+    await publishLeaderboard(client, guildId);
 }
 
 module.exports = {

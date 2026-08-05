@@ -192,10 +192,10 @@ module.exports = {
                 const guild = interaction.guild;
 
                 // Update DB
-                await verificationDb.acceptVerification(targetUserId, interaction.user.id);
+                await verificationDb.acceptVerification(targetUserId, interaction.user.id, interaction.guild.id);
 
                 // Remove locked ping role from the user
-                const settings = raidStateManager.loadSettings();
+                const settings = raidStateManager.loadSettings(interaction.guild.id);
                 if (settings.lockedPingRoleId) {
                     try {
                         const member = await guild.members.fetch(targetUserId).catch(() => null);
@@ -232,7 +232,7 @@ module.exports = {
                 }
 
                 // Update the embed in the logs channel to show accepted (no buttons)
-                const verificationData = await verificationDb.getVerificationData(targetUserId);
+                const verificationData = await verificationDb.getVerificationData(targetUserId, interaction.guild.id);
                 const targetUserInfo = await interaction.client.users.fetch(targetUserId).catch(() => null);
                 const targetUserTag = targetUserInfo?.tag || `<@${targetUserId}>`;
                 const robloxDisplayName = verificationData?.roblox_display_name || verificationData?.roblox_username || 'Unknown';
@@ -276,7 +276,7 @@ module.exports = {
 
                 // Also send a final result embed to the verificationResultChannel
                 try {
-                    const resultSettings = raidStateManager.loadSettings();
+                    const resultSettings = raidStateManager.loadSettings(interaction.guild.id);
                     if (resultSettings.verificationResultChannel) {
                         const resultChannel = await interaction.client.channels.fetch(resultSettings.verificationResultChannel).catch(() => null);
                         if (resultChannel && resultChannel.isTextBased()) {
@@ -457,7 +457,7 @@ module.exports = {
 
             if (prefix !== "raid" || Number.isNaN(raidId)) return;
 
-            const raid = raidStateManager.getRaidById(raidId);
+            const raid = raidStateManager.getRaidById(raidId, interaction.guild.id);
             if (!raid) {
                 return interaction.reply({ content: "Raid not found.", flags: 64 }).catch(() => null);
             }
@@ -482,7 +482,7 @@ module.exports = {
             }
 
             if (action === "leave") {
-                const result = raidStateManager.removeHelper(raidId, interaction.user.id);
+                const result = raidStateManager.removeHelper(raidId, interaction.user.id, interaction.guild.id);
                 if (!result.success) {
                     return interaction.reply({ content: result.message, flags: 64 });
                 }
@@ -519,22 +519,16 @@ module.exports = {
             }
 
             if (action === "outcome") {
-                const activeRaid = raidStateManager.getRaidById(raidId);
+                const activeRaid = raidStateManager.getRaidById(raidId, interaction.guild.id);
                 if (!activeRaid || activeRaid.status === 'CLOSED') {
                     return interaction.reply({ content: '❌ This raid record has already been locked.', flags: 64 }).catch(() => null);
                 }
 
-                raidStateManager.closeRaid(raidId);
-                activeRaid.status = 'CLOSED';
+                    raidStateManager.closeRaid(raidId, undefined, interaction.guild.id);
+                    activeRaid.status = 'CLOSED';
 
-                const settings = raidStateManager.loadSettings();
-                const raidsData = raidStateManager.loadRaids();
-
-                if (!raidsData.streakType) raidsData.streakType = 'NONE';
-                if (!raidsData.streakCount) raidsData.streakCount = 0;
-
-                let resultTitle = '';
-                let resultColor = 0xbf0000;
+                    const settings = raidStateManager.loadSettings(interaction.guild.id);
+                    const raidsData = raidStateManager.loadRaids(interaction.guild.id);
                 let descriptionText = '';
 
                 if (outcome === 'win' || outcome === 'whooped') {
@@ -570,7 +564,7 @@ module.exports = {
                     descriptionText = `The combat operation concluded indeterminately, or was cancelled mid-deployment.`;
                 }
 
-                raidStateManager.saveRaids(raidsData);
+                raidStateManager.saveRaids(interaction.guild.id, raidsData);
 
                 const streakMessage = raidsData.streakCount > 0 
                     ? `**Current Streak:** ${raidsData.streakType === 'WIN' ? '🔥' : '💀'} ${raidsData.streakCount} Matches consecutive!`
@@ -736,7 +730,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                 const guild = interaction.guild;
 
                 // Update DB with rejection
-                await verificationDb.rejectVerification(targetUserId, interaction.user.id, reason);
+                await verificationDb.rejectVerification(targetUserId, interaction.user.id, reason, interaction.guild.id);
 
                 // Send DM to the user with rejection reason
                 try {
@@ -761,7 +755,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                 }
 
                 // Update the embed to show rejected
-                const verificationData = await verificationDb.getVerificationData(targetUserId);
+                const verificationData = await verificationDb.getVerificationData(targetUserId, interaction.guild.id);
                 const targetUserInfo = await interaction.client.users.fetch(targetUserId).catch(() => null);
                 const targetUserTag = targetUserInfo?.tag || `<@${targetUserId}>`;
                 const robloxDisplayName = verificationData?.roblox_display_name || verificationData?.roblox_username || 'Unknown';
@@ -807,7 +801,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
 
                 // Try to update the original embed in the logs channel
                 try {
-                    const settings = raidStateManager.loadSettings();
+                    const settings = raidStateManager.loadSettings(interaction.guild.id);
                     if (settings.infoChannel) {
                         const channel = await interaction.client.channels.fetch(settings.infoChannel).catch(() => null);
                         if (channel && channel.isTextBased()) {
@@ -827,7 +821,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
 
                 // Also send a final result embed to the verificationResultChannel
                 try {
-                    const resultSettings = raidStateManager.loadSettings();
+                    const resultSettings = raidStateManager.loadSettings(interaction.guild.id);
                     if (resultSettings.verificationResultChannel) {
                         const resultChannel = await interaction.client.channels.fetch(resultSettings.verificationResultChannel).catch(() => null);
                         if (resultChannel && resultChannel.isTextBased()) {
@@ -927,7 +921,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                         robloxPsLink: robloxPsLink || null,
                         killCount: killCount || null,
                         friendListLink: friendListLink === 'N/A' ? null : friendListLink
-                    });
+                    }, interaction.guild.id);
 
                     // Build the code block text like the raid request embed
                     const robloxDisplayName = robloxValidation.success ? robloxValidation.displayName : (robloxUsername || 'N/A');
@@ -942,7 +936,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                     ].join('\n');
 
                     // Send the pending verification embed to the configured info channel with Accept/Deny buttons
-                    const settings = raidStateManager.loadSettings();
+                    const settings = raidStateManager.loadSettings(interaction.guild.id);
                     if (settings.infoChannel) {
                         const targetChannel = await interaction.client.channels.fetch(settings.infoChannel).catch(() => null);
                         if (targetChannel && targetChannel.isTextBased()) {
@@ -990,7 +984,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                 const targetRaidId = Number(interaction.customId.split("_")[2]);
                 const helperUsername = interaction.fields.getTextInputValue("helperRobloxUsername");
 
-                const currentRaid = raidStateManager.getRaidById(targetRaidId);
+                const currentRaid = raidStateManager.getRaidById(targetRaidId, interaction.guild.id);
                 if (!currentRaid || currentRaid.status === "CLOSED") {
                     return interaction.reply({ content: "This raid operation is no longer active or closed.", flags: 64 }).catch(() => null);
                 }
@@ -1007,7 +1001,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                     username: helperUsername,
                     displayName: robloxValidation.displayName || helperUsername,
                     userId: robloxValidation.userId || "1"
-                });
+                }, interaction.guild.id);
 
                 if (!result.success) {
                     return interaction.reply({ content: result.message, flags: 64 });
@@ -1030,7 +1024,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
 
             if (interaction.customId === "raid_application_step1") {
                 const userId = interaction.user.id;
-                if (!raidStateManager.canCreateRaid(userId)) {
+                if (!raidStateManager.canCreateRaid(userId, interaction.guild.id)) {
                     return interaction.reply({ content: "You already have an open raid or you are blocked from creating new raids.", flags: 64 }).catch(() => null);
                 }
 
@@ -1115,10 +1109,11 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                     enemyClanNames,
                     enemyClanPresent,
                     reason,
-                    helperLimit
+                    helperLimit,
+                    guildId: interaction.guild.id
                 });
 
-                const settings = raidStateManager.loadSettings();
+                const settings = raidStateManager.loadSettings(interaction.guild.id);
                 const content = raidStateManager.formatRaidMessage(raid);
                 const raidButtonRow = createRaidButtons(raid, interaction.member);
                 const regionRoleInfo = getRegionRoleInfo(raid.region);
@@ -1153,7 +1148,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                     components: [raidButtonRow],
                     allowedMentions: regionRoleInfo.roleId ? { roles: [regionRoleInfo.roleId] } : undefined
                 });
-                raidStateManager.updateRaidMessageReference(raid.raidId, targetChannel.id, message.id);
+                raidStateManager.updateRaidMessageReference(raid.raidId, targetChannel.id, message.id, interaction.guild.id);
             }
         }
     }

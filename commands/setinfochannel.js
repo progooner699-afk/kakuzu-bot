@@ -21,9 +21,10 @@ module.exports = {
         }
 
         const channel = interaction.options.getChannel('channel');
-        const settings = raidStateManager.loadSettings();
+        const guildId = interaction.guild.id;
+        const settings = raidStateManager.loadSettings(guildId);
         settings.infoChannel = channel.id;
-        raidStateManager.saveSettings(settings);
+        raidStateManager.saveSettings(guildId, settings);
 
         await interaction.reply({
             content: `✅ Verification logs channel set to ${channel}. Pending verifications with Accept/Deny buttons will be sent there for moderator review.`,

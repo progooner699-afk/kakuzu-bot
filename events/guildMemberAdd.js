@@ -6,7 +6,7 @@ module.exports = {
     once: false,
     async execute(member, client) {
         // 1. Assign the @lockedping role to restrict channel access
-        const settings = raidStateManager.loadSettings();
+        const settings = raidStateManager.loadSettings(member.guild.id);
         if (settings.lockedPingRoleId) {
             try {
                 const lockedRole = member.guild.roles.cache.get(settings.lockedPingRoleId);

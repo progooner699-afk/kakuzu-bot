@@ -21,9 +21,10 @@ module.exports = {
         }
 
         const channel = interaction.options.getChannel('channel');
-        const settings = raidStateManager.loadSettings();
+        const guildId = interaction.guild.id;
+        const settings = raidStateManager.loadSettings(guildId);
         settings.verificationResultChannel = channel.id;
-        raidStateManager.saveSettings(settings);
+        raidStateManager.saveSettings(guildId, settings);
 
         await interaction.reply({
             content: `✅ Verification result channel set to ${channel}. Final accepted/rejected embeds will be sent there.`,

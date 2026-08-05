@@ -18,7 +18,7 @@ module.exports = {
     async execute(interaction) {
         const raidId = interaction.options.getInteger('raid_id', true);
         const reason = interaction.options.getString('reason', true).trim();
-        const raid = raidStateManager.getRaidById(raidId);
+        const raid = raidStateManager.getRaidById(raidId, interaction.guild.id);
 
         if (!raid) {
             return interaction.reply({ content: 'Raid not found.', ephemeral: true });
@@ -38,13 +38,13 @@ module.exports = {
             closedBy: interaction.user.id,
             closedByTag: interaction.user.tag,
             closeReason: reason
-        });
+        }, interaction.guild.id);
 
         if (!updatedRaid) {
             return interaction.reply({ content: 'Unable to close the raid.', ephemeral: true });
         }
 
-        const settings = raidStateManager.loadSettings();
+        const settings = raidStateManager.loadSettings(interaction.guild.id);
         const alertChannel = await interaction.client.channels.fetch(updatedRaid.channelId).catch(() => null);
         if (alertChannel && alertChannel.isTextBased()) {
             const alertMessage = await alertChannel.messages.fetch(updatedRaid.messageId).catch(() => null);

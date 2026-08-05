@@ -2,12 +2,25 @@ const fs = require('fs');
 const path = require('path');
 const initSqlJs = require('sql.js');
 
-const dbPath = path.join(__dirname, '..', 'data', 'verification.sqlite');
-let dbPromise;
+const baseDataDir = path.join(__dirname, '..', 'data');
+const guildsDataDir = path.join(baseDataDir, 'guilds');
+const dbCache = new Map();
 let SQL;
 
-async function ensureDb() {
-    if (dbPromise) return dbPromise;
+function getGuildDbPath(guildId) {
+    return path.join(guildsDataDir, guildId, 'verification.sqlite');
+}
+
+async function ensureDb(guildId) {
+    if (!guildId) {
+        throw new Error('Guild ID is required for verification database access.');
+    }
+
+    if (dbCache.has(guildId)) {
+        return dbCache.get(guildId);
+    }
+
+    const dbPath = getGuildDbPath(guildId);
     const dataDir = path.dirname(dbPath);
     if (!fs.existsSync(dataDir)) {
         fs.mkdirSync(dataDir, { recursive: true });
@@ -16,15 +29,14 @@ async function ensureDb() {
     const initSqlJsModule = await initSqlJs();
     SQL = initSqlJsModule;
 
+    let db;
     if (fs.existsSync(dbPath)) {
         const fileBuffer = fs.readFileSync(dbPath);
-        dbPromise = Promise.resolve(new SQL.Database(fileBuffer));
+        db = new SQL.Database(fileBuffer);
     } else {
-        const db = new SQL.Database();
-        dbPromise = Promise.resolve(db);
+        db = new SQL.Database();
     }
 
-    const db = await dbPromise;
     db.run(`
         CREATE TABLE IF NOT EXISTS verifications (
             userId TEXT PRIMARY KEY,
@@ -43,22 +55,23 @@ async function ensureDb() {
             reviewed_at INTEGER
         );
     `);
-    saveDb(db);
+    saveDb(guildId, db);
+    dbCache.set(guildId, db);
     return db;
 }
 
-function saveDb(db) {
+function saveDb(guildId, db) {
     const data = db.export();
     const buffer = Buffer.from(data);
-    fs.writeFileSync(dbPath, buffer);
+    fs.writeFileSync(getGuildDbPath(guildId), buffer);
 }
 
-async function getDb() {
-    return ensureDb();
+async function getDb(guildId) {
+    return ensureDb(guildId);
 }
 
-async function isUserVerified(userId) {
-    const db = await getDb();
+async function isUserVerified(userId, guildId) {
+    const db = await getDb(guildId);
     const stmt = db.prepare('SELECT is_verified FROM verifications WHERE userId = ?');
     stmt.bind([userId]);
     const row = stmt.step() ? stmt.getAsObject() : null;
@@ -66,8 +79,8 @@ async function isUserVerified(userId) {
     return row ? Boolean(row.is_verified) : false;
 }
 
-async function getVerificationData(userId) {
-    const db = await getDb();
+async function getVerificationData(userId, guildId) {
+    const db = await getDb(guildId);
     const stmt = db.prepare('SELECT * FROM verifications WHERE userId = ?');
     stmt.bind([userId]);
     const row = stmt.step() ? stmt.getAsObject() : null;
@@ -75,8 +88,8 @@ async function getVerificationData(userId) {
     return row || null;
 }
 
-async function markVerified(userId, data) {
-    const db = await getDb();
+async function markVerified(userId, data, guildId) {
+    const db = await getDb(guildId);
     const stmt = db.prepare(`
         INSERT INTO verifications (userId, is_verified, roblox_username, roblox_display_name, roblox_user_id, roblox_avatar_url, roblox_ps_link, kill_count, friend_list_link, verified_at, status)
         VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
@@ -105,12 +118,12 @@ async function markVerified(userId, data) {
         data.robloxUsername, robloxDisplayName, robloxUserId, robloxAvatarUrl, data.robloxPsLink, data.killCount, data.friendListLink, now
     ]);
     stmt.free();
-    saveDb(db);
+    saveDb(guildId, db);
     return true;
 }
 
-async function acceptVerification(userId, reviewerId) {
-    const db = await getDb();
+async function acceptVerification(userId, reviewerId, guildId) {
+    const db = await getDb(guildId);
     const stmt = db.prepare(`
         UPDATE verifications SET
             is_verified = 1,
@@ -122,12 +135,12 @@ async function acceptVerification(userId, reviewerId) {
     `);
     stmt.run([reviewerId, Date.now(), userId]);
     stmt.free();
-    saveDb(db);
+    saveDb(guildId, db);
     return true;
 }
 
-async function rejectVerification(userId, reviewerId, reason) {
-    const db = await getDb();
+async function rejectVerification(userId, reviewerId, reason, guildId) {
+    const db = await getDb(guildId);
     const stmt = db.prepare(`
         UPDATE verifications SET
             is_verified = 0,
@@ -139,12 +152,12 @@ async function rejectVerification(userId, reviewerId, reason) {
     `);
     stmt.run([reviewerId, Date.now(), reason, userId]);
     stmt.free();
-    saveDb(db);
+    saveDb(guildId, db);
     return true;
 }
 
-async function getPendingVerifications() {
-    const db = await getDb();
+async function getPendingVerifications(guildId) {
+    const db = await getDb(guildId);
     const stmt = db.prepare('SELECT * FROM verifications WHERE status = ?');
     stmt.bind(['pending']);
     const rows = [];

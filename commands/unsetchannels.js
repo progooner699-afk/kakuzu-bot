@@ -7,11 +7,12 @@ module.exports = {
         .setDescription('Reset all configured channels (raid, result, info) to none.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     async execute(interaction) {
-        const settings = raidStateManager.loadSettings();
+        const guildId = interaction.guild.id;
+        const settings = raidStateManager.loadSettings(guildId);
         settings.raidChannel = null;
         settings.resultChannel = null;
         settings.infoChannel = null;
-        raidStateManager.saveSettings(settings);
+        raidStateManager.saveSettings(guildId, settings);
 
         await interaction.reply({
             content: '✅ **All channels have been unset successfully.**\n\n' +

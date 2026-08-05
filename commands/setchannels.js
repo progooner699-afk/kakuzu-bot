@@ -22,11 +22,12 @@ module.exports = {
         const raidChannel = interaction.options.getChannel('raid_channel').id;
         const resultChannel = interaction.options.getChannel('result_channel').id;
 
-        const settings = raidStateManager.loadSettings();
+        const guildId = interaction.guild.id;
+        const settings = raidStateManager.loadSettings(guildId);
         settings.raidChannel = raidChannel;
         settings.resultChannel = resultChannel;
 
-        raidStateManager.saveSettings(settings);
+        raidStateManager.saveSettings(guildId, settings);
         await interaction.reply({
             content: 'Channels configured successfully. Raid alerts will be posted in <#' + raidChannel + '> and raid result embeds will be sent to <#' + resultChannel + '>.',
             flags: 64

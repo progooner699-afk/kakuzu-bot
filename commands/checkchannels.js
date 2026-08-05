@@ -7,7 +7,7 @@ module.exports = {
         .setDescription('Show currently configured channels for raid, result and verification.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     async execute(interaction) {
-        const settings = raidStateManager.loadSettings();
+        const settings = raidStateManager.loadSettings(interaction.guild.id);
 
         const embed = new EmbedBuilder()
             .setTitle('Configured Channels')

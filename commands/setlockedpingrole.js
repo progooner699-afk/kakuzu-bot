@@ -21,9 +21,10 @@ module.exports = {
         }
 
         const role = interaction.options.getRole('role');
-        const settings = raidStateManager.loadSettings();
+        const guildId = interaction.guild.id;
+        const settings = raidStateManager.loadSettings(guildId);
         settings.lockedPingRoleId = role.id;
-        raidStateManager.saveSettings(settings);
+        raidStateManager.saveSettings(guildId, settings);
 
         await interaction.reply({
             content: `✅ Locked ping role set to ${role}. New members will automatically receive this role upon joining.`,

@@ -14,7 +14,7 @@ module.exports = {
     async execute(interaction) {
         const targetUser = interaction.options.getUser('user') || interaction.user;
 
-        const isVerified = await verificationDb.isUserVerified(targetUser.id);
+        const isVerified = await verificationDb.isUserVerified(targetUser.id, interaction.guild.id);
 
         if (isVerified) {
             return interaction.reply({

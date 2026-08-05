@@ -2,12 +2,25 @@ const fs = require('fs');
 const path = require('path');
 const initSqlJs = require('sql.js');
 
-const dbPath = path.join(__dirname, '..', 'data', 'leaderboard.sqlite');
-let dbPromise;
+const baseDataDir = path.join(__dirname, '..', 'data');
+const guildsDataDir = path.join(baseDataDir, 'guilds');
+const dbCache = new Map();
 let SQL;
 
-async function ensureDb() {
-    if (dbPromise) return dbPromise;
+function getGuildDbPath(guildId) {
+    return path.join(guildsDataDir, guildId, 'leaderboard.sqlite');
+}
+
+async function ensureDb(guildId) {
+    if (!guildId) {
+        throw new Error('Guild ID is required for leaderboard database access.');
+    }
+
+    if (dbCache.has(guildId)) {
+        return dbCache.get(guildId);
+    }
+
+    const dbPath = getGuildDbPath(guildId);
     const dataDir = path.dirname(dbPath);
     if (!fs.existsSync(dataDir)) {
         fs.mkdirSync(dataDir, { recursive: true });
@@ -16,15 +29,14 @@ async function ensureDb() {
     const initSqlJsModule = await initSqlJs();
     SQL = initSqlJsModule;
 
+    let db;
     if (fs.existsSync(dbPath)) {
         const fileBuffer = fs.readFileSync(dbPath);
-        dbPromise = Promise.resolve(new SQL.Database(fileBuffer));
+        db = new SQL.Database(fileBuffer);
     } else {
-        const db = new SQL.Database();
-        dbPromise = Promise.resolve(db);
+        db = new SQL.Database();
     }
 
-    const db = await dbPromise;
     db.run(`
         CREATE TABLE IF NOT EXISTS raid_counts (
             userId TEXT PRIMARY KEY,
@@ -38,22 +50,24 @@ async function ensureDb() {
             PRIMARY KEY (raidId, userId)
         );
     `);
-    saveDb(db);
+
+    dbCache.set(guildId, db);
+    saveDb(guildId, db);
     return db;
 }
 
-function saveDb(db) {
+function saveDb(guildId, db) {
     const data = db.export();
     const buffer = Buffer.from(data);
-    fs.writeFileSync(dbPath, buffer);
+    fs.writeFileSync(getGuildDbPath(guildId), buffer);
 }
 
-async function getDb() {
-    return ensureDb();
+async function getDb(guildId) {
+    return ensureDb(guildId);
 }
 
-async function incrementRaidCount(userId) {
-    const db = await getDb();
+async function incrementRaidCount(userId, guildId) {
+    const db = await getDb(guildId);
     const stmt = db.prepare('SELECT count FROM raid_counts WHERE userId = ?');
     stmt.bind([userId]);
     let count = 0;
@@ -68,20 +82,20 @@ async function incrementRaidCount(userId) {
     `);
     upsert.run([userId, count, count]);
     upsert.free();
-    saveDb(db);
+    saveDb(guildId, db);
     return count;
 }
 
-async function markRaidAccepted(raidId, userId) {
-    const db = await getDb();
+async function markRaidAccepted(raidId, userId, guildId) {
+    const db = await getDb(guildId);
     const stmt = db.prepare('INSERT OR IGNORE INTO raid_accepts (raidId, userId) VALUES (?, ?)');
     stmt.run([raidId, userId]);
     stmt.free();
-    saveDb(db);
+    saveDb(guildId, db);
 }
 
-async function hasAcceptedRaid(raidId, userId) {
-    const db = await getDb();
+async function hasAcceptedRaid(raidId, userId, guildId) {
+    const db = await getDb(guildId);
     const stmt = db.prepare('SELECT 1 FROM raid_accepts WHERE raidId = ? AND userId = ?');
     stmt.bind([raidId, userId]);
     const exists = stmt.step();
@@ -89,8 +103,8 @@ async function hasAcceptedRaid(raidId, userId) {
     return exists;
 }
 
-async function getTopLeaderboard(limit = 20) {
-    const db = await getDb();
+async function getTopLeaderboard(limit = 20, guildId) {
+    const db = await getDb(guildId);
     const stmt = db.prepare('SELECT userId, count as raidCount FROM raid_counts ORDER BY count DESC LIMIT ?');
     stmt.bind([limit]);
     const rows = [];
