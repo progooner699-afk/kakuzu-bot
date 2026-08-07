@@ -119,6 +119,50 @@ function createVerificationActionButtons(userId) {
     return new ActionRowBuilder().addComponents(acceptBtn, denyBtn);
 }
 
+function buildVerificationEmbed({ title, description, color, footerText, thumbnailUrl, imageUrl, fields = [], timestamp = new Date() }) {
+    const embed = new EmbedBuilder()
+        .setTitle(title)
+        .setDescription(description)
+        .setColor(color)
+        .setFooter({ text: footerText })
+        .setTimestamp(timestamp);
+
+    if (fields.length) {
+        embed.addFields(fields);
+    }
+
+    if (thumbnailUrl) {
+        embed.setThumbnail(thumbnailUrl);
+    }
+
+    if (imageUrl) {
+        embed.setImage(imageUrl);
+    }
+
+    return embed;
+}
+
+function getVerificationFieldValue(value) {
+    if (value === null || value === undefined) return '—';
+    const stringValue = String(value).trim();
+    return stringValue || '—';
+}
+
+async function getVerificationTargetChannel(client, configuredChannelId, fallbackChannel) {
+    if (configuredChannelId) {
+        const configuredChannel = await client.channels.fetch(configuredChannelId).catch(() => null);
+        if (configuredChannel && configuredChannel.isTextBased()) {
+            return configuredChannel;
+        }
+    }
+
+    if (fallbackChannel && fallbackChannel.isTextBased()) {
+        return fallbackChannel;
+    }
+
+    return null;
+}
+
 async function updateVerificationMessage(channel, targetUserId, embed, components = []) {
     if (!channel || !channel.isTextBased()) return null;
 
@@ -300,34 +344,23 @@ module.exports = {
                     roblox_user_id: robloxUserIdVal
                 });
 
-                const acceptCodeBlock = [
-                    `DISCORD USER: ${targetUserTag}`,
-                    `ROBLOX USER: ${robloxProfileValue}`,
-                    `ROBLOX PS LINK: ${verificationData?.roblox_ps_link || 'N/A'}`,
-                    `KILL COUNT: ${verificationData?.kill_count || 'N/A'}`,
-                    `FRIEND LIST LINK: ${verificationData?.friend_list_link || 'N/A'}`,
-                    `STATUS: ACCEPTED ✅`,
-                    `REVIEWED BY: ${interaction.user.tag}`
-                ].join('\n');
-
-                const logEmbed = new EmbedBuilder()
-                    .setTitle('✅ VERIFICATION ACCEPTED')
-                    .setDescription(acceptCodeBlock)
-                    .setColor(0x00FF00)
-                    .setFooter({ text: `Accepted by ${interaction.user.tag} • ${new Date().toLocaleString()}` })
-                    .setTimestamp();
-
-                // Use Roblox avatar as thumbnail
-                if (robloxAvatarUrlVal) {
-                    logEmbed.setThumbnail(robloxAvatarUrlVal);
-                } else {
-                    logEmbed.setThumbnail(guild.iconURL({ size: 256 }));
-                }
-
-                // Only set image if friend list link is a valid URL
-                if (verificationData?.friend_list_link && verificationData.friend_list_link.match(/^https?:\/\/.+/i)) {
-                    logEmbed.setImage(verificationData.friend_list_link);
-                }
+                const logEmbed = buildVerificationEmbed({
+                    title: '✅ VERIFICATION ACCEPTED',
+                    description: 'A moderator completed the review for this verification request.',
+                    color: 0x5865F2,
+                    footerText: `Accepted by ${interaction.user.tag} • ${new Date().toLocaleString()}`,
+                    thumbnailUrl: robloxAvatarUrlVal || guild.iconURL({ size: 256 }),
+                    imageUrl: verificationData?.friend_list_link && verificationData.friend_list_link.match(/^https?:\/\/.+/i) ? verificationData.friend_list_link : null,
+                    fields: [
+                        { name: '👤 Applicant', value: getVerificationFieldValue(targetUserTag), inline: true },
+                        { name: '🧾 Roblox Profile', value: getVerificationFieldValue(robloxProfileValue), inline: true },
+                        { name: '🛡️ Status', value: '✅ Accepted', inline: true },
+                        { name: '🔗 PS Link', value: getVerificationFieldValue(verificationData?.roblox_ps_link || 'N/A'), inline: true },
+                        { name: '⚔️ Kill Count', value: getVerificationFieldValue(verificationData?.kill_count || 'N/A'), inline: true },
+                        { name: '📸 Friend List', value: getVerificationFieldValue(verificationData?.friend_list_link || 'N/A'), inline: true },
+                        { name: '🧑‍⚖️ Reviewed By', value: getVerificationFieldValue(interaction.user.tag), inline: false }
+                    ]
+                });
 
                 await interaction.update({
                     embeds: [logEmbed],
@@ -340,26 +373,20 @@ module.exports = {
                     if (resultSettings.verificationResultChannel) {
                         const resultChannel = await interaction.client.channels.fetch(resultSettings.verificationResultChannel).catch(() => null);
                         if (resultChannel && resultChannel.isTextBased()) {
-                            const resultCodeBlock = [
-                                `DISCORD USER: ${targetUserTag}`,
-                                `ROBLOX USER: ${robloxDisplayName} (@${robloxUsernameVal})${robloxUserIdVal ? ` [ID: ${robloxUserIdVal}]` : ''}`,
-                                `STATUS: ACCEPTED ✅`,
-                                `REVIEWED BY: ${interaction.user.tag}`
-                            ].join('\n');
-
-                            const resultEmbed = new EmbedBuilder()
-                                .setTitle('✅ VERIFICATION ACCEPTED')
-                                .setDescription(resultCodeBlock)
-                                .setColor(0x00FF00)
-                                .setFooter({ text: `Kakuzu Verification System • ${new Date().toLocaleString()}` })
-                                .setTimestamp();
-
-                            // Use Roblox avatar as thumbnail
-                            if (robloxAvatarUrlVal) {
-                                resultEmbed.setThumbnail(robloxAvatarUrlVal);
-                            } else {
-                                resultEmbed.setThumbnail(guild.iconURL({ size: 256 }));
-                            }
+                            const resultEmbed = buildVerificationEmbed({
+                                title: '✅ VERIFICATION ACCEPTED',
+                                description: 'The applicant has been approved and cleared by a moderator.',
+                                color: 0x2ECC71,
+                                footerText: `Kakuzu Verification System • ${new Date().toLocaleString()}`,
+                                thumbnailUrl: robloxAvatarUrlVal || guild.iconURL({ size: 256 }),
+                                fields: [
+                                    { name: '👤 Applicant', value: getVerificationFieldValue(targetUserTag), inline: true },
+                                    { name: '🧾 Roblox Profile', value: getVerificationFieldValue(robloxProfileValue), inline: true },
+                                    { name: '🛡️ Status', value: '✅ Accepted', inline: true },
+                                    { name: '🧑‍⚖️ Reviewed By', value: getVerificationFieldValue(interaction.user.tag), inline: true },
+                                    { name: '📅 Submitted', value: getVerificationFieldValue(new Date().toLocaleString()), inline: true }
+                                ]
+                            });
 
                             await resultChannel.send({ embeds: [resultEmbed] });
                         }
@@ -828,35 +855,24 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                     roblox_user_id: robloxUserIdVal
                 });
 
-                const rejectCodeBlock = [
-                    `DISCORD USER: ${targetUserTag}`,
-                    `ROBLOX USER: ${robloxProfileValue}`,
-                    `ROBLOX PS LINK: ${verificationData?.roblox_ps_link || 'N/A'}`,
-                    `KILL COUNT: ${verificationData?.kill_count || 'N/A'}`,
-                    `FRIEND LIST LINK: ${verificationData?.friend_list_link || 'N/A'}`,
-                    `STATUS: REJECTED ❌`,
-                    `REVIEWED BY: ${interaction.user.tag}`,
-                    `REASON: ${reason}`
-                ].join('\n');
-
-                const updatedEmbed = new EmbedBuilder()
-                    .setTitle('❌ VERIFICATION REJECTED')
-                    .setDescription(rejectCodeBlock)
-                    .setColor(0xFF0000)
-                    .setFooter({ text: `Rejected by ${interaction.user.tag} • ${new Date().toLocaleString()}` })
-                    .setTimestamp();
-
-                // Use Roblox avatar as thumbnail
-                if (robloxAvatarUrlVal) {
-                    updatedEmbed.setThumbnail(robloxAvatarUrlVal);
-                } else {
-                    updatedEmbed.setThumbnail(guild.iconURL({ size: 256 }));
-                }
-
-                // Only set image if friend list link is a valid URL
-                if (verificationData?.friend_list_link && verificationData.friend_list_link.match(/^https?:\/\/.+/i)) {
-                    updatedEmbed.setImage(verificationData.friend_list_link);
-                }
+                const updatedEmbed = buildVerificationEmbed({
+                    title: '❌ VERIFICATION REJECTED',
+                    description: 'The applicant was not approved during this review.',
+                    color: 0xE74C3C,
+                    footerText: `Rejected by ${interaction.user.tag} • ${new Date().toLocaleString()}`,
+                    thumbnailUrl: robloxAvatarUrlVal || guild.iconURL({ size: 256 }),
+                    imageUrl: verificationData?.friend_list_link && verificationData.friend_list_link.match(/^https?:\/\/.+/i) ? verificationData.friend_list_link : null,
+                    fields: [
+                        { name: '👤 Applicant', value: getVerificationFieldValue(targetUserTag), inline: true },
+                        { name: '🧾 Roblox Profile', value: getVerificationFieldValue(robloxProfileValue), inline: true },
+                        { name: '🛡️ Status', value: '❌ Rejected', inline: true },
+                        { name: '🔗 PS Link', value: getVerificationFieldValue(verificationData?.roblox_ps_link || 'N/A'), inline: true },
+                        { name: '⚔️ Kill Count', value: getVerificationFieldValue(verificationData?.kill_count || 'N/A'), inline: true },
+                        { name: '📸 Friend List', value: getVerificationFieldValue(verificationData?.friend_list_link || 'N/A'), inline: true },
+                        { name: '📝 Reason', value: getVerificationFieldValue(reason), inline: false },
+                        { name: '🧑‍⚖️ Reviewed By', value: getVerificationFieldValue(interaction.user.tag), inline: false }
+                    ]
+                });
 
                 // Find and update the original message
                 await interaction.reply({
@@ -879,27 +895,21 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                     if (resultSettings.verificationResultChannel) {
                         const resultChannel = await interaction.client.channels.fetch(resultSettings.verificationResultChannel).catch(() => null);
                         if (resultChannel && resultChannel.isTextBased()) {
-                            const resultCodeBlock = [
-                                `DISCORD USER: ${targetUserTag}`,
-                                `ROBLOX USER: ${robloxDisplayName} (@${robloxUsernameVal})${robloxUserIdVal ? ` [ID: ${robloxUserIdVal}]` : ''}`,
-                                `STATUS: REJECTED ❌`,
-                                `REVIEWED BY: ${interaction.user.tag}`,
-                                `REASON: ${reason}`
-                            ].join('\n');
-
-                            const resultEmbed = new EmbedBuilder()
-                                .setTitle('❌ VERIFICATION REJECTED')
-                                .setDescription(resultCodeBlock)
-                                .setColor(0xFF0000)
-                                .setFooter({ text: `Kakuzu Verification System • ${new Date().toLocaleString()}` })
-                                .setTimestamp();
-
-                            // Use Roblox avatar as thumbnail
-                            if (robloxAvatarUrlVal) {
-                                resultEmbed.setThumbnail(robloxAvatarUrlVal);
-                            } else {
-                                resultEmbed.setThumbnail(guild.iconURL({ size: 256 }));
-                            }
+                            const resultEmbed = buildVerificationEmbed({
+                                title: '❌ VERIFICATION REJECTED',
+                                description: 'The applicant was not approved during this review.',
+                                color: 0xE74C3C,
+                                footerText: `Kakuzu Verification System • ${new Date().toLocaleString()}`,
+                                thumbnailUrl: robloxAvatarUrlVal || guild.iconURL({ size: 256 }),
+                                fields: [
+                                    { name: '👤 Applicant', value: getVerificationFieldValue(targetUserTag), inline: true },
+                                    { name: '🧾 Roblox Profile', value: getVerificationFieldValue(robloxProfileValue), inline: true },
+                                    { name: '🛡️ Status', value: '❌ Rejected', inline: true },
+                                    { name: '📝 Reason', value: getVerificationFieldValue(reason), inline: false },
+                                    { name: '🧑‍⚖️ Reviewed By', value: getVerificationFieldValue(interaction.user.tag), inline: true },
+                                    { name: '📅 Reviewed', value: getVerificationFieldValue(new Date().toLocaleString()), inline: true }
+                                ]
+                            });
 
                             await resultChannel.send({ embeds: [resultEmbed] });
                         }
@@ -977,7 +987,6 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                         friendListLink: friendListLink === 'N/A' ? null : friendListLink
                     }, interaction.guild.id);
 
-                    // Build the code block text like the raid request embed
                     const robloxDisplayName = robloxValidation.success ? robloxValidation.displayName : (robloxUsername || 'N/A');
                     const robloxUserId = robloxValidation.success ? robloxValidation.userId : null;
                     const robloxProfileValue = formatRobloxProfileValue({
@@ -986,43 +995,30 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                         roblox_user_id: robloxUserId
                     });
 
-                    const codeBlockText = [
-                        `DISCORD USER: ${interaction.user.tag}`,
-                        `ROBLOX USER: ${robloxProfileValue}`,
-                        `ROBLOX PS LINK: ${robloxPsLink || 'N/A'}`,
-                        `KILL COUNT: ${killCount || 'N/A'}`,
-                        `FRIEND LIST LINK: ${friendListLink}`,
-                        `STATUS: PENDING REVIEW`
-                    ].join('\n');
-
-                    // Send the pending verification embed to the configured info channel with Accept/Deny buttons
                     const settings = raidStateManager.loadSettings(interaction.guild.id);
-                    if (settings.infoChannel) {
-                        const targetChannel = await interaction.client.channels.fetch(settings.infoChannel).catch(() => null);
-                        if (targetChannel && targetChannel.isTextBased()) {
-                            const profileEmbed = new EmbedBuilder()
-                                .setTitle('🆕 NEW PENDING VERIFICATION')
-                                .setDescription(codeBlockText)
-                                .setFooter({ text: `Kakuzu Verification System • ${new Date().toLocaleString()}` })
-                                .setColor(0xFFA500); // Orange for pending
+                    const targetChannel = await getVerificationTargetChannel(interaction.client, settings.infoChannel, interaction.channel);
+                    if (targetChannel) {
+                        const profileEmbed = buildVerificationEmbed({
+                            title: '🆕 NEW PENDING VERIFICATION',
+                            description: 'A new verification request has been submitted and is waiting for moderator review.',
+                            color: 0xF59E0B,
+                            footerText: `Kakuzu Verification System • ${new Date().toLocaleString()}`,
+                            thumbnailUrl: robloxValidation.success && robloxValidation.avatarUrl ? robloxValidation.avatarUrl : interaction.user.displayAvatarURL({ size: 256 }),
+                            imageUrl: friendListLink && friendListLink.match(/^https?:\/\/.+/i) ? friendListLink : null,
+                            fields: [
+                                { name: '👤 Applicant', value: getVerificationFieldValue(interaction.user.tag), inline: true },
+                                { name: '🧾 Roblox Profile', value: getVerificationFieldValue(robloxProfileValue), inline: true },
+                                { name: '🛡️ Status', value: '⏳ Pending Review', inline: true },
+                                { name: '🔗 PS Link', value: getVerificationFieldValue(robloxPsLink || 'N/A'), inline: true },
+                                { name: '⚔️ Kill Count', value: getVerificationFieldValue(killCount || 'N/A'), inline: true },
+                                { name: '📸 Friend List', value: getVerificationFieldValue(friendListLink === 'N/A' ? 'N/A' : friendListLink), inline: true }
+                            ]
+                        });
 
-                            // Use Roblox avatar as thumbnail
-                            if (robloxValidation.success && robloxValidation.avatarUrl) {
-                                profileEmbed.setThumbnail(robloxValidation.avatarUrl);
-                            } else {
-                                profileEmbed.setThumbnail(interaction.user.displayAvatarURL({ size: 256 }));
-                            }
-
-                            // Only set image if friendListLink is a valid URL
-                            if (friendListLink && friendListLink.match(/^https?:\/\/.+/i)) {
-                                profileEmbed.setImage(friendListLink);
-                            }
-
-                            const actionRow = createVerificationActionButtons(interaction.user.id);
-                            const pendingMessage = await targetChannel.send({ embeds: [profileEmbed], components: [actionRow] }).catch(() => null);
-                            if (pendingMessage) {
-                                await verificationDb.setVerificationLogMessage(interaction.user.id, targetChannel.id, pendingMessage.id, interaction.guild.id);
-                            }
+                        const actionRow = createVerificationActionButtons(interaction.user.id);
+                        const pendingMessage = await targetChannel.send({ embeds: [profileEmbed], components: [actionRow] }).catch(() => null);
+                        if (pendingMessage) {
+                            await verificationDb.setVerificationLogMessage(interaction.user.id, targetChannel.id, pendingMessage.id, interaction.guild.id);
                         }
                     }
 

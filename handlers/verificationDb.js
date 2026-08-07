@@ -202,5 +202,6 @@ module.exports = {
     markVerified,
     acceptVerification,
     rejectVerification,
+    setVerificationLogMessage,
     getPendingVerifications
 };
