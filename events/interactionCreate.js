@@ -14,16 +14,11 @@
 const raidStateManager = require("../handlers/raidStateManager");
 const robloxApi = require("../handlers/robloxApi");
 const verificationDb = require("../handlers/verificationDb");
+const { formatRobloxProfileValue } = require("../handlers/verificationHelpers");
 const pendingRaidApplications = new Map();
 const pendingRegionSelections = new Map();
 
-const REGION_ROLE_IDS = {
-    NA: '1516664149793439775',
-    SA: '1516664182194307082',
-    ASIA: '1516663854354923620',
-    EU: '1516664062438674462',
-    AUST: '1522551121615523910'
-};
+// Region ping IDs are now configured per-guild via settings.regionPings
 
 // Whitelisted roles updated with Supreme Leader included
 const RAID_CLOSE_ROLES = [
@@ -63,13 +58,24 @@ function normalizeRegion(region) {
     if (value === 'US' || value === 'USA' || value === 'NORTH AMERICA') return 'NA';
     if (value === 'SOUTH AMERICA') return 'SA';
     if (value === 'AUS' || value === 'AUSTRALIA') return 'AUST';
+    if (value === 'MIDDLE' || value === 'MIDDLE EAST' || value === 'MIDDLE_EAST') return 'MIDDLE_EAST';
+    if (value === 'AFRICA') return 'AFRICA';
+    if (value === 'OCEANIA' || value === 'OC' || value === 'OCE') return 'OCEANIA';
     return value;
 }
 
-function getRegionRoleInfo(region) {
+function getRegionRoleInfo(guildId, region) {
     const normalized = normalizeRegion(region);
-    const roleId = REGION_ROLE_IDS[normalized] || null;
-    return roleId ? { roleId, mention: `<@&${roleId}>` } : { roleId: null, mention: null };
+    try {
+        const settings = raidStateManager.loadSettings(guildId) || {};
+        const mapping = settings.regionPings || {};
+        const roleIds = Array.isArray(mapping[normalized]) ? mapping[normalized].filter(Boolean) : [];
+        const mention = roleIds.length ? roleIds.map(id => `<@&${id}>`).join(' ') : null;
+        const allowedMentions = roleIds.length ? { roles: roleIds } : undefined;
+        return { roleIds, mention, roleId: roleIds.length === 1 ? roleIds[0] : null, allowedMentions };
+    } catch (err) {
+        return { roleIds: [], mention: null, roleId: null, allowedMentions: undefined };
+    }
 }
 
 function createRaidButtons(raid, member = null) {
@@ -111,6 +117,31 @@ function createVerificationActionButtons(userId) {
         .setStyle(ButtonStyle.Danger);
 
     return new ActionRowBuilder().addComponents(acceptBtn, denyBtn);
+}
+
+async function updateVerificationMessage(channel, targetUserId, embed, components = []) {
+    if (!channel || !channel.isTextBased()) return null;
+
+    try {
+        const messages = await channel.messages.fetch({ limit: 100 });
+        const targetMessage = messages.find(msg => {
+            if (!msg.embeds?.length) return false;
+            const embedData = msg.embeds[0].data;
+            const hasTargetUser = embedData.description?.includes(`<@${targetUserId}>`) || embedData.description?.includes(targetUserId);
+            const hasPendingStatus = embedData.title?.includes('PENDING') || embedData.title?.includes('ACCEPTED') || embedData.title?.includes('REJECTED');
+            return hasTargetUser && hasPendingStatus;
+        });
+
+        if (!targetMessage) {
+            return null;
+        }
+
+        await targetMessage.edit({ embeds: [embed], components });
+        return targetMessage;
+    } catch (error) {
+        console.warn(`Could not update verification message in channel ${channel.id}: ${error.message}`);
+        return null;
+    }
 }
 
 module.exports = {
@@ -239,10 +270,15 @@ module.exports = {
                 const robloxUsernameVal = verificationData?.roblox_username || 'Unknown';
                 const robloxUserIdVal = verificationData?.roblox_user_id || null;
                 const robloxAvatarUrlVal = verificationData?.roblox_avatar_url || null;
+                const robloxProfileValue = formatRobloxProfileValue({
+                    roblox_display_name: robloxDisplayName,
+                    roblox_username: robloxUsernameVal,
+                    roblox_user_id: robloxUserIdVal
+                });
 
                 const acceptCodeBlock = [
                     `DISCORD USER: ${targetUserTag}`,
-                    `ROBLOX USER: ${robloxDisplayName} (@${robloxUsernameVal})${robloxUserIdVal ? ` [ID: ${robloxUserIdVal}]` : ''}`,
+                    `ROBLOX USER: ${robloxProfileValue}`,
                     `ROBLOX PS LINK: ${verificationData?.roblox_ps_link || 'N/A'}`,
                     `KILL COUNT: ${verificationData?.kill_count || 'N/A'}`,
                     `FRIEND LIST LINK: ${verificationData?.friend_list_link || 'N/A'}`,
@@ -252,7 +288,7 @@ module.exports = {
 
                 const logEmbed = new EmbedBuilder()
                     .setTitle('✅ VERIFICATION ACCEPTED')
-                    .setDescription(`\`\`\`text\n${acceptCodeBlock}\n\`\`\``)
+                    .setDescription(acceptCodeBlock)
                     .setColor(0x00FF00)
                     .setFooter({ text: `Accepted by ${interaction.user.tag} • ${new Date().toLocaleString()}` })
                     .setTimestamp();
@@ -289,7 +325,7 @@ module.exports = {
 
                             const resultEmbed = new EmbedBuilder()
                                 .setTitle('✅ VERIFICATION ACCEPTED')
-                                .setDescription(`\`\`\`text\n${resultCodeBlock}\n\`\`\``)
+                                .setDescription(resultCodeBlock)
                                 .setColor(0x00FF00)
                                 .setFooter({ text: `Kakuzu Verification System • ${new Date().toLocaleString()}` })
                                 .setTimestamp();
@@ -600,11 +636,11 @@ module.exports = {
                     if (settings.resultChannel) {
                         const targetResultChannel = await interaction.client.channels.fetch(settings.resultChannel).catch(() => null);
                         if (targetResultChannel && targetResultChannel.isTextBased()) {
-                            const regionRoleInfo = getRegionRoleInfo(activeRaid.region);
+                            const regionRoleInfo = getRegionRoleInfo(interaction.guild.id, activeRaid.region);
                             await targetResultChannel.send({
                                 content: regionRoleInfo.mention || undefined,
                                 embeds: [buildReportCardEmbed(attachments)],
-                                allowedMentions: regionRoleInfo.roleId ? { roles: [regionRoleInfo.roleId] } : undefined
+                                allowedMentions: regionRoleInfo.allowedMentions
                             });
                         }
                     }
@@ -762,10 +798,15 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                 const robloxUsernameVal = verificationData?.roblox_username || 'Unknown';
                 const robloxUserIdVal = verificationData?.roblox_user_id || null;
                 const robloxAvatarUrlVal = verificationData?.roblox_avatar_url || null;
+                const robloxProfileValue = formatRobloxProfileValue({
+                    roblox_display_name: robloxDisplayName,
+                    roblox_username: robloxUsernameVal,
+                    roblox_user_id: robloxUserIdVal
+                });
 
                 const rejectCodeBlock = [
                     `DISCORD USER: ${targetUserTag}`,
-                    `ROBLOX USER: ${robloxDisplayName} (@${robloxUsernameVal})${robloxUserIdVal ? ` [ID: ${robloxUserIdVal}]` : ''}`,
+                    `ROBLOX USER: ${robloxProfileValue}`,
                     `ROBLOX PS LINK: ${verificationData?.roblox_ps_link || 'N/A'}`,
                     `KILL COUNT: ${verificationData?.kill_count || 'N/A'}`,
                     `FRIEND LIST LINK: ${verificationData?.friend_list_link || 'N/A'}`,
@@ -776,7 +817,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
 
                 const updatedEmbed = new EmbedBuilder()
                     .setTitle('❌ VERIFICATION REJECTED')
-                    .setDescription(`\`\`\`text\n${rejectCodeBlock}\n\`\`\``)
+                    .setDescription(rejectCodeBlock)
                     .setColor(0xFF0000)
                     .setFooter({ text: `Rejected by ${interaction.user.tag} • ${new Date().toLocaleString()}` })
                     .setTimestamp();
@@ -799,21 +840,11 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                     flags: 64
                 });
 
-                // Try to update the original embed in the logs channel
                 try {
                     const settings = raidStateManager.loadSettings(interaction.guild.id);
                     if (settings.infoChannel) {
                         const channel = await interaction.client.channels.fetch(settings.infoChannel).catch(() => null);
-                        if (channel && channel.isTextBased()) {
-                            const messages = await channel.messages.fetch({ limit: 50 });
-                            const targetMsg = messages.find(msg => 
-                                msg.embeds.length > 0 && 
-                                msg.embeds[0].data.fields?.some(f => f.value?.includes(`<@${targetUserId}>`))
-                            );
-                            if (targetMsg) {
-                                await targetMsg.edit({ embeds: [updatedEmbed], components: [] });
-                            }
-                        }
+                        await updateVerificationMessage(channel, targetUserId, updatedEmbed, []);
                     }
                 } catch (error) {
                     console.warn(`Could not update original verification message: ${error.message}`);
@@ -835,7 +866,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
 
                             const resultEmbed = new EmbedBuilder()
                                 .setTitle('❌ VERIFICATION REJECTED')
-                                .setDescription(`\`\`\`text\n${resultCodeBlock}\n\`\`\``)
+                                .setDescription(resultCodeBlock)
                                 .setColor(0xFF0000)
                                 .setFooter({ text: `Kakuzu Verification System • ${new Date().toLocaleString()}` })
                                 .setTimestamp();
@@ -926,9 +957,15 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                     // Build the code block text like the raid request embed
                     const robloxDisplayName = robloxValidation.success ? robloxValidation.displayName : (robloxUsername || 'N/A');
                     const robloxUserId = robloxValidation.success ? robloxValidation.userId : null;
+                    const robloxProfileValue = formatRobloxProfileValue({
+                        roblox_display_name: robloxDisplayName,
+                        roblox_username: robloxUsername,
+                        roblox_user_id: robloxUserId
+                    });
+
                     const codeBlockText = [
                         `DISCORD USER: ${interaction.user.tag}`,
-                        `ROBLOX USER: ${robloxDisplayName}${robloxUsername ? ` (@${robloxUsername})` : ''}${robloxUserId ? ` [ID: ${robloxUserId}]` : ''}`,
+                        `ROBLOX USER: ${robloxProfileValue}`,
                         `ROBLOX PS LINK: ${robloxPsLink || 'N/A'}`,
                         `KILL COUNT: ${killCount || 'N/A'}`,
                         `FRIEND LIST LINK: ${friendListLink}`,
@@ -942,7 +979,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                         if (targetChannel && targetChannel.isTextBased()) {
                             const profileEmbed = new EmbedBuilder()
                                 .setTitle('🆕 NEW PENDING VERIFICATION')
-                                .setDescription(`\`\`\`text\n${codeBlockText}\n\`\`\``)
+                                .setDescription(codeBlockText)
                                 .setFooter({ text: `Kakuzu Verification System • ${new Date().toLocaleString()}` })
                                 .setColor(0xFFA500); // Orange for pending
 
@@ -1116,7 +1153,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                 const settings = raidStateManager.loadSettings(interaction.guild.id);
                 const content = raidStateManager.formatRaidMessage(raid);
                 const raidButtonRow = createRaidButtons(raid, interaction.member);
-                const regionRoleInfo = getRegionRoleInfo(raid.region);
+                const regionRoleInfo = getRegionRoleInfo(interaction.guild.id, raid.region);
 
                 // Require an explicitly configured raid channel. Do NOT fallback to the command channel.
                 if (!settings.raidChannel) {
@@ -1146,7 +1183,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                     content: regionRoleInfo.mention || undefined,
                     embeds: [content],
                     components: [raidButtonRow],
-                    allowedMentions: regionRoleInfo.roleId ? { roles: [regionRoleInfo.roleId] } : undefined
+                    allowedMentions: regionRoleInfo.allowedMentions
                 });
                 raidStateManager.updateRaidMessageReference(raid.raidId, targetChannel.id, message.id, interaction.guild.id);
             }

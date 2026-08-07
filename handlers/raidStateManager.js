@@ -15,7 +15,9 @@ const defaultSettings = {
     resultChannel: null,
     infoChannel: null,
     lockedPingRoleId: null,
-    verificationResultChannel: null
+    verificationResultChannel: null,
+    // regionPings: mapping of normalized region -> array of role IDs (strings)
+    regionPings: {}
 };
 
 const defaultRaids = {
