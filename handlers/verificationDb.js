@@ -52,9 +52,23 @@ async function ensureDb(guildId) {
             status TEXT DEFAULT 'pending',
             rejection_reason TEXT,
             reviewed_by TEXT,
-            reviewed_at INTEGER
+            reviewed_at INTEGER,
+            log_channel_id TEXT,
+            log_message_id TEXT
         );
     `);
+
+    try {
+        db.run(`ALTER TABLE verifications ADD COLUMN log_channel_id TEXT`);
+    } catch (error) {
+        // Ignore if the column already exists
+    }
+
+    try {
+        db.run(`ALTER TABLE verifications ADD COLUMN log_message_id TEXT`);
+    } catch (error) {
+        // Ignore if the column already exists
+    }
     saveDb(guildId, db);
     dbCache.set(guildId, db);
     return db;
@@ -151,6 +165,20 @@ async function rejectVerification(userId, reviewerId, reason, guildId) {
         WHERE userId = ?
     `);
     stmt.run([reviewerId, Date.now(), reason, userId]);
+    stmt.free();
+    saveDb(guildId, db);
+    return true;
+}
+
+async function setVerificationLogMessage(userId, channelId, messageId, guildId) {
+    const db = await getDb(guildId);
+    const stmt = db.prepare(`
+        UPDATE verifications SET
+            log_channel_id = ?,
+            log_message_id = ?
+        WHERE userId = ?
+    `);
+    stmt.run([channelId, messageId, userId]);
     stmt.free();
     saveDb(guildId, db);
     return true;

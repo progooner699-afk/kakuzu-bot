@@ -144,6 +144,30 @@ async function updateVerificationMessage(channel, targetUserId, embed, component
     }
 }
 
+async function editStoredVerificationMessage(client, verificationData, embed, components = []) {
+    if (!verificationData?.log_channel_id || !verificationData?.log_message_id) {
+        return null;
+    }
+
+    try {
+        const channel = await client.channels.fetch(verificationData.log_channel_id).catch(() => null);
+        if (!channel || !channel.isTextBased()) {
+            return null;
+        }
+
+        const message = await channel.messages.fetch(verificationData.log_message_id).catch(() => null);
+        if (!message) {
+            return updateVerificationMessage(channel, verificationData.userId, embed, components);
+        }
+
+        await message.edit({ embeds: [embed], components });
+        return message;
+    } catch (error) {
+        console.warn(`Could not edit stored verification message: ${error.message}`);
+        return null;
+    }
+}
+
 module.exports = {
     name: "interactionCreate",
     async execute(interaction) {
@@ -843,8 +867,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                 try {
                     const settings = raidStateManager.loadSettings(interaction.guild.id);
                     if (settings.infoChannel) {
-                        const channel = await interaction.client.channels.fetch(settings.infoChannel).catch(() => null);
-                        await updateVerificationMessage(channel, targetUserId, updatedEmbed, []);
+                        await editStoredVerificationMessage(interaction.client, verificationData, updatedEmbed, []);
                     }
                 } catch (error) {
                     console.warn(`Could not update original verification message: ${error.message}`);
@@ -996,7 +1019,10 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                             }
 
                             const actionRow = createVerificationActionButtons(interaction.user.id);
-                            await targetChannel.send({ embeds: [profileEmbed], components: [actionRow] }).catch(() => null);
+                            const pendingMessage = await targetChannel.send({ embeds: [profileEmbed], components: [actionRow] }).catch(() => null);
+                            if (pendingMessage) {
+                                await verificationDb.setVerificationLogMessage(interaction.user.id, targetChannel.id, pendingMessage.id, interaction.guild.id);
+                            }
                         }
                     }
 
