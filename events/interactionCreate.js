@@ -476,19 +476,19 @@ module.exports = {
 
                 // DM the user with the full accepted embed (never crash if DMs are disabled)
                 const dmEmbed = buildVerificationEmbed({
-                    title: '✅ Verification Accepted',
-                    description: 'Your player verification has been approved.',
+                    title: '🎉✅ PLAYER VERIFIED ✅🎉',
+                    description: '> 🎊 **CONGRATULATIONS!** 🎊\nYour player verification has been **approved**.\nWelcome to the clan — we\'re thrilled to have you aboard! 🥳\n\n💬 If you have any issues or questions, feel free to talk to the server administrators.',
                     color: 0x2ECC71,
-                    footerText: `Kakuzu Verification System • ${reviewedAt}`,
-                    thumbnailUrl: interaction.client.user.displayAvatarURL({ size: 256 }),
+                    footerText: `🔐 Kakuzu Verification System • ✅ ${reviewedAt}`,
+                    thumbnailUrl: values.robloxAvatarUrl || interaction.client.user.displayAvatarURL({ size: 256 }),
                     fields: [
-                        { name: '**Roblox Username**', value: getVerificationFieldValue(values.robloxUsername), inline: true },
-                        { name: '**Kill Count**', value: getVerificationFieldValue(values.killCount), inline: true },
-                        { name: '**PS Link**', value: getVerificationFieldValue(values.psLink), inline: true },
-                        { name: '**Verification ID**', value: getVerificationFieldValue(values.verificationId), inline: true },
-                        { name: '**Approved By**', value: `<@${interaction.user.id}>`, inline: true },
-                        { name: '**Date/Time**', value: reviewedAt, inline: true },
-                        { name: '**Status**', value: '✅ ACCEPTED', inline: false }
+                        { name: '🎮 Roblox Profile', value: getVerificationFieldValue(values.robloxProfileValue), inline: true },
+                        { name: '⚔️ Kill Count', value: getVerificationFieldValue(values.killCount), inline: true },
+                        { name: '🔗 PS Link', value: getVerificationFieldValue(values.psLink), inline: true },
+                        { name: '🏷️ Verification ID', value: getVerificationFieldValue(values.verificationId), inline: true },
+                        { name: '🧑‍⚖️ Approved By', value: `<@${interaction.user.id}>`, inline: true },
+                        { name: '🕒 Date/Time', value: reviewedAt, inline: true },
+                        { name: '📋 Status', value: '✅ **ACCEPTED**', inline: false }
                     ]
                 });
                 const dmResult = await sendVerificationDM(interaction.client, targetUserId, dmEmbed);
@@ -960,20 +960,20 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
 
                 // DM the user with the full rejected embed (never crash if DMs are disabled)
                 const dmEmbed = buildVerificationEmbed({
-                    title: '❌ Verification Rejected',
-                    description: 'Your player verification request has been rejected.',
+                    title: '❌ PLAYER VERIFICATION REJECTED',
+                    description: '> 😔 Unfortunately, your player verification request has been **rejected**.\nPlease review the reason below — you are welcome to try again later. 💪\n\n💬 If you believe this is a mistake or have any issues, feel free to talk to the server administrators.',
                     color: 0xE74C3C,
-                    footerText: `Kakuzu Verification System • ${reviewedAt}`,
-                    thumbnailUrl: interaction.client.user.displayAvatarURL({ size: 256 }),
+                    footerText: `🔐 Kakuzu Verification System • ❌ ${reviewedAt}`,
+                    thumbnailUrl: values.robloxAvatarUrl || interaction.client.user.displayAvatarURL({ size: 256 }),
                     fields: [
-                        { name: '**Roblox Username**', value: getVerificationFieldValue(values.robloxUsername), inline: true },
-                        { name: '**Kill Count**', value: getVerificationFieldValue(values.killCount), inline: true },
-                        { name: '**PS Link**', value: getVerificationFieldValue(values.psLink), inline: true },
-                        { name: '**Verification ID**', value: getVerificationFieldValue(values.verificationId), inline: true },
-                        { name: '**Rejected By**', value: `<@${interaction.user.id}>`, inline: true },
-                        { name: '**Date/Time**', value: reviewedAt, inline: true },
-                        { name: '**Reason**', value: getVerificationFieldValue(reason), inline: false },
-                        { name: '**Status**', value: '❌ REJECTED', inline: false }
+                        { name: '🎮 Roblox Profile', value: getVerificationFieldValue(values.robloxProfileValue), inline: true },
+                        { name: '⚔️ Kill Count', value: getVerificationFieldValue(values.killCount), inline: true },
+                        { name: '🔗 PS Link', value: getVerificationFieldValue(values.psLink), inline: true },
+                        { name: '🏷️ Verification ID', value: getVerificationFieldValue(values.verificationId), inline: true },
+                        { name: '🧑‍⚖️ Rejected By', value: `<@${interaction.user.id}>`, inline: true },
+                        { name: '🕒 Date/Time', value: reviewedAt, inline: true },
+                        { name: '📝 Reason', value: getVerificationFieldValue(reason), inline: false },
+                        { name: '📋 Status', value: '❌ **REJECTED**', inline: false }
                     ]
                 });
                 const dmResult = await sendVerificationDM(interaction.client, targetUserId, dmEmbed);
