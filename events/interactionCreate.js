@@ -29,14 +29,33 @@ const RAID_CLOSE_ROLES = [
     '💣 ‖ SUPREME LEADER'
 ];
 
-// Roles that can accept/deny verifications
-const VERIFICATION_MOD_ROLES = [
-    'Administrator',
-    'Management Supervisor',
-    'Community Manager',
-    'Senior Moderator',
-    '💣 ‖ SUPREME LEADER'
-];
+// Roles that can accept/deny verifications are NO LONGER hardcoded by name.
+// They are configured per-guild via /verificationadminrole and stored as role
+// IDs in the persistent per-guild settings.json so they survive restarts and
+// are never affected by role name changes.
+
+function getVerificationAdminRoleIds(guildId) {
+    try {
+        const settings = raidStateManager.loadSettings(guildId) || {};
+        const roles = Array.isArray(settings.verificationAdminRoles) ? settings.verificationAdminRoles : [];
+        // Deduplicate and drop the @everyone role id (which equals the guild id).
+        return [...new Set(roles)].filter(id => typeof id === 'string' && id.length && id !== guildId);
+    } catch (err) {
+        return [];
+    }
+}
+
+// Builds a deduplicated staff ping from the configured verification-admin role
+// IDs. Never pings @everyone/@here.
+function getVerificationStaffPing(guildId) {
+    const roleIds = getVerificationAdminRoleIds(guildId);
+    const unique = [...new Set(roleIds)];
+    return {
+        roleIds: unique,
+        mention: unique.length ? unique.map(id => `<@&${id}>`).join(' ') : null,
+        allowedMentions: unique.length ? { roles: unique } : undefined
+    };
+}
 
 function canCloseRaid(member, raid) {
     if (!member || !raid) return false;
@@ -48,7 +67,10 @@ function canCloseRaid(member, raid) {
 function canModerateVerification(member) {
     if (!member) return false;
     if (member.permissions.has(PermissionsBitField.Flags.Administrator)) return true;
-    return member.roles.cache.some(role => VERIFICATION_MOD_ROLES.includes(role.name));
+    const guildId = member.guild && member.guild.id;
+    if (!guildId) return false;
+    const roleIds = getVerificationAdminRoleIds(guildId);
+    return roleIds.some(id => member.roles.cache.has(id));
 }
 
 function normalizeRegion(region) {
@@ -154,6 +176,8 @@ async function getVerificationTargetChannel(client, configuredChannelId, fallbac
         if (configuredChannel && configuredChannel.isTextBased()) {
             return configuredChannel;
         }
+        console.warn(`Configured verification log channel ${configuredChannelId} is unavailable or not text-based.`);
+        return null;
     }
 
     if (fallbackChannel && fallbackChannel.isTextBased()) {
@@ -209,6 +233,100 @@ async function editStoredVerificationMessage(client, verificationData, embed, co
     } catch (error) {
         console.warn(`Could not edit stored verification message: ${error.message}`);
         return null;
+    }
+}
+
+// ===== Verification decision helpers =====
+
+function formatVerificationDate(value) {
+    if (!value) return new Date().toLocaleString();
+    const d = new Date(Number(value));
+    return Number.isNaN(d.getTime()) ? new Date().toLocaleString() : d.toLocaleString();
+}
+
+function getVerificationValues(verificationData, targetUserTag) {
+    const psLink = verificationData?.roblox_ps_link || '';
+    const friendList = verificationData?.friend_list_link || '';
+    return {
+        targetUserTag,
+        robloxUsername: verificationData?.roblox_username || verificationData?.roblox_display_name || 'Unknown',
+        killCount: verificationData?.kill_count || 'N/A',
+        psLink: /^https?:\/\/.+/i.test(psLink) ? `[View PS](${psLink})` : (psLink || 'Not provided'),
+        friendList: /^https?:\/\/.+/i.test(friendList) ? `[View Screenshot](${friendList})` : 'Not provided',
+        verificationId: verificationData?.verification_id || 'Unknown'
+    };
+}
+
+function buildAcceptedEmbed({ values, reviewerTag, reviewedAt, guild }) {
+    return buildVerificationEmbed({
+        title: '✅ PLAYER VERIFIED',
+        description: '> Verification request has been approved.',
+        color: 0x2ECC71,
+        footerText: `Kakuzu Verification System • ${reviewedAt}`,
+        thumbnailUrl: guild.iconURL({ size: 256 }),
+        fields: [
+            { name: '**Player**', value: values.targetUserTag, inline: false },
+            { name: '**Roblox Username**', value: getVerificationFieldValue(values.robloxUsername), inline: true },
+            { name: '**Kill Count**', value: getVerificationFieldValue(values.killCount), inline: true },
+            { name: '**PS Link**', value: getVerificationFieldValue(values.psLink), inline: true },
+            { name: '**Friend List**', value: getVerificationFieldValue(values.friendList), inline: true },
+            { name: '**Status**', value: '✅ ACCEPTED', inline: false },
+            { name: '**Verified By**', value: reviewerTag, inline: true },
+            { name: '**Verification ID**', value: getVerificationFieldValue(values.verificationId), inline: true },
+            { name: '**Verified At**', value: reviewedAt, inline: false }
+        ]
+    });
+}
+
+function buildRejectedEmbed({ values, reviewerTag, reviewedAt, guild, reason }) {
+    return buildVerificationEmbed({
+        title: '❌ PLAYER VERIFICATION REJECTED',
+        description: '> Your verification request was rejected by the verification staff.',
+        color: 0xE74C3C,
+        footerText: `Kakuzu Verification System • ${reviewedAt}`,
+        thumbnailUrl: guild.iconURL({ size: 256 }),
+        fields: [
+            { name: '**Player**', value: values.targetUserTag, inline: false },
+            { name: '**Roblox Username**', value: getVerificationFieldValue(values.robloxUsername), inline: true },
+            { name: '**Kill Count**', value: getVerificationFieldValue(values.killCount), inline: true },
+            { name: '**PS Link**', value: getVerificationFieldValue(values.psLink), inline: true },
+            { name: '**Friend List**', value: getVerificationFieldValue(values.friendList), inline: true },
+            { name: '**Reason**', value: getVerificationFieldValue(reason), inline: false },
+            { name: '**Status**', value: '❌ REJECTED', inline: false },
+            { name: '**Rejected By**', value: reviewerTag, inline: true },
+            { name: '**Verification ID**', value: getVerificationFieldValue(values.verificationId), inline: true },
+            { name: '**Rejected At**', value: reviewedAt, inline: false }
+        ]
+    });
+}
+
+async function sendVerificationResult(client, guildId, targetUserId, embed) {
+    const settings = raidStateManager.loadSettings(guildId);
+    if (!settings.verificationResultChannel) {
+        console.warn(`No verification result channel configured for guild ${guildId}.`);
+        return false;
+    }
+    const channel = await client.channels.fetch(settings.verificationResultChannel).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+        console.warn(`Verification result channel ${settings.verificationResultChannel} unavailable for guild ${guildId}.`);
+        return false;
+    }
+    await channel.send({ content: `<@${targetUserId}>`, embeds: [embed] }).catch(err => {
+        console.warn(`Could not send verification result to result channel: ${err.message}`);
+    });
+    return true;
+}
+
+async function sendVerificationDM(client, targetUserId, embed) {
+    try {
+        const targetUser = await client.users.fetch(targetUserId).catch(() => null);
+        if (!targetUser) return { delivered: false, reason: 'User not found' };
+        await targetUser.send({ embeds: [embed] }).catch(() => {
+            throw new Error('DM blocked or disabled');
+        });
+        return { delivered: true };
+    } catch (error) {
+        return { delivered: false, reason: error.message };
     }
 }
 
@@ -290,11 +408,20 @@ module.exports = {
                 const targetUserId = customId.replace("verify_accept_", "");
                 const guild = interaction.guild;
 
-                // Update DB
-                await verificationDb.acceptVerification(targetUserId, interaction.user.id, interaction.guild.id);
+                const guildId = interaction.guild.id;
+
+                // Prevent double processing (DB-level guard ensures only a
+                // PENDING request can be accepted).
+                const result = await verificationDb.acceptVerification(targetUserId, interaction.user.id, guildId);
+                if (!result.success) {
+                    return interaction.reply({
+                        content: `❌ ${result.message}`,
+                        flags: 64
+                    });
+                }
 
                 // Remove locked ping role from the user
-                const settings = raidStateManager.loadSettings(interaction.guild.id);
+                const settings = raidStateManager.loadSettings(guildId);
                 if (settings.lockedPingRoleId) {
                     try {
                         const member = await guild.members.fetch(targetUserId).catch(() => null);
@@ -309,90 +436,55 @@ module.exports = {
                     }
                 }
 
-                // Send DM to the user
-                try {
-                    const targetUser = await interaction.client.users.fetch(targetUserId).catch(() => null);
-                    if (targetUser) {
-                        const acceptDM = new EmbedBuilder()
-                            .setTitle('✅ Verification Accepted')
-                            .setDescription('Congratulations! Your verification has been **accepted** by a moderator.')
-                            .addFields([
-                                { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
-                                { name: 'Status', value: '✅ **ACCEPTED**', inline: true }
-                            ])
-                            .setColor(0x00FF00)
-                            .setFooter({ text: 'Kakuzu Verification System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
-                            .setTimestamp();
-
-                        await targetUser.send({ embeds: [acceptDM] }).catch(() => null);
-                    }
-                } catch (error) {
-                    console.warn(`Could not DM acceptance to ${targetUserId}: ${error.message}`);
-                }
-
-                // Update the embed in the logs channel to show accepted (no buttons)
-                const verificationData = await verificationDb.getVerificationData(targetUserId, interaction.guild.id);
-                const targetUserInfo = await interaction.client.users.fetch(targetUserId).catch(() => null);
-                const targetUserTag = targetUserInfo?.tag || `<@${targetUserId}>`;
-                const robloxDisplayName = verificationData?.roblox_display_name || verificationData?.roblox_username || 'Unknown';
-                const robloxUsernameVal = verificationData?.roblox_username || 'Unknown';
-                const robloxUserIdVal = verificationData?.roblox_user_id || null;
-                const robloxAvatarUrlVal = verificationData?.roblox_avatar_url || null;
-                const robloxProfileValue = formatRobloxProfileValue({
-                    roblox_display_name: robloxDisplayName,
-                    roblox_username: robloxUsernameVal,
-                    roblox_user_id: robloxUserIdVal
-                });
+                // Update the verification log embed (this button lives on the log message
+                // in the verification logs channel). Buttons are removed/disabled.
+                const verificationData = await verificationDb.getVerificationData(targetUserId, guildId);
+                const reviewedAt = formatVerificationDate(verificationData?.reviewed_at || Date.now());
+                const values = getVerificationValues(verificationData, `<@${targetUserId}>`);
 
                 const logEmbed = buildVerificationEmbed({
                     title: '✅ VERIFICATION ACCEPTED',
-                    description: 'A moderator completed the review for this verification request.',
-                    color: 0x5865F2,
-                    footerText: `Accepted by ${interaction.user.tag} • ${new Date().toLocaleString()}`,
-                    thumbnailUrl: robloxAvatarUrlVal || guild.iconURL({ size: 256 }),
-                    imageUrl: verificationData?.friend_list_link && verificationData.friend_list_link.match(/^https?:\/\/.+/i) ? verificationData.friend_list_link : null,
+                    description: 'A moderator approved this verification request.',
+                    color: 0x2ECC71,
+                    footerText: `Accepted by ${interaction.user.tag} • ${reviewedAt}`,
+                    thumbnailUrl: verificationData?.roblox_avatar_url || guild.iconURL({ size: 256 }),
                     fields: [
-                        { name: '👤 Applicant', value: getVerificationFieldValue(targetUserTag), inline: true },
-                        { name: '🧾 Roblox Profile', value: getVerificationFieldValue(robloxProfileValue), inline: true },
-                        { name: '🛡️ Status', value: '✅ Accepted', inline: true },
-                        { name: '🔗 PS Link', value: getVerificationFieldValue(verificationData?.roblox_ps_link || 'N/A'), inline: true },
-                        { name: '⚔️ Kill Count', value: getVerificationFieldValue(verificationData?.kill_count || 'N/A'), inline: true },
-                        { name: '📸 Friend List', value: getVerificationFieldValue(verificationData?.friend_list_link || 'N/A'), inline: true },
-                        { name: '🧑‍⚖️ Reviewed By', value: getVerificationFieldValue(interaction.user.tag), inline: false }
+                        { name: '👤 Applicant', value: values.targetUserTag, inline: true },
+                        { name: '🛡️ Status', value: '✅ ACCEPTED', inline: true },
+                        { name: '🧾 Verified By', value: `<@${interaction.user.id}>`, inline: true },
+                        { name: '🆔 Verification ID', value: getVerificationFieldValue(values.verificationId), inline: true }
                     ]
                 });
 
                 await interaction.update({
                     embeds: [logEmbed],
-                    components: [] // Remove buttons
+                    components: [] // Remove/disable Accept & Reject buttons
+                }).catch(() => editStoredVerificationMessage(interaction.client, verificationData, logEmbed, []));
+
+                // Send final result to the verification result channel (mention the user above the embed)
+                const finalEmbed = buildAcceptedEmbed({ values, reviewerTag: `<@${interaction.user.id}>`, reviewedAt, guild });
+                await sendVerificationResult(interaction.client, guildId, targetUserId, finalEmbed).catch(() => null);
+
+                // DM the user with the full accepted embed (never crash if DMs are disabled)
+                const dmEmbed = buildVerificationEmbed({
+                    title: '✅ Verification Accepted',
+                    description: 'Your player verification has been approved.',
+                    color: 0x2ECC71,
+                    footerText: `Kakuzu Verification System • ${reviewedAt}`,
+                    thumbnailUrl: interaction.client.user.displayAvatarURL({ size: 256 }),
+                    fields: [
+                        { name: '**Roblox Username**', value: getVerificationFieldValue(values.robloxUsername), inline: true },
+                        { name: '**Kill Count**', value: getVerificationFieldValue(values.killCount), inline: true },
+                        { name: '**PS Link**', value: getVerificationFieldValue(values.psLink), inline: true },
+                        { name: '**Verification ID**', value: getVerificationFieldValue(values.verificationId), inline: true },
+                        { name: '**Approved By**', value: `<@${interaction.user.id}>`, inline: true },
+                        { name: '**Date/Time**', value: reviewedAt, inline: true },
+                        { name: '**Status**', value: '✅ ACCEPTED', inline: false }
+                    ]
                 });
-
-                // Also send a final result embed to the verificationResultChannel
-                try {
-                    const resultSettings = raidStateManager.loadSettings(interaction.guild.id);
-                    if (resultSettings.verificationResultChannel) {
-                        const resultChannel = await interaction.client.channels.fetch(resultSettings.verificationResultChannel).catch(() => null);
-                        if (resultChannel && resultChannel.isTextBased()) {
-                            const resultEmbed = buildVerificationEmbed({
-                                title: '✅ VERIFICATION ACCEPTED',
-                                description: 'The applicant has been approved and cleared by a moderator.',
-                                color: 0x2ECC71,
-                                footerText: `Kakuzu Verification System • ${new Date().toLocaleString()}`,
-                                thumbnailUrl: robloxAvatarUrlVal || guild.iconURL({ size: 256 }),
-                                fields: [
-                                    { name: '👤 Applicant', value: getVerificationFieldValue(targetUserTag), inline: true },
-                                    { name: '🧾 Roblox Profile', value: getVerificationFieldValue(robloxProfileValue), inline: true },
-                                    { name: '🛡️ Status', value: '✅ Accepted', inline: true },
-                                    { name: '🧑‍⚖️ Reviewed By', value: getVerificationFieldValue(interaction.user.tag), inline: true },
-                                    { name: '📅 Submitted', value: getVerificationFieldValue(new Date().toLocaleString()), inline: true }
-                                ]
-                            });
-
-                            await resultChannel.send({ embeds: [resultEmbed] });
-                        }
-                    }
-                } catch (error) {
-                    console.warn(`Could not send verification result to result channel: ${error.message}`);
+                const dmResult = await sendVerificationDM(interaction.client, targetUserId, dmEmbed);
+                if (!dmResult.delivered) {
+                    console.warn(`DM acceptance to ${targetUserId} could not be delivered (${dmResult.reason}). Result was still posted to the result channel.`);
                 }
 
                 return;
@@ -439,21 +531,21 @@ module.exports = {
                             .setCustomId("verify_roblox_username")
                             .setLabel("Roblox Username")
                             .setStyle(TextInputStyle.Short)
-                            .setRequired(false)
+                            .setRequired(true)
                     ),
                     new ActionRowBuilder().addComponents(
                         new TextInputBuilder()
                             .setCustomId("verify_roblox_ps_link")
                             .setLabel("Roblox Private Server (PS) Link")
                             .setStyle(TextInputStyle.Short)
-                            .setRequired(false)
+                            .setRequired(true)
                     ),
                     new ActionRowBuilder().addComponents(
                         new TextInputBuilder()
                             .setCustomId("verify_kill_count")
                             .setLabel("Kill Counts")
                             .setStyle(TextInputStyle.Short)
-                            .setRequired(false)
+                            .setRequired(true)
                     ),
                     new ActionRowBuilder().addComponents(
                         new TextInputBuilder()
@@ -815,107 +907,69 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                 const targetUserId = interaction.customId.replace("verify_deny_reason_", "");
                 const reason = interaction.fields.getTextInputValue("deny_reason");
                 const guild = interaction.guild;
+                const guildId = interaction.guild.id;
 
-                // Update DB with rejection
-                await verificationDb.rejectVerification(targetUserId, interaction.user.id, reason, interaction.guild.id);
-
-                // Send DM to the user with rejection reason
-                try {
-                    const targetUser = await interaction.client.users.fetch(targetUserId).catch(() => null);
-                    if (targetUser) {
-                        const rejectDM = new EmbedBuilder()
-                            .setTitle('❌ Verification Rejected')
-                            .setDescription('Your verification has been **rejected** by a moderator.')
-                            .addFields([
-                                { name: 'Moderator', value: `<@${interaction.user.id}>`, inline: true },
-                                { name: 'Status', value: '❌ **REJECTED**', inline: true },
-                                { name: 'Reason', value: reason, inline: false }
-                            ])
-                            .setColor(0xFF0000)
-                            .setFooter({ text: 'Kakuzu Verification System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
-                            .setTimestamp();
-
-                        await targetUser.send({ embeds: [rejectDM] }).catch(() => null);
-                    }
-                } catch (error) {
-                    console.warn(`Could not DM rejection to ${targetUserId}: ${error.message}`);
+                // Prevent double processing (DB-level guard ensures only a
+                // PENDING request can be rejected).
+                const result = await verificationDb.rejectVerification(targetUserId, interaction.user.id, reason, guildId);
+                if (!result.success) {
+                    return interaction.reply({
+                        content: `❌ ${result.message}`,
+                        flags: 64
+                    });
                 }
 
-                // Update the embed to show rejected
-                const verificationData = await verificationDb.getVerificationData(targetUserId, interaction.guild.id);
-                const targetUserInfo = await interaction.client.users.fetch(targetUserId).catch(() => null);
-                const targetUserTag = targetUserInfo?.tag || `<@${targetUserId}>`;
-                const robloxDisplayName = verificationData?.roblox_display_name || verificationData?.roblox_username || 'Unknown';
-                const robloxUsernameVal = verificationData?.roblox_username || 'Unknown';
-                const robloxUserIdVal = verificationData?.roblox_user_id || null;
-                const robloxAvatarUrlVal = verificationData?.roblox_avatar_url || null;
-                const robloxProfileValue = formatRobloxProfileValue({
-                    roblox_display_name: robloxDisplayName,
-                    roblox_username: robloxUsernameVal,
-                    roblox_user_id: robloxUserIdVal
-                });
+                const verificationData = await verificationDb.getVerificationData(targetUserId, guildId);
+                const reviewedAt = formatVerificationDate(verificationData?.reviewed_at || Date.now());
+                const values = getVerificationValues(verificationData, `<@${targetUserId}>`);
 
-                const updatedEmbed = buildVerificationEmbed({
-                    title: '❌ VERIFICATION REJECTED',
-                    description: 'The applicant was not approved during this review.',
-                    color: 0xE74C3C,
-                    footerText: `Rejected by ${interaction.user.tag} • ${new Date().toLocaleString()}`,
-                    thumbnailUrl: robloxAvatarUrlVal || guild.iconURL({ size: 256 }),
-                    imageUrl: verificationData?.friend_list_link && verificationData.friend_list_link.match(/^https?:\/\/.+/i) ? verificationData.friend_list_link : null,
-                    fields: [
-                        { name: '👤 Applicant', value: getVerificationFieldValue(targetUserTag), inline: true },
-                        { name: '🧾 Roblox Profile', value: getVerificationFieldValue(robloxProfileValue), inline: true },
-                        { name: '🛡️ Status', value: '❌ Rejected', inline: true },
-                        { name: '🔗 PS Link', value: getVerificationFieldValue(verificationData?.roblox_ps_link || 'N/A'), inline: true },
-                        { name: '⚔️ Kill Count', value: getVerificationFieldValue(verificationData?.kill_count || 'N/A'), inline: true },
-                        { name: '📸 Friend List', value: getVerificationFieldValue(verificationData?.friend_list_link || 'N/A'), inline: true },
-                        { name: '📝 Reason', value: getVerificationFieldValue(reason), inline: false },
-                        { name: '🧑‍⚖️ Reviewed By', value: getVerificationFieldValue(interaction.user.tag), inline: false }
-                    ]
-                });
-
-                // Find and update the original message
                 await interaction.reply({
-                    content: `✅ Verification for <@${targetUserId}> has been **rejected**.\n**Reason:** ${reason}`,
+                    content: `✅ Verification for <@${targetUserId}> has been **rejected**.`,
                     flags: 64
                 });
 
-                try {
-                    const settings = raidStateManager.loadSettings(interaction.guild.id);
-                    if (settings.infoChannel) {
-                        await editStoredVerificationMessage(interaction.client, verificationData, updatedEmbed, []);
-                    }
-                } catch (error) {
-                    console.warn(`Could not update original verification message: ${error.message}`);
-                }
+                // Update the verification log embed in the logs channel (no buttons)
+                const updatedEmbed = buildVerificationEmbed({
+                    title: '❌ VERIFICATION REJECTED',
+                    description: 'A moderator rejected this verification request.',
+                    color: 0xE74C3C,
+                    footerText: `Rejected by ${interaction.user.tag} • ${reviewedAt}`,
+                    thumbnailUrl: verificationData?.roblox_avatar_url || guild.iconURL({ size: 256 }),
+                    fields: [
+                        { name: '👤 Applicant', value: values.targetUserTag, inline: true },
+                        { name: '🛡️ Status', value: '❌ REJECTED', inline: true },
+                        { name: '🧾 Rejected By', value: `<@${interaction.user.id}>`, inline: true },
+                        { name: '🆔 Verification ID', value: getVerificationFieldValue(values.verificationId), inline: true }
+                    ]
+                });
 
-                // Also send a final result embed to the verificationResultChannel
-                try {
-                    const resultSettings = raidStateManager.loadSettings(interaction.guild.id);
-                    if (resultSettings.verificationResultChannel) {
-                        const resultChannel = await interaction.client.channels.fetch(resultSettings.verificationResultChannel).catch(() => null);
-                        if (resultChannel && resultChannel.isTextBased()) {
-                            const resultEmbed = buildVerificationEmbed({
-                                title: '❌ VERIFICATION REJECTED',
-                                description: 'The applicant was not approved during this review.',
-                                color: 0xE74C3C,
-                                footerText: `Kakuzu Verification System • ${new Date().toLocaleString()}`,
-                                thumbnailUrl: robloxAvatarUrlVal || guild.iconURL({ size: 256 }),
-                                fields: [
-                                    { name: '👤 Applicant', value: getVerificationFieldValue(targetUserTag), inline: true },
-                                    { name: '🧾 Roblox Profile', value: getVerificationFieldValue(robloxProfileValue), inline: true },
-                                    { name: '🛡️ Status', value: '❌ Rejected', inline: true },
-                                    { name: '📝 Reason', value: getVerificationFieldValue(reason), inline: false },
-                                    { name: '🧑‍⚖️ Reviewed By', value: getVerificationFieldValue(interaction.user.tag), inline: true },
-                                    { name: '📅 Reviewed', value: getVerificationFieldValue(new Date().toLocaleString()), inline: true }
-                                ]
-                            });
+                await editStoredVerificationMessage(interaction.client, verificationData, updatedEmbed, []).catch(() => null);
 
-                            await resultChannel.send({ embeds: [resultEmbed] });
-                        }
-                    }
-                } catch (error) {
-                    console.warn(`Could not send verification result to result channel: ${error.message}`);
+                // Send final result to the verification result channel (mention the user above the embed)
+                const finalEmbed = buildRejectedEmbed({ values, reviewerTag: `<@${interaction.user.id}>`, reviewedAt, guild, reason });
+                await sendVerificationResult(interaction.client, guildId, targetUserId, finalEmbed).catch(() => null);
+
+                // DM the user with the full rejected embed (never crash if DMs are disabled)
+                const dmEmbed = buildVerificationEmbed({
+                    title: '❌ Verification Rejected',
+                    description: 'Your player verification request has been rejected.',
+                    color: 0xE74C3C,
+                    footerText: `Kakuzu Verification System • ${reviewedAt}`,
+                    thumbnailUrl: interaction.client.user.displayAvatarURL({ size: 256 }),
+                    fields: [
+                        { name: '**Roblox Username**', value: getVerificationFieldValue(values.robloxUsername), inline: true },
+                        { name: '**Kill Count**', value: getVerificationFieldValue(values.killCount), inline: true },
+                        { name: '**PS Link**', value: getVerificationFieldValue(values.psLink), inline: true },
+                        { name: '**Verification ID**', value: getVerificationFieldValue(values.verificationId), inline: true },
+                        { name: '**Rejected By**', value: `<@${interaction.user.id}>`, inline: true },
+                        { name: '**Date/Time**', value: reviewedAt, inline: true },
+                        { name: '**Reason**', value: getVerificationFieldValue(reason), inline: false },
+                        { name: '**Status**', value: '❌ REJECTED', inline: false }
+                    ]
+                });
+                const dmResult = await sendVerificationDM(interaction.client, targetUserId, dmEmbed);
+                if (!dmResult.delivered) {
+                    console.warn(`DM rejection to ${targetUserId} could not be delivered (${dmResult.reason}). Result was still posted to the result channel.`);
                 }
 
                 return;
@@ -957,7 +1011,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                 await interaction.deferReply({ flags: 64 }).catch(() => null);
 
                 try {
-                    // Safely get optional field values (won't throw if left blank)
+                    // Safely get field values (won't throw if left blank)
                     const getFieldValue = (customId) => {
                         try {
                             return interaction.fields.getTextInputValue(customId) || '';
@@ -966,28 +1020,50 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                         }
                     };
 
-                    const robloxUsername = getFieldValue("verify_roblox_username");
-                    const robloxPsLink = getFieldValue("verify_roblox_ps_link");
-                    const killCount = getFieldValue("verify_kill_count");
-                    const friendListLink = getFieldValue("verify_friend_list_link") || 'N/A';
+                    const robloxUsername = getFieldValue("verify_roblox_username").trim();
+                    const robloxPsLink = getFieldValue("verify_roblox_ps_link").trim();
+                    const killCount = getFieldValue("verify_kill_count").trim();
+                    let friendListLink = getFieldValue("verify_friend_list_link").trim();
 
-                    // Validate the Roblox username and get user data (only if provided)
+                    // ----- Required field validation -----
+                    if (!robloxUsername) {
+                        return interaction.followUp({ content: '❌ **Roblox username is required.** Please fill in your Roblox username before submitting.', flags: 64 }).catch(() => null);
+                    }
+                    if (!robloxPsLink) {
+                        return interaction.followUp({ content: '❌ **PS link is required.** Please provide your Roblox Private Server link.', flags: 64 }).catch(() => null);
+                    }
+                    if (!/^https?:\/\/.+/i.test(robloxPsLink)) {
+                        return interaction.followUp({ content: '❌ **Invalid PS link.** Please provide a valid URL starting with http:// or https://.', flags: 64 }).catch(() => null);
+                    }
+                    const killCountNum = Number(killCount);
+                    if (!killCount || Number.isNaN(killCountNum) || killCountNum < 0) {
+                        return interaction.followUp({ content: '❌ **Invalid kill count.** Please enter a valid number (e.g. 123).', flags: 64 }).catch(() => null);
+                    }
+                    if (friendListLink && !/^https?:\/\/.+/i.test(friendListLink)) {
+                        return interaction.followUp({ content: '❌ **Invalid friend-list link.** If provided, it must be a valid image URL (https://...).', flags: 64 }).catch(() => null);
+                    }
+
+                    // Validate the Roblox username (non-blocking; do not over-restrict)
                     const robloxValidation = robloxUsername
-                        ? await robloxApi.validateAndGetAvatar(robloxUsername)
+                        ? await robloxApi.validateAndGetAvatar(robloxUsername).catch(() => ({ success: false, error: 'Unable to reach Roblox API' }))
                         : { success: false, error: 'No username provided' };
 
-                    // Save verification data as pending (including roblox profile data)
+                    const guildId = interaction.guild.id;
+                    const verificationId = raidStateManager.getNextVerificationId(guildId);
+
+                    // Save verification data as pending (persisted per guild)
                     await verificationDb.markVerified(interaction.user.id, {
-                        robloxUsername: robloxUsername || null,
-                        robloxDisplayName: robloxValidation.success ? robloxValidation.displayName : (robloxUsername || null),
+                        robloxUsername: robloxUsername,
+                        robloxDisplayName: robloxValidation.success ? robloxValidation.displayName : robloxUsername,
                         robloxUserId: robloxValidation.success ? robloxValidation.userId : null,
                         robloxAvatarUrl: robloxValidation.success ? robloxValidation.avatarUrl : null,
-                        robloxPsLink: robloxPsLink || null,
-                        killCount: killCount || null,
-                        friendListLink: friendListLink === 'N/A' ? null : friendListLink
-                    }, interaction.guild.id);
+                        robloxPsLink,
+                        killCount: String(killCountNum),
+                        friendListLink: friendListLink || null,
+                        verificationId
+                    }, guildId);
 
-                    const robloxDisplayName = robloxValidation.success ? robloxValidation.displayName : (robloxUsername || 'N/A');
+                    const robloxDisplayName = robloxValidation.success ? robloxValidation.displayName : robloxUsername;
                     const robloxUserId = robloxValidation.success ? robloxValidation.userId : null;
                     const robloxProfileValue = formatRobloxProfileValue({
                         roblox_display_name: robloxDisplayName,
@@ -995,36 +1071,61 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                         roblox_user_id: robloxUserId
                     });
 
-                    const settings = raidStateManager.loadSettings(interaction.guild.id);
-                    const targetChannel = await getVerificationTargetChannel(interaction.client, settings.infoChannel, interaction.channel);
-                    if (targetChannel) {
-                        const profileEmbed = buildVerificationEmbed({
-                            title: '🆕 NEW PENDING VERIFICATION',
-                            description: 'A new verification request has been submitted and is waiting for moderator review.',
-                            color: 0xF59E0B,
-                            footerText: `Kakuzu Verification System • ${new Date().toLocaleString()}`,
-                            thumbnailUrl: robloxValidation.success && robloxValidation.avatarUrl ? robloxValidation.avatarUrl : interaction.user.displayAvatarURL({ size: 256 }),
-                            imageUrl: friendListLink && friendListLink.match(/^https?:\/\/.+/i) ? friendListLink : null,
-                            fields: [
-                                { name: '👤 Applicant', value: getVerificationFieldValue(interaction.user.tag), inline: true },
-                                { name: '🧾 Roblox Profile', value: getVerificationFieldValue(robloxProfileValue), inline: true },
-                                { name: '🛡️ Status', value: '⏳ Pending Review', inline: true },
-                                { name: '🔗 PS Link', value: getVerificationFieldValue(robloxPsLink || 'N/A'), inline: true },
-                                { name: '⚔️ Kill Count', value: getVerificationFieldValue(killCount || 'N/A'), inline: true },
-                                { name: '📸 Friend List', value: getVerificationFieldValue(friendListLink === 'N/A' ? 'N/A' : friendListLink), inline: true }
-                            ]
-                        });
-
-                        const actionRow = createVerificationActionButtons(interaction.user.id);
-                        const pendingMessage = await targetChannel.send({ embeds: [profileEmbed], components: [actionRow] }).catch(() => null);
-                        if (pendingMessage) {
-                            await verificationDb.setVerificationLogMessage(interaction.user.id, targetChannel.id, pendingMessage.id, interaction.guild.id);
-                        }
+                    // Always retrieve the configured verification logs channel for THIS guild.
+                    // Never fall back to the interaction channel (fixes the reported bug).
+                    const settings = raidStateManager.loadSettings(guildId);
+                    const logsChannelId = settings.verificationLogsChannel || settings.infoChannel;
+                    if (!logsChannelId) {
+                        console.warn(`No verification logs channel configured for guild ${guildId}.`);
+                        return interaction.followUp({ content: '❌ **No verification logs channel is configured.** Please ask a server administrator to run `/setverificationlogs` with a valid text channel.', flags: 64 }).catch(() => null);
+                    }
+                    const logsChannel = await interaction.client.channels.fetch(logsChannelId).catch(() => null);
+                    if (!logsChannel || !logsChannel.isTextBased()) {
+                        console.warn(`Verification logs channel ${logsChannelId} unavailable or invalid for guild ${guildId}.`);
+                        return interaction.followUp({ content: '❌ **The configured verification logs channel is unavailable or invalid.** Please ask a server administrator to re-run `/setverificationlogs`.', flags: 64 }).catch(() => null);
                     }
 
-                    const replyContent = robloxValidation.success 
+                    const submittedAt = formatVerificationDate(Date.now());
+                    const profileEmbed = buildVerificationEmbed({
+                        title: '🆕 NEW PENDING VERIFICATION',
+                        description: 'A new verification request has been submitted and is waiting for moderator review.',
+                        color: 0xF59E0B,
+                        footerText: `Kakuzu Verification System • ${submittedAt}`,
+                        thumbnailUrl: robloxValidation.success && robloxValidation.avatarUrl ? robloxValidation.avatarUrl : interaction.user.displayAvatarURL({ size: 256 }),
+                        imageUrl: friendListLink && friendListLink.match(/^https?:\/\/.+/i) ? friendListLink : null,
+                        fields: [
+                            { name: '👤 Applicant', value: `<@${interaction.user.id}> (${interaction.user.tag})`, inline: true },
+                            { name: '🆔 User ID', value: getVerificationFieldValue(interaction.user.id), inline: true },
+                            { name: '🧾 Roblox Profile', value: getVerificationFieldValue(robloxProfileValue), inline: true },
+                            { name: '⚔️ Kill Count', value: getVerificationFieldValue(String(killCountNum)), inline: true },
+                            { name: '🔗 PS Link', value: getVerificationFieldValue(robloxPsLink), inline: true },
+                            { name: '📸 Friend List', value: getVerificationFieldValue(friendListLink ? `[View Screenshot](${friendListLink})` : 'Not provided'), inline: true },
+                            { name: '🛡️ Status', value: '⏳ PENDING', inline: true },
+                            { name: '🆔 Verification ID', value: getVerificationFieldValue(verificationId), inline: true },
+                            { name: '📅 Requested At', value: submittedAt, inline: true }
+                        ]
+                    });
+
+                    const actionRow = createVerificationActionButtons(interaction.user.id);
+                    const staffPing = getVerificationStaffPing(guildId);
+                    const sendOptions = { embeds: [profileEmbed], components: [actionRow] };
+                    if (staffPing.mention) {
+                        sendOptions.content = staffPing.mention;
+                        sendOptions.allowedMentions = staffPing.allowedMentions;
+                    }
+
+                    const pendingMessage = await logsChannel.send(sendOptions).catch((err) => {
+                        console.warn(`Could not send pending verification to logs channel: ${err.message}`);
+                        return null;
+                    });
+                    if (!pendingMessage) {
+                        return interaction.followUp({ content: '❌ **The bot could not post your verification to the configured logs channel.** Please contact a server administrator.', flags: 64 }).catch(() => null);
+                    }
+                    await verificationDb.setVerificationLogMessage(interaction.user.id, logsChannel.id, pendingMessage.id, guildId);
+
+                    const replyContent = robloxValidation.success
                         ? '✅ **Verification Submitted!** Your information has been sent to moderators for review. You will receive a DM once a decision is made.'
-                        : `✅ **Verification Submitted!** Your information has been saved and sent to moderators for review. Note: Could not validate Roblox username (${robloxValidation.error}). You will receive a DM once a decision is made.`;
+                        : `✅ **Verification Submitted!** Your information has been sent to moderators for review. Note: Could not validate Roblox username (${robloxValidation.error}) — you may be contacted to fix it. You will receive a DM once a decision is made.`;
 
                     return interaction.followUp({
                         content: replyContent,

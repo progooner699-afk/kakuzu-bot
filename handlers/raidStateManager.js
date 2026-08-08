@@ -15,7 +15,13 @@ const defaultSettings = {
     resultChannel: null,
     infoChannel: null,
     lockedPingRoleId: null,
+    // Dedicated pending verifications log channel (per guild, persistent)
+    verificationLogsChannel: null,
     verificationResultChannel: null,
+    // Role IDs allowed to accept/reject verifications (per guild, persistent)
+    verificationAdminRoles: [],
+    // Persistent per-guild counter used to generate unique verification IDs
+    verificationRequestCounter: 0,
     // regionPings: mapping of normalized region -> array of role IDs (strings)
     regionPings: {}
 };
@@ -85,6 +91,19 @@ function loadSettings(guildId) {
 
 function saveSettings(guildId, settings) {
     fs.writeFileSync(getSettingsPath(guildId), JSON.stringify(settings, null, 4));
+}
+
+/**
+ * Generates the next unique verification request ID for a guild, e.g. VER-0001.
+ * The counter is persisted per-guild in settings.json so IDs survive restarts
+ * and are unique across all verification requests in the same guild.
+ */
+function getNextVerificationId(guildId) {
+    const settings = loadSettings(guildId);
+    const next = (Number(settings.verificationRequestCounter) || 0) + 1;
+    settings.verificationRequestCounter = next;
+    saveSettings(guildId, settings);
+    return `VER-${String(next).padStart(4, '0')}`;
 }
 
 function loadRaids(guildId) {
@@ -538,6 +557,7 @@ module.exports = {
     ensureDataFiles,
     loadSettings,
     saveSettings,
+    getNextVerificationId,
     loadRaids,
     saveRaids,
     canCreateRaid,

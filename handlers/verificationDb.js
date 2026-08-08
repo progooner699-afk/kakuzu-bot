@@ -54,7 +54,8 @@ async function ensureDb(guildId) {
             reviewed_by TEXT,
             reviewed_at INTEGER,
             log_channel_id TEXT,
-            log_message_id TEXT
+            log_message_id TEXT,
+            verification_id TEXT
         );
     `);
 
@@ -66,6 +67,12 @@ async function ensureDb(guildId) {
 
     try {
         db.run(`ALTER TABLE verifications ADD COLUMN log_message_id TEXT`);
+    } catch (error) {
+        // Ignore if the column already exists
+    }
+
+    try {
+        db.run(`ALTER TABLE verifications ADD COLUMN verification_id TEXT`);
     } catch (error) {
         // Ignore if the column already exists
     }
@@ -105,8 +112,8 @@ async function getVerificationData(userId, guildId) {
 async function markVerified(userId, data, guildId) {
     const db = await getDb(guildId);
     const stmt = db.prepare(`
-        INSERT INTO verifications (userId, is_verified, roblox_username, roblox_display_name, roblox_user_id, roblox_avatar_url, roblox_ps_link, kill_count, friend_list_link, verified_at, status)
-        VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+        INSERT INTO verifications (userId, is_verified, roblox_username, roblox_display_name, roblox_user_id, roblox_avatar_url, roblox_ps_link, kill_count, friend_list_link, verified_at, status, verification_id)
+        VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
         ON CONFLICT(userId) DO UPDATE SET
             is_verified = 0,
             roblox_username = ?,
@@ -120,16 +127,18 @@ async function markVerified(userId, data, guildId) {
             status = 'pending',
             rejection_reason = NULL,
             reviewed_by = NULL,
-            reviewed_at = NULL
+            reviewed_at = NULL,
+            verification_id = ?
     `);
     const now = Date.now();
     const robloxDisplayName = data.robloxDisplayName || data.robloxUsername;
     const robloxUserId = data.robloxUserId || null;
     const robloxAvatarUrl = data.robloxAvatarUrl || null;
+    const verificationId = data.verificationId || null;
     stmt.run([
         userId,
-        data.robloxUsername, robloxDisplayName, robloxUserId, robloxAvatarUrl, data.robloxPsLink, data.killCount, data.friendListLink, now,
-        data.robloxUsername, robloxDisplayName, robloxUserId, robloxAvatarUrl, data.robloxPsLink, data.killCount, data.friendListLink, now
+        data.robloxUsername, robloxDisplayName, robloxUserId, robloxAvatarUrl, data.robloxPsLink, data.killCount, data.friendListLink, now, verificationId,
+        data.robloxUsername, robloxDisplayName, robloxUserId, robloxAvatarUrl, data.robloxPsLink, data.killCount, data.friendListLink, now, verificationId
     ]);
     stmt.free();
     saveDb(guildId, db);
@@ -138,6 +147,13 @@ async function markVerified(userId, data, guildId) {
 
 async function acceptVerification(userId, reviewerId, guildId) {
     const db = await getDb(guildId);
+    const current = await getVerificationData(userId, guildId);
+    if (!current) {
+        return { success: false, code: 'NOT_FOUND', message: 'Verification request not found.' };
+    }
+    if (current.status !== 'pending') {
+        return { success: false, code: 'ALREADY_PROCESSED', message: 'This verification request has already been processed.' };
+    }
     const stmt = db.prepare(`
         UPDATE verifications SET
             is_verified = 1,
@@ -145,16 +161,27 @@ async function acceptVerification(userId, reviewerId, guildId) {
             reviewed_by = ?,
             reviewed_at = ?,
             rejection_reason = NULL
-        WHERE userId = ?
+        WHERE userId = ? AND status = 'pending'
     `);
     stmt.run([reviewerId, Date.now(), userId]);
+    const changes = db.getRowsModified();
     stmt.free();
     saveDb(guildId, db);
-    return true;
+    if (changes > 0) {
+        return { success: true, message: 'Verification accepted.' };
+    }
+    return { success: false, code: 'ALREADY_PROCESSED', message: 'This verification request has already been processed.' };
 }
 
 async function rejectVerification(userId, reviewerId, reason, guildId) {
     const db = await getDb(guildId);
+    const current = await getVerificationData(userId, guildId);
+    if (!current) {
+        return { success: false, code: 'NOT_FOUND', message: 'Verification request not found.' };
+    }
+    if (current.status !== 'pending') {
+        return { success: false, code: 'ALREADY_PROCESSED', message: 'This verification request has already been processed.' };
+    }
     const stmt = db.prepare(`
         UPDATE verifications SET
             is_verified = 0,
@@ -162,12 +189,16 @@ async function rejectVerification(userId, reviewerId, reason, guildId) {
             reviewed_by = ?,
             reviewed_at = ?,
             rejection_reason = ?
-        WHERE userId = ?
+        WHERE userId = ? AND status = 'pending'
     `);
     stmt.run([reviewerId, Date.now(), reason, userId]);
+    const changes = db.getRowsModified();
     stmt.free();
     saveDb(guildId, db);
-    return true;
+    if (changes > 0) {
+        return { success: true, message: 'Verification rejected.' };
+    }
+    return { success: false, code: 'ALREADY_PROCESSED', message: 'This verification request has already been processed.' };
 }
 
 async function setVerificationLogMessage(userId, channelId, messageId, guildId) {
