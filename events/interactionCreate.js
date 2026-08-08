@@ -247,9 +247,16 @@ function formatVerificationDate(value) {
 function getVerificationValues(verificationData, targetUserTag) {
     const psLink = verificationData?.roblox_ps_link || '';
     const friendList = verificationData?.friend_list_link || '';
+    const profileValue = formatRobloxProfileValue({
+        roblox_display_name: verificationData?.roblox_display_name || verificationData?.roblox_username,
+        roblox_username: verificationData?.roblox_username,
+        roblox_user_id: verificationData?.roblox_user_id
+    });
     return {
         targetUserTag,
         robloxUsername: verificationData?.roblox_username || verificationData?.roblox_display_name || 'Unknown',
+        robloxProfileValue: profileValue || 'Not linked',
+        robloxAvatarUrl: verificationData?.roblox_avatar_url || null,
         killCount: verificationData?.kill_count || 'N/A',
         psLink: /^https?:\/\/.+/i.test(psLink) ? `[View PS](${psLink})` : (psLink || 'Not provided'),
         friendList: /^https?:\/\/.+/i.test(friendList) ? `[View Screenshot](${friendList})` : 'Not provided',
@@ -259,21 +266,22 @@ function getVerificationValues(verificationData, targetUserTag) {
 
 function buildAcceptedEmbed({ values, reviewerTag, reviewedAt, guild }) {
     return buildVerificationEmbed({
-        title: '✅ PLAYER VERIFIED',
-        description: '> Verification request has been approved.',
+        title: '🎉✅ PLAYER VERIFIED ✅🎉',
+        description: '> 🎊 **CONGRATULATIONS!** 🎊\nYour verification request has been **approved**.\nWelcome to the clan — we\'re thrilled to have you aboard! 🥳',
         color: 0x2ECC71,
-        footerText: `Kakuzu Verification System • ${reviewedAt}`,
-        thumbnailUrl: guild.iconURL({ size: 256 }),
+        footerText: `🔐 Kakuzu Verification System • ✅ Approved at ${reviewedAt}`,
+        thumbnailUrl: values.robloxAvatarUrl || guild.iconURL({ size: 256 }),
+        imageUrl: null,
         fields: [
-            { name: '**Player**', value: values.targetUserTag, inline: false },
-            { name: '**Roblox Username**', value: getVerificationFieldValue(values.robloxUsername), inline: true },
-            { name: '**Kill Count**', value: getVerificationFieldValue(values.killCount), inline: true },
-            { name: '**PS Link**', value: getVerificationFieldValue(values.psLink), inline: true },
-            { name: '**Friend List**', value: getVerificationFieldValue(values.friendList), inline: true },
-            { name: '**Status**', value: '✅ ACCEPTED', inline: false },
-            { name: '**Verified By**', value: reviewerTag, inline: true },
-            { name: '**Verification ID**', value: getVerificationFieldValue(values.verificationId), inline: true },
-            { name: '**Verified At**', value: reviewedAt, inline: false }
+            { name: '👤 Player', value: values.targetUserTag, inline: false },
+            { name: '🎮 Roblox Profile', value: getVerificationFieldValue(values.robloxProfileValue), inline: true },
+            { name: '⚔️ Kill Count', value: getVerificationFieldValue(values.killCount), inline: true },
+            { name: '🔗 PS Link', value: getVerificationFieldValue(values.psLink), inline: true },
+            { name: '🖼️ Friend List', value: getVerificationFieldValue(values.friendList), inline: false },
+            { name: '📋 Status', value: '✅ **ACCEPTED**', inline: true },
+            { name: '🧑‍⚖️ Verified By', value: reviewerTag, inline: true },
+            { name: '🏷️ Verification ID', value: getVerificationFieldValue(values.verificationId), inline: true },
+            { name: '🕒 Verified At', value: reviewedAt, inline: false }
         ]
     });
 }
@@ -281,21 +289,22 @@ function buildAcceptedEmbed({ values, reviewerTag, reviewedAt, guild }) {
 function buildRejectedEmbed({ values, reviewerTag, reviewedAt, guild, reason }) {
     return buildVerificationEmbed({
         title: '❌ PLAYER VERIFICATION REJECTED',
-        description: '> Your verification request was rejected by the verification staff.',
+        description: '> 😔 Unfortunately, your verification request was **rejected** by the verification staff.\nPlease review the reason below — you are welcome to try again later. 💪',
         color: 0xE74C3C,
-        footerText: `Kakuzu Verification System • ${reviewedAt}`,
-        thumbnailUrl: guild.iconURL({ size: 256 }),
+        footerText: `🔐 Kakuzu Verification System • ❌ Rejected at ${reviewedAt}`,
+        thumbnailUrl: values.robloxAvatarUrl || guild.iconURL({ size: 256 }),
+        imageUrl: null,
         fields: [
-            { name: '**Player**', value: values.targetUserTag, inline: false },
-            { name: '**Roblox Username**', value: getVerificationFieldValue(values.robloxUsername), inline: true },
-            { name: '**Kill Count**', value: getVerificationFieldValue(values.killCount), inline: true },
-            { name: '**PS Link**', value: getVerificationFieldValue(values.psLink), inline: true },
-            { name: '**Friend List**', value: getVerificationFieldValue(values.friendList), inline: true },
-            { name: '**Reason**', value: getVerificationFieldValue(reason), inline: false },
-            { name: '**Status**', value: '❌ REJECTED', inline: false },
-            { name: '**Rejected By**', value: reviewerTag, inline: true },
-            { name: '**Verification ID**', value: getVerificationFieldValue(values.verificationId), inline: true },
-            { name: '**Rejected At**', value: reviewedAt, inline: false }
+            { name: '👤 Player', value: values.targetUserTag, inline: false },
+            { name: '🎮 Roblox Profile', value: getVerificationFieldValue(values.robloxProfileValue), inline: true },
+            { name: '⚔️ Kill Count', value: getVerificationFieldValue(values.killCount), inline: true },
+            { name: '🔗 PS Link', value: getVerificationFieldValue(values.psLink), inline: true },
+            { name: '🖼️ Friend List', value: getVerificationFieldValue(values.friendList), inline: false },
+            { name: '📝 Reason', value: getVerificationFieldValue(reason), inline: false },
+            { name: '📋 Status', value: '❌ **REJECTED**', inline: true },
+            { name: '🧑‍⚖️ Rejected By', value: reviewerTag, inline: true },
+            { name: '🏷️ Verification ID', value: getVerificationFieldValue(values.verificationId), inline: true },
+            { name: '🕒 Rejected At', value: reviewedAt, inline: false }
         ]
     });
 }
