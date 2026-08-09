@@ -3,7 +3,7 @@ const raidStateManager = require('../handlers/raidStateManager');
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('checkchannels')
+        .setName('channelconfig')
         .setDescription('Show currently configured channels for raid, result and verification.')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     async execute(interaction) {

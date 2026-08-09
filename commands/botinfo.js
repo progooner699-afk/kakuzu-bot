@@ -2,7 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('info')
+        .setName('botinfo')
         .setDescription('Display Kakuzu system information'),
     async execute(interaction) {
         const codeBlock = [

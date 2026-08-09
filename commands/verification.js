@@ -2,7 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('playerinfo')
+        .setName('verification')
         .setDescription('Deploy the TSB Info Collector verification portal embed.'),
     async execute(interaction) {
         const codeBlock = [
