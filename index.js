@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
+const cors = require('cors');
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
 const config = require('./config.json');
 const commandHandler = require('./handlers/commandHandler');
@@ -39,12 +40,41 @@ for (const file of eventFiles) {
 
 raidStateManager.ensureDataFiles();
 
-// Express keep-alive server for Render + UptimeRobot
+// Express API server for the React dashboard (keep-alive + stats/actions)
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 5000;
 
+// Allow local frontend (CORS) + JSON request bodies
+app.use(cors());
+app.use(express.json());
+
+// Health check
 app.get('/', (req, res) => res.send('Kakuzu is Online!'));
-app.listen(port, () => console.log(`Keep-alive server running on port ${port}`));
+
+// Bot statistics endpoint (consumed by the React dashboard)
+app.get('/api/stats', (req, res) => {
+    res.json({
+        servers: client.guilds.cache.size,
+        users: client.users.cache.size,
+        ping: client.ws.ping,
+        status: client.isReady() ? 'Online' : 'Offline'
+    });
+});
+
+// Restart/reconnect endpoint (consumed by the React dashboard)
+app.post('/api/action/restart', async (req, res) => {
+    res.json({ success: true, message: 'Bot restarting...' });
+    console.log('[API] Restart requested — reconnecting Discord client...');
+    try {
+        await client.destroy();
+        await client.login(process.env.DISCORD_TOKEN);
+        console.log('[API] Bot reconnected successfully.');
+    } catch (error) {
+        console.error('[API] Restart failed:', error);
+    }
+});
+
+app.listen(port, () => console.log(`API server running on port ${port}`));
 
 // Discord bot login
 client.login(process.env.DISCORD_TOKEN);
