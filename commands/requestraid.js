@@ -5,6 +5,16 @@ module.exports = {
         .setName('requestraid')
         .setDescription('Create a new raid request using the modal application workflow.'),
     async execute(interaction) {
+        // Check verification first
+        const verificationDb = require('../handlers/verificationDb');
+        const isVerified = await verificationDb.isUserVerified(interaction.user.id, interaction.guild.id);
+        if (!isVerified) {
+            return interaction.reply({
+                content: "🔒 **Raid Access Denied — Verification Required**\n\nYou must verify your Roblox account before requesting raids. Run `/link-roblox` with your Roblox username, then try again.",
+                flags: 64
+            }).catch(() => null);
+        }
+
         const buttonRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('request_raid')
@@ -33,7 +43,7 @@ module.exports = {
                 'Always provide accurate teamer counts and enemy clan names so helpers know exactly what loadout or strategy to bring!',
                 '```',
                 '',
-                'Click the button below to open the raid application form.'
+                'Click the button below to open the raid application form. The bot will auto-detect your game, region, and server link from your Roblox presence.'
             ].join('\n'),
             components: [buttonRow]
         });
