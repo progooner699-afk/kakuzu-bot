@@ -1,4 +1,4 @@
-const {
+﻿const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
@@ -555,19 +555,11 @@ module.exports = {
 
         // Handle request_raid button - auto-detect game/region/server
         if (interaction.customId === "request_raid") {
-            const verificationDb = require("../handlers/verificationDb");
-            const isVerified = await verificationDb.isUserVerified(interaction.user.id, interaction.guild.id);
+            const verificationData = await verificationDb.getVerificationData(interaction.user.id, interaction.guild.id);
+            const isVerified = Boolean(verificationData?.is_verified && verificationData?.roblox_user_id);
             if (!isVerified) {
                 return interaction.reply({
-                    content: "Raid Access Denied - Verification Required. Run /link-roblox first.",
-                    flags: 64
-                }).catch(() => null);
-            }
-
-            const verificationData = await verificationDb.getVerificationData(interaction.user.id, interaction.guild.id);
-            if (!verificationData || !verificationData.roblox_user_id) {
-                return interaction.reply({
-                    content: "Please run /link-roblox first.",
+                    content: "Raid Access Denied - Verification Required. Link your Roblox account first by using the link embed button.",
                     flags: 64
                 }).catch(() => null);
             }
@@ -593,8 +585,8 @@ module.exports = {
                 new ActionRowBuilder().addComponents(
                     new TextInputBuilder()
                         .setCustomId("enemyCount")
-                        .setLabel("Number of Enemies")
-                        .setPlaceholder("e.g., 5")
+                        .setLabel("Enemy Names")
+                        .setPlaceholder("e.g., Clan A, Clan B")
                         .setStyle(TextInputStyle.Short)
                         .setRequired(true)
                 ),
@@ -609,10 +601,18 @@ module.exports = {
                 new ActionRowBuilder().addComponents(
                     new TextInputBuilder()
                         .setCustomId("enemyClanName")
-                        .setLabel("Enemy Clan Name (Optional)")
-                        .setPlaceholder("Leave blank for not provided")
+                        .setLabel("Enemy Clan Name")
+                        .setPlaceholder("Enter enemy clan name")
                         .setStyle(TextInputStyle.Short)
-                        .setRequired(false)
+                        .setRequired(true)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId("reason")
+                        .setLabel("Reason for Raid")
+                        .setPlaceholder("Explain why you need help")
+                        .setStyle(TextInputStyle.Paragraph)
+                        .setRequired(true)
                 )
             );
 
@@ -633,9 +633,9 @@ module.exports = {
             // Create the link embed with button
             const linkEmbed = new EmbedBuilder()
                 .setTitle('Link Your Roblox Account')
-                .setDescription('Click the button below to link your Discord account with your Roblox username.\n\nThis will verify your account and grant you raid access.')
+                .setDescription('Click the button below to link your Discord account with your Roblox username.\n\nYou will be prompted to enter your Roblox username from the button interaction, and your account will be verified for raid access.')
                 .addFields([
-                    { name: 'Instructions', value: '1. Click the "Link Roblox" button\n2. Enter your exact Roblox username\n3. Submit the form', inline: false },
+                    { name: 'Instructions', value: '1. Click the "Link Roblox" button\n2. Enter your Roblox username in the popup\n3. Submit the form', inline: false },
                     { name: 'Benefits', value: '• Request raids\n• Accept raid operations\n• Full access to bot features', inline: false }
                 ])
                 .setColor(0x9B59B6)
@@ -757,177 +757,98 @@ module.exports = {
         }
 
         if (interaction.customId === "raid_application_step1") {
-                const userId = interaction.user.id;
-                if (!raidStateManager.canCreateRaid(userId, interaction.guild.id)) {
-                    return interaction.reply({ content: "You already have an open raid or you are blocked from creating new raids.", flags: 64 }).catch(() => null);
-                }
+            const userId = interaction.user.id;
+            if (!raidStateManager.canCreateRaid(userId, interaction.guild.id)) {
+                return interaction.reply({ content: "You already have an open raid or you are blocked from creating new raids.", flags: 64 }).catch(() => null);
+            }
 
-                const game = pendingGameSelections.get(userId);
-                const region = pendingRegionSelections.get(userId);
-                
-                if (!game || !region) {
-                    pendingGameSelections.delete(userId);
-                    pendingRegionSelections.delete(userId);
-                    return interaction.reply({ content: "Game detection expired. Please try again.", flags: 64 }).catch(() => null);
-                }
-
-                const partial = {
-                    requesterId: userId,
-                    requesterTag: interaction.user.tag,
-                    targetGame: game,
-                    region: region,
-                    enemyCount: interaction.fields.getTextInputValue("enemyCount"),
-                    helperLimit: interaction.fields.getTextInputValue("helperLimit"),
-                    enemyClanName: interaction.fields.getTextInputValue("enemyClanName") || "not provided"
-                };
-
-                // Clear game/region selections
+            const game = pendingGameSelections.get(userId);
+            const region = pendingRegionSelections.get(userId);
+            
+            if (!game || !region) {
                 pendingGameSelections.delete(userId);
                 pendingRegionSelections.delete(userId);
-                pendingRaidApplications.set(userId, partial);
-
-                const continueButton = new ButtonBuilder()
-                    .setCustomId("raid_step2_continue")
-                    .setLabel("Continue to Step 2")
-                    .setStyle(ButtonStyle.Primary);
-
-                const row = new ActionRowBuilder().addComponents(continueButton);
-                return interaction.reply({
-                    content: "Step 1 saved! Click the button below to continue.",
-                    components: [row],
-                    flags: 64
-                }).catch(() => null);
+                return interaction.reply({ content: "Game detection expired. Please try again.", flags: 64 }).catch(() => null);
             }
 
-            // Handle raid_step2_continue button - show step2 modal
-            if (interaction.customId === "raid_step2_continue") {
-                const userId = interaction.user.id;
-                const partial = pendingRaidApplications.get(userId);
-                
-                if (!partial) {
-                    return interaction.reply({ content: "Raid application expired. Please start over.", flags: 64 }).catch(() => null);
-                }
+            const enemyCountInput = interaction.fields.getTextInputValue("enemyCount").trim();
+            const helperLimit = Number(interaction.fields.getTextInputValue("helperLimit"));
+            const enemyClanName = interaction.fields.getTextInputValue("enemyClanName") || "not provided";
+            const reason = interaction.fields.getTextInputValue("reason");
 
-                const modal = new ModalBuilder()
-                    .setCustomId("raid_application_step2")
-                    .setTitle("Raid Application - Step 2");
-
-                modal.addComponents(
-                    new ActionRowBuilder().addComponents(
-                        new TextInputBuilder()
-                            .setCustomId("teamers")
-                            .setLabel("Number of Teamers")
-                            .setPlaceholder("e.g., 2")
-                            .setStyle(TextInputStyle.Short)
-                            .setRequired(true)
-                    ),
-                    new ActionRowBuilder().addComponents(
-                        new TextInputBuilder()
-                            .setCustomId("enemyClanPresent")
-                            .setLabel("Is Enemy Clan Present? (yes/no)")
-                            .setPlaceholder("yes or no")
-                            .setStyle(TextInputStyle.Short)
-                            .setRequired(true)
-                    ),
-                    new ActionRowBuilder().addComponents(
-                        new TextInputBuilder()
-                            .setCustomId("reason")
-                            .setLabel("Reason for Raid Request")
-                            .setPlaceholder("Explain why you need help")
-                            .setStyle(TextInputStyle.Paragraph)
-                            .setRequired(true)
-                    )
-                );
-
-                return interaction.showModal(modal).catch(() => null);
+            const enemyCount = enemyCountInput ? enemyCountInput.length : 0;
+            if (!enemyCountInput) {
+                return interaction.reply({ content: "Please enter at least one enemy name.", flags: 64 }).catch(() => null);
+            }
+            if (Number.isNaN(helperLimit) || helperLimit < 1 || helperLimit > 20) {
+                return interaction.reply({ content: "Helpers needed must be a number between 1 and 20.", flags: 64 }).catch(() => null);
             }
 
-            if (interaction.customId === "raid_application_step2") {
-                const userId = interaction.user.id;
-                const partial = pendingRaidApplications.get(userId);
-                pendingRaidApplications.delete(userId);
-                if (!partial) {
-                    return interaction.reply({ content: "Raid application expired. Please start over.", flags: 64 }).catch(() => null);
-                }
+            pendingGameSelections.delete(userId);
+            pendingRegionSelections.delete(userId);
 
-                const enemyCount = Number(partial.enemyCount);
-                const helperLimit = Number(partial.helperLimit);
-                const enemyClanName = partial.enemyClanName || "not provided";
-                const teamers = interaction.fields.getTextInputValue("teamers");
-                const enemyClanPresent = interaction.fields.getTextInputValue("enemyClanPresent");
-                const reason = interaction.fields.getTextInputValue("reason");
+            const verificationData = await verificationDb.getVerificationData(userId, interaction.guild.id);
+            const robloxUsername = verificationData?.roblox_username || 'Unknown';
+            const robloxDisplayName = verificationData?.roblox_display_name || robloxUsername;
+            const robloxUserId = verificationData?.roblox_user_id || "1";
+            const robloxAvatarUrl = verificationData?.roblox_avatar_url || null;
 
-                if (Number.isNaN(enemyCount) || enemyCount <= 2) {
-                    return interaction.reply({ content: "Enemy count must be a number greater than 2.", flags: 64 }).catch(() => null);
-                }
-                if (Number.isNaN(helperLimit) || helperLimit < 1 || helperLimit > 20) {
-                    return interaction.reply({ content: "Helpers needed must be a number between 1 and 20.", flags: 64 }).catch(() => null);
-                }
+            const raid = raidStateManager.createRaid({
+                requesterId: userId,
+                requesterTag: interaction.user.tag,
+                targetGame: game,
+                robloxUsername,
+                robloxDisplayName,
+                robloxUserId,
+                robloxAvatarUrl,
+                serverLink: '',
+                region,
+                enemyCount,
+                teamers: 'Not provided',
+                enemyClanNames: enemyClanName,
+                enemyClanPresent: 'NO',
+                reason,
+                helperLimit,
+                guildId: interaction.guild.id
+            });
 
-                // Get Roblox data from verification
-                const verificationData = await verificationDb.getVerificationData(userId, interaction.guild.id);
-                const robloxUsername = verificationData?.roblox_username || 'Unknown';
-                const robloxDisplayName = verificationData?.roblox_display_name || robloxUsername;
-                const robloxUserId = verificationData?.roblox_user_id || "1";
-                const robloxAvatarUrl = verificationData?.roblox_avatar_url || null;
+            const settings = raidStateManager.loadSettings(interaction.guild.id);
+            const content = raidStateManager.formatRaidMessage(raid);
+            const raidButtonRow = createRaidButtons(raid, interaction.member);
+            const regionRoleInfo = getRegionRoleInfo(interaction.guild.id, raid.region);
 
-                const raid = raidStateManager.createRaid({
-                    requesterId: userId,
-                    requesterTag: interaction.user.tag,
-                    targetGame: partial.targetGame,
-                    robloxUsername,
-                    robloxDisplayName,
-                    robloxUserId,
-                    robloxAvatarUrl,
-                    serverLink: partial.serverLink || '',
-                    region: partial.region,
-                    enemyCount,
-                    teamers,
-                    enemyClanName,
-                    enemyClanPresent,
-                    reason,
-                    helperLimit,
-                    guildId: interaction.guild.id
-                });
-
-                const settings = raidStateManager.loadSettings(interaction.guild.id);
-                const content = raidStateManager.formatRaidMessage(raid);
-                const raidButtonRow = createRaidButtons(raid, interaction.member);
-                const regionRoleInfo = getRegionRoleInfo(interaction.guild.id, raid.region);
-
-                // Require an explicitly configured raid channel. Do NOT fallback to the command channel.
-                if (!settings.raidChannel) {
-                    return interaction.reply({ content: '? Raid channel is not configured. Please run `/setchannels` and set the `raid_channel` first (Raid Alert channel).', flags: 64 }).catch(() => null);
-                }
-
-                const targetChannel = await interaction.client.channels.fetch(settings.raidChannel).catch(() => null);
-
-                if (!targetChannel || !targetChannel.isTextBased()) {
-                    return interaction.reply({ content: '? Configured raid channel is unavailable or not a text channel. Please reconfigure it with `/setchannels`.', flags: 64 }).catch(() => null);
-                }
-
-                const completionEmbed = new EmbedBuilder()
-                    .setTitle('?? Raid Request Successfully Launched!')
-                    .setDescription(`Operator <@${userId}> has successfully deployed a combat request!`)
-                    .addFields([
-                        { name: 'Raid Registry ID', value: `\`#${raid.raidId}\``, inline: true },
-                        { name: 'Roblox Identity', value: `\`${robloxUsername}\``, inline: true },
-                        { name: 'Target Game', value: `\`${raidStateManager.GAME_CONFIG[partial.targetGame] || partial.targetGame}\``, inline: true },
-                        { name: 'Target Region', value: `\`${region}\``, inline: true }
-                    ])
-                    .setColor(0x00ff66)
-                    .setTimestamp();
-
-                await interaction.reply({ embeds: [completionEmbed], flags: 64 }).catch(() => null);
-
-                const message = await targetChannel.send({
-                    content: regionRoleInfo.mention || undefined,
-                    embeds: [content],
-                    components: [raidButtonRow],
-                    allowedMentions: regionRoleInfo.allowedMentions
-                });
-                raidStateManager.updateRaidMessageReference(raid.raidId, targetChannel.id, message.id, interaction.guild.id);
+            if (!settings.raidChannel) {
+                return interaction.reply({ content: 'Raid channel is not configured. Please run `/setchannels` and set the `raid_channel` first (Raid Alert channel).', flags: 64 }).catch(() => null);
             }
+
+            const targetChannel = await interaction.client.channels.fetch(settings.raidChannel).catch(() => null);
+
+            if (!targetChannel || !targetChannel.isTextBased()) {
+                return interaction.reply({ content: 'Configured raid channel is unavailable or not a text channel. Please reconfigure it with `/setchannels`.', flags: 64 }).catch(() => null);
+            }
+
+            const completionEmbed = new EmbedBuilder()
+                .setTitle('Raid Request Successfully Launched!')
+                .setDescription(`Operator <@${userId}> has successfully deployed a combat request!`)
+                .addFields([
+                    { name: 'Raid Registry ID', value: `\`#${raid.raidId}\``, inline: true },
+                    { name: 'Roblox Identity', value: `\`${robloxUsername}\``, inline: true },
+                    { name: 'Target Game', value: `\`${raidStateManager.GAME_CONFIG[game] || game}\``, inline: true },
+                    { name: 'Target Region', value: `\`${region}\``, inline: true }
+                ])
+                .setColor(0x00ff66)
+                .setTimestamp();
+
+            await interaction.reply({ embeds: [completionEmbed], flags: 64 }).catch(() => null);
+
+            const message = await targetChannel.send({
+                content: regionRoleInfo.mention || undefined,
+                embeds: [content],
+                components: [raidButtonRow],
+                allowedMentions: regionRoleInfo.allowedMentions
+            });
+            raidStateManager.updateRaidMessageReference(raid.raidId, targetChannel.id, message.id, interaction.guild.id);
+        }
         }
     }
 ;

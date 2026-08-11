@@ -4,31 +4,34 @@
  * Allows users to self-verify by linking their Discord ID to their Roblox account.
  * Posts an embed with a button in a selected channel for users to link their accounts.
  */
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelSelectMenuBuilder, ChannelType, PermissionsBitField } = require('discord.js');
-const verificationDb = require('../handlers/verificationDb');
-const robloxApi = require('../handlers/robloxApi');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ChannelSelectMenuBuilder, ChannelType, PermissionsBitField } = require('discord.js');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('link-roblox')
         .setDescription('Setup Roblox linking system - post embed with link button in a channel'),
     async execute(interaction) {
-        // Check if user has permission (admin/moderator)
         const member = interaction.member;
-        if (!member.permissions.has(PermissionsBitField.Flags.Administrator) && 
-            !member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+        if (!member?.permissions?.has(PermissionsBitField.Flags.Administrator) &&
+            !member?.permissions?.has(PermissionsBitField.Flags.ManageMessages)) {
             return interaction.reply({
-                content: '? You need Administrator or Manage Messages permission to use this command.',
+                content: 'You need Administrator or Manage Messages permission to use this command.',
                 flags: 64
-            });
+            }).catch(() => null);
         }
 
+        const footerIconUrl = interaction.client?.user?.displayAvatarURL?.({ size: 64 });
         const setupEmbed = new EmbedBuilder()
-            .setTitle('?? Roblox Account Linking System')
-            .setDescription('Click the button below to select a channel where the Roblox linking embed will be posted.\n\nPlayers will be able to click the link button in that channel and enter their Roblox username to link their account.')
+            .setTitle('Roblox Account Linking System')
+            .setDescription('Select a channel below where the Roblox linking embed will be posted.\n\nPlayers will be able to click the button in that channel and link their account from the interaction.')
             .setColor(0x9B59B6)
-            .setFooter({ text: 'Kakuzu Verification System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
             .setTimestamp();
+
+        if (footerIconUrl && /^https?:\/\//i.test(footerIconUrl)) {
+            setupEmbed.setFooter({ text: 'Kakuzu Verification System', iconURL: footerIconUrl });
+        } else {
+            setupEmbed.setFooter({ text: 'Kakuzu Verification System' });
+        }
 
         const channelSelect = new ChannelSelectMenuBuilder()
             .setCustomId('select_link_channel')
