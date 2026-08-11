@@ -227,6 +227,49 @@ async function getPendingVerifications(guildId) {
     return rows;
 }
 
+/**
+ * Directly links a Discord user to their Roblox account and grants raid access
+ * immediately — no moderator approval required. Used by the /link-roblox command.
+ * @param {string} userId - Discord user ID
+ * @param {object} robloxData - { robloxUsername, robloxDisplayName, robloxUserId, robloxAvatarUrl }
+ * @param {string} guildId
+ */
+async function directLink(userId, robloxData, guildId) {
+    const db = await getDb(guildId);
+    const now = Date.now();
+    const stmt = db.prepare(`
+        INSERT INTO verifications (userId, is_verified, roblox_username, roblox_display_name, roblox_user_id, roblox_avatar_url, roblox_ps_link, kill_count, friend_list_link, verified_at, status, verification_id, reviewed_by, reviewed_at)
+        VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?, ?)
+        ON CONFLICT(userId) DO UPDATE SET
+            is_verified = 1,
+            roblox_username = ?,
+            roblox_display_name = ?,
+            roblox_user_id = ?,
+            roblox_avatar_url = ?,
+            roblox_ps_link = ?,
+            kill_count = ?,
+            friend_list_link = ?,
+            verified_at = ?,
+            status = 'accepted',
+            rejection_reason = NULL,
+            reviewed_by = ?,
+            reviewed_at = ?,
+            verification_id = ?
+    `);
+    stmt.run([
+        userId,
+        robloxData.robloxUsername, robloxData.robloxDisplayName, robloxData.robloxUserId, robloxData.robloxAvatarUrl,
+        robloxData.robloxPsLink || null, robloxData.killCount || null, robloxData.friendListLink || null,
+        now, robloxData.verificationId || null, userId, now,
+        robloxData.robloxUsername, robloxData.robloxDisplayName, robloxData.robloxUserId, robloxData.robloxAvatarUrl,
+        robloxData.robloxPsLink || null, robloxData.killCount || null, robloxData.friendListLink || null,
+        now, userId, now, robloxData.verificationId || null
+    ]);
+    stmt.free();
+    saveDb(guildId, db);
+    return true;
+}
+
 module.exports = {
     isUserVerified,
     getVerificationData,
@@ -234,5 +277,6 @@ module.exports = {
     acceptVerification,
     rejectVerification,
     setVerificationLogMessage,
-    getPendingVerifications
+    getPendingVerifications,
+    directLink
 };

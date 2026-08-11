@@ -17,6 +17,8 @@ const verificationDb = require("../handlers/verificationDb");
 const { formatRobloxProfileValue } = require("../handlers/verificationHelpers");
 const pendingRaidApplications = new Map();
 const pendingRegionSelections = new Map();
+const pendingGameSelections = new Map();
+const pendingRaidOutcomes = new Map();
 
 // Region ping IDs are now configured per-guild via settings.regionPings
 
@@ -107,13 +109,7 @@ function createRaidButtons(raid, member = null) {
         .setStyle(ButtonStyle.Success)
         .setDisabled(raid.status !== "OPEN");
 
-    const leave = new ButtonBuilder()
-        .setCustomId(`raid_leave_${raid.raidId}`)
-        .setLabel("Leave Raid")
-        .setStyle(ButtonStyle.Danger)
-        .setDisabled(raid.status === "CLOSED");
-
-    const components = [accept, leave];
+    const components = [accept];
     const showClose = canCloseRaid(member, raid);
     if (showClose) {
         const close = new ButtonBuilder()
@@ -339,6 +335,205 @@ async function sendVerificationDM(client, targetUserId, embed) {
     }
 }
 
+async function finalizeRaidOutcome(interaction, raid, outcome) {
+    const settings = raidStateManager.loadSettings(interaction.guild.id);
+    const raidsData = raidStateManager.loadRaids(interaction.guild.id);
+
+    let resultTitle, resultColor, descriptionText;
+    if (outcome === 'win' || outcome === 'whooped') {
+        if (raidsData.streakType === 'WIN') {
+            raidsData.streakCount += 1;
+        } else {
+            raidsData.streakType = 'WIN';
+            raidsData.streakCount = 1;
+        }
+        if (outcome === 'whooped') {
+            resultTitle = '🔥 OBLITERATION DEPLOYMENT (WHOOPED) 🔥';
+            resultColor = 0xff0055;
+            descriptionText = `Our combat deployment completely **WHOOPED** the opposition forces! A flawless victory.`;
+        } else {
+            resultTitle = '🏆 OPERATION VICTORY 🏆';
+            resultColor = 0x00ff66;
+            descriptionText = `Our active deployment successfully secured a decisive combat victory!`;
+        }
+    } else if (outcome === 'loss') {
+        if (raidsData.streakType === 'LOSS') {
+            raidsData.streakCount += 1;
+        } else {
+            raidsData.streakType = 'LOSS';
+            raidsData.streakCount = 1;
+        }
+        resultTitle = '❌ DEPLOYMENT LOSS ❌';
+        resultColor = 0xff3333;
+        descriptionText = `Our combat crew suffered an operational defeat against enemy forces during deployment.`;
+    } else {
+        resultTitle = '⚖️ INDECISIVE CONCLUSION / CAN\'T SAY ⚖️';
+        resultColor = 0x888888;
+        descriptionText = `The combat operation concluded indeterminately, or was cancelled mid-deployment.`;
+    }
+
+    raidStateManager.saveRaids(interaction.guild.id, raidsData);
+
+    const streakMessage = raidsData.streakCount > 0
+        ? `**Current Streak:** ${raidsData.streakType === 'WIN' ? '🔥' : '💀'} ${raidsData.streakCount} Matches consecutive!`
+        : '**Current Streak:** None tracking';
+
+    const gameLabel = raidStateManager.GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
+    const mvpUserId = raid.mvpUserId;
+
+    const buildReportCardEmbed = (attachments = []) => {
+        const rosterValue = raid.helpers && raid.helpers.length > 0
+            ? raid.helpers.map(h => {
+                const helperUserId = typeof h === 'string' ? h : h.userId;
+                const helperRobloxUsername = typeof h === 'string' ? 'Unknown' : (h.robloxUsername || 'Unknown');
+                const timeSpent = typeof h === 'object' ? raidStateManager.formatTimeSpent(h.timeSpentSeconds || 0) : '0m 0s';
+                const isMvp = helperUserId === mvpUserId;
+                const prefix = isMvp ? '🏆 MVP: ' : '• ';
+                return `${prefix}<@${helperUserId}> (Roblox: ${helperRobloxUsername}) — Time Spent: ${timeSpent}`;
+            }).join('\n')
+            : 'No operators deployed.';
+
+        const embed = new EmbedBuilder()
+            .setTitle(resultTitle)
+            .setDescription(`${descriptionText}\n\n${streakMessage}`)
+            .setColor(resultColor)
+            .addFields([
+                { name: 'Operation Registry', value: `\`#${raid.raidId}\``, inline: true },
+                { name: 'Squad Leader', value: `<@${raid.requesterId}>`, inline: true },
+                { name: 'Region Server', value: `\`${raid.region || 'Unknown'}\``, inline: true },
+                { name: 'Operation Game', value: `\`${gameLabel}\``, inline: true },
+                { name: 'Hostile Count', value: `\`${raid.enemyCount || 0}\``, inline: true },
+                { name: 'Hostile Grouping', value: raid.enemyClanNames ? `\`${raid.enemyClanNames}\`` : '`None`', inline: true },
+                { name: 'Deployment Squad Roster', value: rosterValue, inline: false }
+            ])
+            .setTimestamp();
+
+        if (attachments.length > 0) {
+            const picsValue = attachments.slice(0, 8).map((url, index) => `${index + 1}. ${url}`).join('\n');
+            embed.addFields({ name: 'Pics', value: picsValue.length > 1024 ? `${picsValue.slice(0, 1020)}...` : picsValue, inline: false });
+            embed.setImage(attachments[0]);
+        } else {
+            embed.addFields({ name: 'Pics', value: 'No pictures uploaded.', inline: false });
+        }
+
+        return embed;
+    };
+
+    const sendResultEmbed = async (attachments = []) => {
+        if (settings.resultChannel) {
+            const targetResultChannel = await interaction.client.channels.fetch(settings.resultChannel).catch(() => null);
+            if (targetResultChannel && targetResultChannel.isTextBased()) {
+                const regionRoleInfo = getRegionRoleInfo(interaction.guild.id, raid.region);
+                await targetResultChannel.send({
+                    content: regionRoleInfo.mention || undefined,
+                    embeds: [buildReportCardEmbed(attachments)],
+                    allowedMentions: regionRoleInfo.allowedMentions
+                });
+            }
+        }
+    };
+
+    // Update the raid alert message in the channel
+    try {
+        const alertChannel = await interaction.client.channels.fetch(raid.channelId).catch(() => null);
+        if (alertChannel && alertChannel.isTextBased()) {
+            const baseAlertMsg = await alertChannel.messages.fetch(raid.messageId).catch(() => null);
+            if (baseAlertMsg) {
+                const updatedAlertEmbed = raidStateManager.formatRaidMessage(raid);
+                const cleanClosedRow = createRaidButtons(raid, interaction.member);
+                await baseAlertMsg.edit({ embeds: [updatedAlertEmbed], components: [cleanClosedRow] }).catch(() => null);
+            }
+        }
+    } catch (e) { /* ignore */ }
+
+
+    let uploadedUrls = [];
+    const guild = interaction.guild;
+    let tempChannel = null;
+
+    try {
+        const parentId = interaction.channel?.parentId || null;
+        tempChannel = await guild.channels.create({
+            name: `raid-uploads-${raid.raidId}`,
+            type: ChannelType.GuildText,
+            parent: parentId || undefined,
+            topic: `Temporary upload channel for raid #${raid.raidId}. Will be removed after collection.`
+        });
+
+        await interaction.followUp({ content: `📸 Upload any pictures or files for this raid result in ${tempChannel} now. Reply with \`done\` in that channel when finished, or wait 60 seconds. The result will be posted to the configured result channel automatically.`, ephemeral: true }).catch(() => null);
+
+        await tempChannel.send({ content: `📸 **Upload pictures for Raid #${raid.raidId} here.**\nReply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 seconds and the bot will post whatever was uploaded.` }).catch(() => null);
+
+        const collector = tempChannel.createMessageCollector({
+            filter: (msg) => {
+                if (msg.content?.toLowerCase().trim() === 'done' && msg.author.id === interaction.user.id) return true;
+                return msg.attachments && msg.attachments.size > 0;
+            },
+            time: 60000,
+            max: 100
+        });
+
+        collector.on('collect', (msg) => {
+            if (msg.attachments && msg.attachments.size > 0) {
+                for (const attachment of msg.attachments.values()) {
+                    uploadedUrls.push(attachment.url);
+                }
+            }
+            if (msg.content?.toLowerCase().trim() === 'done' && msg.author.id === interaction.user.id) {
+                collector.stop('done_by_user');
+            }
+        });
+
+        collector.on('end', async () => {
+            try {
+                await sendResultEmbed(uploadedUrls);
+            } catch (err) {
+                console.warn('Failed to send result embed after collection:', err?.message || err);
+            }
+            setTimeout(async () => {
+                try {
+                    if (tempChannel && !tempChannel.deleted) await tempChannel.delete('Temporary raid upload channel expired');
+                } catch (err) { /* ignore */ }
+            }, 2000);
+        });
+
+        return;
+    } catch (error) {
+        console.warn('Could not create temporary upload channel, falling back to in-channel collector:', error?.message || error);
+    }
+
+    // Legacy fallback
+    await interaction.followUp({ content: '📸 Upload any pictures or files for this raid result in this channel. Reply with `done` when finished, or just wait 30 seconds. The result will be sent automatically after.', ephemeral: true }).catch(() => null);
+
+    const collectorChannel = interaction.channel || await interaction.client.channels.fetch(interaction.channelId).catch(() => null);
+    if (!collectorChannel || !collectorChannel.isTextBased()) {
+        await sendResultEmbed(uploadedUrls);
+        return;
+    }
+
+    const legacyCollector = collectorChannel.createMessageCollector({
+        filter: (msg) => msg.author.id === interaction.user.id && msg.channelId === interaction.channelId,
+        time: 30000,
+        max: 20
+    });
+
+    legacyCollector.on('collect', (msg) => {
+        if (msg.attachments.size > 0) {
+            for (const attachment of msg.attachments.values()) {
+                uploadedUrls.push(attachment.url);
+            }
+        }
+        const content = msg.content?.toLowerCase().trim();
+        if (content === 'done') {
+            legacyCollector.stop('done');
+        }
+    });
+
+    legacyCollector.on('end', async () => {
+        await sendResultEmbed(uploadedUrls);
+    });
+}
+
 module.exports = {
     name: "interactionCreate",
     async execute(interaction) {
@@ -359,8 +554,39 @@ module.exports = {
         }
 
         if (interaction.isStringSelectMenu()) {
+            if (interaction.customId === "raid_game_select") {
+                const game = interaction.values[0];
+                pendingGameSelections.set(interaction.user.id, game);
+
+                const regionSelect = new StringSelectMenuBuilder()
+                    .setCustomId("raid_region_select")
+                    .setPlaceholder("Select a region")
+                    .setMinValues(1)
+                    .setMaxValues(1)
+                    .addOptions(
+                        new StringSelectMenuOptionBuilder().setLabel("NA").setValue("NA"),
+                        new StringSelectMenuOptionBuilder().setLabel("SA").setValue("SA"),
+                        new StringSelectMenuOptionBuilder().setLabel("ASIA").setValue("ASIA"),
+                        new StringSelectMenuOptionBuilder().setLabel("EU").setValue("EU"),
+                        new StringSelectMenuOptionBuilder().setLabel("AUST").setValue("AUST")
+                    );
+
+                return interaction.reply({
+                    content: "Game selected. Select the raid region from the dropdown below.",
+                    components: [new ActionRowBuilder().addComponents(regionSelect)],
+                    flags: 64
+                }).catch(() => null);
+            }
+
             if (interaction.customId === "raid_region_select") {
                 const region = interaction.values[0];
+
+                const game = pendingGameSelections.get(interaction.user.id);
+                if (!game) {
+                    pendingGameSelections.delete(interaction.user.id);
+                    return interaction.reply({ content: "Please select a game first.", flags: 64 }).catch(() => null);
+                }
+
                 pendingRegionSelections.set(interaction.user.id, region);
 
                 const modal = new ModalBuilder()
@@ -400,6 +626,38 @@ module.exports = {
 
                 return interaction.showModal(modal);
             }
+            if (interaction.customId.startsWith("raid_mvp_select_")) {
+                const mvpRaidId = Number(interaction.customId.replace("raid_mvp_select_", ""));
+                if (Number.isNaN(mvpRaidId)) return;
+
+                const mvpUserId = interaction.values[0];
+                const mvpOutcome = pendingRaidOutcomes.get(mvpRaidId);
+                pendingRaidOutcomes.delete(mvpRaidId);
+
+                let mvpRaid = raidStateManager.getRaidById(mvpRaidId, interaction.guild.id);
+                if (!mvpRaid || mvpRaid.status !== 'CLOSED') {
+                    return interaction.reply({ content: '❌ This raid has already been finalized.', flags: 64 }).catch(() => null);
+                }
+
+                const actualOutcome = mvpOutcome || mvpRaid.outcome;
+                if (!actualOutcome) {
+                    return interaction.reply({ content: '❌ Could not determine the raid outcome.', flags: 64 }).catch(() => null);
+                }
+
+                if (mvpUserId !== 'skip') {
+                    raidStateManager.setRaidMvp(mvpRaidId, mvpUserId, interaction.guild.id);
+                    mvpRaid = raidStateManager.getRaidById(mvpRaidId, interaction.guild.id);
+                }
+
+                await interaction.update({
+                    content: `🏆 MVP set to ${mvpUserId !== 'skip' ? '<@' + mvpUserId + '>' : 'none'}. Compiling raid result...`,
+                    components: [],
+                    flags: 64
+                }).catch(() => null);
+
+                await finalizeRaidOutcome(interaction, mvpRaid, actualOutcome);
+            }
+
         }
 
         if (interaction.isButton()) {
@@ -569,23 +827,35 @@ module.exports = {
                 return interaction.showModal(modal);
             }
 
+            if (customId === "verify_help_link") {
+                return interaction.reply({ content: "Run `/link-roblox` and enter your exact Roblox username to verify your account and gain raid access.", flags: 64 }).catch(() => null);
+            }
+
             if (customId === "request_raid") {
-                const regionSelect = new StringSelectMenuBuilder()
-                    .setCustomId("raid_region_select")
-                    .setPlaceholder("Select a region")
+                const isVerified = await verificationDb.isUserVerified(interaction.user.id, interaction.guild.id);
+                if (!isVerified) {
+                    return interaction.reply({
+                        content: "🔒 **Raid Access Denied — Verification Required**\n\nYou must verify your Roblox account before requesting raids. Run `/link-roblox` with your Roblox username, then try again.",
+                        flags: 64
+                    }).catch(() => null);
+                }
+
+                const gameSelect = new StringSelectMenuBuilder()
+                    .setCustomId("raid_game_select")
+                    .setPlaceholder("Select a game")
                     .setMinValues(1)
                     .setMaxValues(1)
                     .addOptions(
-                        new StringSelectMenuOptionBuilder().setLabel("NA").setValue("NA"),
-                        new StringSelectMenuOptionBuilder().setLabel("SA").setValue("SA"),
-                        new StringSelectMenuOptionBuilder().setLabel("ASIA").setValue("ASIA"),
-                        new StringSelectMenuOptionBuilder().setLabel("EU").setValue("EU"),
-                        new StringSelectMenuOptionBuilder().setLabel("AUST").setValue("AUST")
+                        new StringSelectMenuOptionBuilder().setLabel("🥊 The Strongest Battlegrounds").setValue("tsb"),
+                        new StringSelectMenuOptionBuilder().setLabel("⚔️ RIVALS").setValue("rivals"),
+                        new StringSelectMenuOptionBuilder().setLabel("🛏️ BedWars").setValue("bedwars"),
+                        new StringSelectMenuOptionBuilder().setLabel("🍎 Blox Fruits").setValue("bloxfuits"),
+                        new StringSelectMenuOptionBuilder().setLabel("👁️ JJK").setValue("jjk")
                     );
 
                 return interaction.reply({
-                    content: "Select the raid region from the dropdown below.",
-                    components: [new ActionRowBuilder().addComponents(regionSelect)],
+                    content: "Select your target game from the dropdown below.",
+                    components: [new ActionRowBuilder().addComponents(gameSelect)],
                     flags: 64
                 }).catch(() => null);
             }
@@ -655,6 +925,14 @@ module.exports = {
                     return interaction.reply({ content: "This raid is closed and cannot accept helpers.", flags: 64 }).catch(() => null);
                 }
 
+                const isVerifiedHelper = await verificationDb.isUserVerified(interaction.user.id, interaction.guild.id);
+                if (!isVerifiedHelper) {
+                    return interaction.reply({
+                        content: "🔒 **Raid Access Denied — Verification Required**\n\nYou must verify your Roblox account before accepting raids. Run `/link-roblox` with your Roblox username, then try again.",
+                        flags: 64
+                    }).catch(() => null);
+                }
+
                 const acceptModal = new ModalBuilder()
                     .setCustomId(`raid_acceptmodal_${raidId}`)
                     .setTitle("Join Raid Deployment Squad");
@@ -712,202 +990,56 @@ module.exports = {
                     return interaction.reply({ content: '❌ This raid record has already been locked.', flags: 64 }).catch(() => null);
                 }
 
-                    raidStateManager.closeRaid(raidId, undefined, interaction.guild.id);
-                    activeRaid.status = 'CLOSED';
+                raidStateManager.closeRaid(raidId, { outcome }, interaction.guild.id);
+                activeRaid.status = 'CLOSED';
 
-                    const settings = raidStateManager.loadSettings(interaction.guild.id);
-                    const raidsData = raidStateManager.loadRaids(interaction.guild.id);
-                let descriptionText = '';
-
+                const raidsData = raidStateManager.loadRaids(interaction.guild.id);
                 if (outcome === 'win' || outcome === 'whooped') {
-                    if (raidsData.streakType === 'WIN') {
-                        raidsData.streakCount += 1;
-                    } else {
-                        raidsData.streakType = 'WIN';
-                        raidsData.streakCount = 1;
-                    }
-
-                    if (outcome === 'whooped') {
-                        resultTitle = '🔥 OBLITERATION DEPLOYMENT (WHOOPED) 🔥';
-                        resultColor = 0xff0055;
-                        descriptionText = `Our combat deployment completely **WHOOPED** the opposition forces! A flawless victory.`;
-                    } else {
-                        resultTitle = '🏆 OPERATION VICTORY 🏆';
-                        resultColor = 0x00ff66;
-                        descriptionText = `Our active deployment successfully secured a decisive combat victory!`;
-                    }
+                    if (raidsData.streakType === 'WIN') { raidsData.streakCount += 1; } else { raidsData.streakType = 'WIN'; raidsData.streakCount = 1; }
                 } else if (outcome === 'loss') {
-                    if (raidsData.streakType === 'LOSS') {
-                        raidsData.streakCount += 1;
-                    } else {
-                        raidsData.streakType = 'LOSS';
-                        raidsData.streakCount = 1;
-                    }
-                    resultTitle = '❌ DEPLOYMENT LOSS ❌';
-                    resultColor = 0xff3333;
-                    descriptionText = `Our combat crew suffered an operational defeat against enemy forces during deployment.`;
-                } else {
-                    resultTitle = '⚖️ INDECISIVE CONCLUSION / CAN\'T SAY ⚖️';
-                    resultColor = 0x888888;
-                    descriptionText = `The combat operation concluded indeterminately, or was cancelled mid-deployment.`;
+                    if (raidsData.streakType === 'LOSS') { raidsData.streakCount += 1; } else { raidsData.streakType = 'LOSS'; raidsData.streakCount = 1; }
                 }
-
                 raidStateManager.saveRaids(interaction.guild.id, raidsData);
 
-                const streakMessage = raidsData.streakCount > 0 
-                    ? `**Current Streak:** ${raidsData.streakType === 'WIN' ? '🔥' : '💀'} ${raidsData.streakCount} Matches consecutive!`
-                    : '**Current Streak:** None tracking';
+                // If helpers exist, prompt for MVP selection before finalizing
+                if (activeRaid.helpers && activeRaid.helpers.length > 0) {
+                    const mvpSelect = new StringSelectMenuBuilder()
+                        .setCustomId(`raid_mvp_select_${raidId}`)
+                        .setPlaceholder('Select the MVP helper')
+                        .setMinValues(1)
+                        .setMaxValues(1);
 
-                const buildReportCardEmbed = (attachments = []) => {
-                    const embed = new EmbedBuilder()
-                        .setTitle(resultTitle)
-                        .setDescription(`${descriptionText}\n\n${streakMessage}`)
-                        .setColor(resultColor)
-                        .addFields([
-                            { name: 'Operation Registry', value: `\`#${activeRaid.raidId}\``, inline: true },
-                            { name: 'Squad Leader', value: `<@${activeRaid.requesterId}>`, inline: true },
-                            { name: 'Region Server', value: `\`${activeRaid.region || 'Unknown'}\``, inline: true },
-                            { name: 'Hostile Count', value: `\`${activeRaid.enemyCount || 0}\``, inline: true },
-                            { name: 'Hostile Grouping', value: activeRaid.enemyClanNames ? `\`${activeRaid.enemyClanNames}\`` : '`None`', inline: true },
-                            { name: 'Deployment Squad Roster', value: activeRaid.helpers.length > 0 ? activeRaid.helpers.map(h => typeof h === 'string' ? `<@${h}>` : `<@${h.userId}>`).join(', ') : 'No operators deployed.', inline: false }
-                        ])
-                        .setTimestamp();
-
-                    if (attachments.length > 0) {
-                        const picsValue = attachments.slice(0, 8).map((url, index) => `${index + 1}. ${url}`).join('\n');
-                        embed.addFields({ name: 'Pics', value: picsValue.length > 1024 ? `${picsValue.slice(0, 1020)}...` : picsValue, inline: false });
-                        embed.setImage(attachments[0]);
-                    } else {
-                        embed.addFields({ name: 'Pics', value: 'No pictures uploaded.', inline: false });
+                    for (const helper of activeRaid.helpers) {
+                        const helperUserId = typeof helper === 'string' ? helper : helper.userId;
+                        const helperName = typeof helper === 'string' ? 'Unknown' : (helper.robloxUsername || helper.robloxDisplayName || 'Unknown');
+                        mvpSelect.addOptions(
+                            new StringSelectMenuOptionBuilder()
+                                .setLabel(helperName)
+                                .setDescription('Discord: ' + helperUserId)
+                                .setValue(helperUserId)
+                        );
                     }
 
-                    return embed;
-                };
+                    mvpSelect.addOptions(
+                        new StringSelectMenuOptionBuilder()
+                            .setLabel('⏭️ Skip MVP Selection')
+                            .setValue('skip')
+                    );
 
-                const sendResultEmbed = async (attachments = []) => {
-                    if (settings.resultChannel) {
-                        const targetResultChannel = await interaction.client.channels.fetch(settings.resultChannel).catch(() => null);
-                        if (targetResultChannel && targetResultChannel.isTextBased()) {
-                            const regionRoleInfo = getRegionRoleInfo(interaction.guild.id, activeRaid.region);
-                            await targetResultChannel.send({
-                                content: regionRoleInfo.mention || undefined,
-                                embeds: [buildReportCardEmbed(attachments)],
-                                allowedMentions: regionRoleInfo.allowedMentions
-                            });
-                        }
-                    }
-                };
+                    pendingRaidOutcomes.set(raidId, outcome);
 
-                const alertChannel = await interaction.client.channels.fetch(activeRaid.channelId).catch(() => null);
-                if (alertChannel) {
-                    const baseAlertMsg = await alertChannel.messages.fetch(activeRaid.messageId).catch(() => null);
-                    if (baseAlertMsg) {
-                        const updatedAlertEmbed = raidStateManager.formatRaidMessage(activeRaid);
-                        const cleanClosedRow = createRaidButtons(activeRaid, interaction.member);
-                        await baseAlertMsg.edit({ embeds: [updatedAlertEmbed], components: [cleanClosedRow] }).catch(() => null);
-                    }
+                    return interaction.reply({
+                        content: '🏆 **Select the MVP helper for this raid, or skip to proceed:**',
+                        components: [new ActionRowBuilder().addComponents(mvpSelect)],
+                        flags: 64
+                    }).catch(() => null);
                 }
 
-                await interaction.update({ content: `✅ Combat operation logs compiled as **${outcome.toUpperCase()}**!`, components: [] });
-
-                // Try to create a temporary upload channel for 60 seconds where participants
-                // can upload pictures. If channel creation fails, fall back to the old in-channel collector.
-                let uploadedUrls = [];
-                const guild = interaction.guild;
-                let tempChannel = null;
-
-                try {
-                    const parentId = interaction.channel?.parentId || null;
-                    tempChannel = await guild.channels.create({
-                        name: `raid-uploads-${activeRaid.raidId}`,
-                        type: ChannelType.GuildText,
-                        parent: parentId || undefined,
-                        topic: `Temporary upload channel for raid #${activeRaid.raidId}. Will be removed after collection.`
-                    });
-
-                    // Notify users where to upload (ephemeral instruction plus a message in the temp channel)
-                    await interaction.followUp({ content: `📸 Upload any pictures or files for this raid result in ${tempChannel} now. Reply with \`done\` in that channel when finished, or wait 60 seconds. The result will be posted to the configured result channel automatically.`, ephemeral: true }).catch(() => null);
-
-                    await tempChannel.send({ content: `📸 **Upload pictures for Raid #${activeRaid.raidId} here.**
-Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 seconds and the bot will post whatever was uploaded.` }).catch(() => null);
-
-                    const collector = tempChannel.createMessageCollector({
-                        filter: (msg) => {
-                            // Accept attachments from anyone; accept the `done` command from the user who closed the raid
-                            if (msg.content?.toLowerCase().trim() === 'done' && msg.author.id === interaction.user.id) return true;
-                            return msg.attachments && msg.attachments.size > 0;
-                        },
-                        time: 60000,
-                        max: 100
-                    });
-
-                    collector.on('collect', (msg) => {
-                        if (msg.attachments && msg.attachments.size > 0) {
-                            for (const attachment of msg.attachments.values()) {
-                                uploadedUrls.push(attachment.url);
-                            }
-                        }
-                        if (msg.content?.toLowerCase().trim() === 'done' && msg.author.id === interaction.user.id) {
-                            collector.stop('done_by_user');
-                        }
-                    });
-
-                    collector.on('end', async () => {
-                        try {
-                            await sendResultEmbed(uploadedUrls);
-                        } catch (err) {
-                            console.warn('Failed to send result embed after collection:', err?.message || err);
-                        }
-
-                        // Attempt to delete the temporary channel after a short delay
-                        setTimeout(async () => {
-                            try {
-                                if (tempChannel && !tempChannel.deleted) await tempChannel.delete('Temporary raid upload channel expired');
-                            } catch (err) {
-                                // ignore deletion errors
-                            }
-                        }, 2000);
-                    });
-
-                    return;
-                } catch (error) {
-                    console.warn('Could not create temporary upload channel, falling back to in-channel collector:', error?.message || error);
-                    // Fallthrough to the legacy behavior below
-                }
-
-                // Legacy fallback: collect in the interaction channel (30s) from the raid-closer only
-                await interaction.followUp({ content: '📸 Upload any pictures or files for this raid result in this channel. Reply with `done` when finished, or just wait 30 seconds. The result will be sent automatically after.', ephemeral: true }).catch(() => null);
-
-                const collectorChannel = interaction.channel || await interaction.client.channels.fetch(interaction.channelId).catch(() => null);
-                if (!collectorChannel || !collectorChannel.isTextBased()) {
-                    await sendResultEmbed(uploadedUrls);
-                    return;
-                }
-
-                const legacyCollector = collectorChannel.createMessageCollector({
-                    filter: (msg) => msg.author.id === interaction.user.id && msg.channelId === interaction.channelId,
-                    time: 30000,
-                    max: 20
-                });
-
-                legacyCollector.on('collect', (msg) => {
-                    if (msg.attachments.size > 0) {
-                        for (const attachment of msg.attachments.values()) {
-                            uploadedUrls.push(attachment.url);
-                        }
-                    }
-                    const content = msg.content?.toLowerCase().trim();
-                    if (content === 'done') {
-                        legacyCollector.stop('done');
-                    }
-                });
-
-                legacyCollector.on('end', async () => {
-                    await sendResultEmbed(uploadedUrls);
-                });
-
-                return;
+                // No helpers — acknowledge and finalize immediately
+                await interaction.update({ content: `✅ Combat operation logs compiled as **${outcome.toUpperCase()}**!`, components: [] }).catch(() => null);
+                await finalizeRaidOutcome(interaction, activeRaid, outcome);
             }
+
         }
 
         if (interaction.isModalSubmit()) {
@@ -1185,6 +1317,28 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                     if (message) await message.edit({ embeds: [content], components: [row] });
                 }
 
+                                // Send private server link DM to the helper
+                const gameLabel = raidStateManager.GAME_CONFIG[currentRaid.targetGame] || currentRaid.targetGame || 'Unknown';
+                const helperDmEmbed = new EmbedBuilder()
+                    .setTitle(`⚔️ Raid #${currentRaid.raidId} — Join Deployment`)
+                    .setDescription(`You have been accepted as a helper for this raid.`)
+                    .addFields([
+                        { name: '🎮 Game', value: gameLabel, inline: true },
+                        { name: '🌍 Region', value: currentRaid.region || 'Unknown', inline: true },
+                        { name: '📋 Raid ID', value: `#${currentRaid.raidId}`, inline: true },
+                        { name: '🔗 Server Link', value: currentRaid.serverLink ? `[Join Server](${currentRaid.serverLink})` : 'No link provided', inline: false }
+                    ])
+                    .setColor(0xFFD700)
+                    .setFooter({ text: 'Kakuzu Raid System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
+                    .setTimestamp();
+
+                try {
+                    const helperUser = await interaction.client.users.fetch(interaction.user.id);
+                    await helperUser.send({ embeds: [helperDmEmbed] }).catch(() => null);
+                } catch (err) {
+                    // Silently handle if DMs are closed
+                }
+
                 return interaction.reply({
                     content: `✅ **Raid Request Accepted!**\n- \`Raid ID:\` #${currentRaid.raidId}\n- \`Server:\` ${currentRaid.serverLink}`,
                     flags: 64
@@ -1198,14 +1352,17 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                 }
 
                 const region = pendingRegionSelections.get(userId);
-                if (!region) {
+                const game = pendingGameSelections.get(userId);
+                if (!region || !game) {
                     pendingRegionSelections.delete(userId);
-                    return interaction.reply({ content: "Please select a region before continuing.", flags: 64 }).catch(() => null);
+                    pendingGameSelections.delete(userId);
+                    return interaction.reply({ content: "Please select a game and region before continuing.", flags: 64 }).catch(() => null);
                 }
 
                 const partial = {
                     requesterId: userId,
                     requesterTag: interaction.user.tag,
+                    targetGame: game,
                     robloxUsername: interaction.fields.getTextInputValue("robloxUsername"),
                     serverLink: interaction.fields.getTextInputValue("serverLink"),
                     region,
@@ -1213,6 +1370,9 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                     helperLimit: interaction.fields.getTextInputValue("helperLimit")
                 };
 
+                // Clear game/region selections now that Step 1 is stored
+                pendingGameSelections.delete(userId);
+                pendingRegionSelections.delete(userId);
                 pendingRaidApplications.set(userId, partial);
 
                 const continueButton = new ButtonBuilder()
@@ -1267,6 +1427,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                 const raid = raidStateManager.createRaid({
                     requesterId: userId,
                     requesterTag: interaction.user.tag,
+                    targetGame: partial.targetGame || '',
                     robloxUsername,
                     robloxDisplayName: robloxValidation.displayName || robloxUsername,
                     robloxUserId: robloxValidation.userId || "1",
@@ -1304,6 +1465,7 @@ Reply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 sec
                     .addFields([
                         { name: 'Raid Registry ID', value: `\`#${raid.raidId}\``, inline: true },
                         { name: 'Roblox Identity', value: `\`${robloxUsername}\``, inline: true },
+                        { name: 'Target Game', value: `\`${raidStateManager.GAME_CONFIG[partial.targetGame] || partial.targetGame}\``, inline: true },
                         { name: 'Target Region', value: `\`${region}\``, inline: true }
                     ])
                     .setColor(0x00ff66)

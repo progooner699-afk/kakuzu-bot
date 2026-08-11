@@ -41,4 +41,20 @@ if (require.main === module) {
     run().catch(() => process.exit(1));
 }
 
-module.exports = { run };
+// Register this bot's slash commands to a single guild.
+// Guild-scoped commands appear INSTANTLY (no propagation delay) and are the
+// recommended way to make commands available in a server the bot is in.
+async function registerGuildCommands(guildId) {
+    const commands = commandHandler.getCommandDataArray();
+    const token = process.env.DISCORD_TOKEN;
+    if (!token) {
+        throw new Error('No DISCORD_TOKEN found in environment (.env file).');
+    }
+    const rest = new REST({ version: '10' }).setToken(token);
+    const route = Routes.applicationGuildCommands(config.clientId, guildId);
+    await rest.put(route, { body: commands });
+    console.log(`✅ Registered ${commands.length} slash commands to guild ${guildId}.`);
+    return commands.length;
+}
+
+module.exports = { run, registerGuildCommands };

@@ -45,6 +45,30 @@ const defaultRaids = {
 const profileCache = new Map();
 const PROFILE_CACHE_TTL = 10 * 60 * 1000;
 
+/**
+ * Game selection configuration used throughout the raid pipeline.
+ * The key is the stored value on the raid object; the value is the
+ * display label (emoji + name) shown in embeds and UI.
+ */
+const GAME_CONFIG = {
+    'tsb': '🥊 The Strongest Battlegrounds',
+    'rivals': '⚔️ RIVALS',
+    'bedwars': '🛏️ BedWars',
+    'bloxfuits': '🍎 Blox Fruits',
+    'jjk': '👁️ JJK'
+};
+
+/**
+ * Formats a number of seconds into a human-readable duration string.
+ * e.g. 860 → "14m 20s"
+ */
+function formatTimeSpent(totalSeconds) {
+    if (!totalSeconds || totalSeconds < 0) totalSeconds = 0;
+    const m = Math.floor(totalSeconds / 60);
+    const s = Math.floor(totalSeconds % 60);
+    return `${m}m ${s}s`;
+}
+
 function getGuildDataDir(guildId) {
     return path.join(guildsDataDir, guildId);
 }
@@ -208,11 +232,12 @@ function createRaid(options) {
     resetLeaderboardsIfNeeded(raids);
     const nextId = raids.lastRaidId + 1;
     const teamersCount = getTeamersCount(options.teamers);
-    const raid = {
+        const raid = {
         raidId: nextId,
         status: 'OPEN',
         requesterId: options.requesterId,
         requesterTag: options.requesterTag,
+        targetGame: normalizeText(options.targetGame || ''),
         robloxUsername: normalizeText(options.robloxUsername),
         robloxDisplayName: normalizeText(options.robloxDisplayName || options.robloxUsername),
         robloxUserId: options.robloxUserId || "1",
@@ -259,11 +284,13 @@ async function addHelper(raidId, userId, robloxData, guildId) {
     if (await leaderboardDb.hasAcceptedRaid(raidId, userId, guildId)) return { success: false, message: 'You have already accepted this raid alert.' };
     if (raid.helpers.length >= raid.helperLimit) return { success: false, message: 'Raid is already full.' };
     
-    raid.helpers.push({
+        raid.helpers.push({
         userId: userId,
         robloxUsername: robloxData.username,
         robloxDisplayName: robloxData.displayName,
-        robloxUserId: robloxData.userId
+        robloxUserId: robloxData.userId,
+        joinTime: Date.now(),
+        timeSpentSeconds: 0
     });
     
     updateRaidStatus(raid);
@@ -292,10 +319,30 @@ function closeRaid(raidId, options = {}, guildId) {
     const raid = raids.raids.find(item => item.raidId === raidId);
     if (!raid) return null;
     raid.status = 'CLOSED';
+    raid.outcome = options.outcome || null;
+    raid.mvpUserId = options.mvpUserId || null;
     raid.closedBy = options.closedBy || null;
     raid.closedByTag = options.closedByTag || null;
     raid.closeReason = options.closeReason || null;
     raid.closedAt = Date.now();
+
+    // Stop timers for all helpers: calculate elapsed time from joinTime (or
+    // lastSeenTime if presence polling updated it) to now.
+    for (const helper of raid.helpers) {
+        if (typeof helper === 'object' && helper.userId) {
+            if (helper.lastSeenTime) {
+                // Helper was tracked as in-game by the presence poller
+                const elapsed = Math.floor((Date.now() - helper.lastSeenTime) / 1000);
+                helper.timeSpentSeconds = (helper.timeSpentSeconds || 0) + elapsed;
+                helper.lastSeenTime = null;
+            } else if (!helper.timeSpentSeconds || helper.timeSpentSeconds === 0) {
+                // Fallback: simple join-to-close delta
+                const joinTime = helper.joinTime || raid.createdAt;
+                helper.timeSpentSeconds = Math.floor((Date.now() - joinTime) / 1000);
+            }
+        }
+    }
+
     if (raids.activeRaidByOwner[raid.requesterId] === raid.raidId) {
         delete raids.activeRaidByOwner[raid.requesterId];
     }
@@ -344,6 +391,8 @@ function formatRaidMessage(raid) {
         ? `\n[🔗 ${raid.robloxDisplayName || raid.robloxUsername} Profile](https://www.roblox.com/users/${raid.robloxUserId}/profile)`
         : '';
 
+    const gameLabel = GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
+
     const embed = new EmbedBuilder()
         .setTitle('🚨 Raid Alert')
         .setColor(0xFFD700)
@@ -351,6 +400,7 @@ function formatRaidMessage(raid) {
         .addFields([
             { name: 'Requested By', value: `${raid.requesterTag || `<@${raid.requesterId}>`}${requesterProfileLink}`, inline: true },
             { name: 'Time Requested', value: `\`${new Date(raid.createdAt).toLocaleString()}\``, inline: true },
+            { name: 'Target Game', value: `\`${gameLabel}\``, inline: true },
             { name: 'Region', value: `\`${raid.region || 'Unknown'}\``, inline: true },
             { name: '\u200b', value: '\u200b', inline: false },
             { name: 'Enemy Count', value: `\`${raid.enemyCount || 0}\``, inline: true },
@@ -371,6 +421,58 @@ function formatRaidMessage(raid) {
     }
     
     return embed;
+}
+
+function setRaidMvp(raidId, mvpUserId, guildId) {
+    const raids = loadRaids(guildId);
+    const raid = raids.raids.find(item => item.raidId === raidId);
+    if (!raid) return null;
+    raid.mvpUserId = mvpUserId;
+    saveRaids(guildId, raids);
+    return raid;
+}
+
+async function pollHelperPresences(client, guildId) {
+    const apiKey = process.env.ROBLOX_API_KEY;
+    if (!apiKey) return;
+    const raids = loadRaids(guildId);
+    const activeRaids = raids.raids.filter(r => r.status !== 'CLOSED' && Array.isArray(r.helpers) && r.helpers.length > 0);
+    if (activeRaids.length === 0) return;
+    const helperUserIds = [];
+    const helperMap = new Map();
+    for (const raid of activeRaids) {
+        for (const helper of raid.helpers) {
+            if (typeof helper === 'object' && helper.robloxUserId && helper.robloxUserId !== '1') {
+                helperUserIds.push(helper.robloxUserId);
+                helperMap.set(helper.robloxUserId, { raid, helper });
+            }
+        }
+    }
+    if (helperUserIds.length === 0) return;
+    try {
+        const response = await fetch('https://presence.roblox.com/v1/presence/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+            body: JSON.stringify({ userIds: helperUserIds })
+        });
+        if (!response.ok) return;
+        const data = await response.json();
+        for (const user of (data.userPresences || data.data || [])) {
+            const info = helperMap.get(String(user.userId));
+            if (!info) continue;
+            const helper = info.helper;
+            if (user.userPresenceType === 'InGame' && !helper.lastSeenTime) {
+                helper.lastSeenTime = Date.now();
+            } else if (user.userPresenceType !== 'InGame' && helper.lastSeenTime) {
+                const elapsed = Math.floor((Date.now() - helper.lastSeenTime) / 1000);
+                helper.timeSpentSeconds = (helper.timeSpentSeconds || 0) + elapsed;
+                helper.lastSeenTime = null;
+            }
+        }
+        saveRaids(guildId, raids);
+    } catch (error) {
+        console.warn('Presence polling error:', error?.message || error);
+    }
 }
 
 function getTopEntries(ranking, max = 5) {
@@ -573,5 +675,9 @@ module.exports = {
     publishLeaderboard,
     syncLeaderboardMessage,
     closeAllRaids,
-    buildLeaderboardEmbeds
+    buildLeaderboardEmbeds,
+    formatTimeSpent,
+    GAME_CONFIG,
+    setRaidMvp,
+    pollHelperPresences
 };
