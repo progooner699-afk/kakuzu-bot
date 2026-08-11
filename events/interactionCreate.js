@@ -161,9 +161,9 @@ function buildVerificationEmbed({ title, description, color, footerText, thumbna
 }
 
 function getVerificationFieldValue(value) {
-    if (value === null || value === undefined) return '—';
+    if (value === null || value === undefined) return 'ï¿½';
     const stringValue = String(value).trim();
-    return stringValue || '—';
+    return stringValue || 'ï¿½';
 }
 
 async function getVerificationTargetChannel(client, configuredChannelId, fallbackChannel) {
@@ -263,9 +263,9 @@ function getVerificationValues(verificationData, targetUserTag) {
 function buildAcceptedEmbed({ values, reviewerTag, reviewedAt, guild }) {
     return buildVerificationEmbed({
         title: '??? PLAYER VERIFIED ???',
-        description: '> ?? **CONGRATULATIONS!** ??\nYour verification request has been **approved**.\nWelcome to the clan — we\'re thrilled to have you aboard! ??',
+        description: '> ?? **CONGRATULATIONS!** ??\nYour verification request has been **approved**.\nWelcome to the clan ï¿½ we\'re thrilled to have you aboard! ??',
         color: 0x2ECC71,
-        footerText: `?? Kakuzu Verification System • ? Approved at ${reviewedAt}`,
+        footerText: `?? Kakuzu Verification System ï¿½ ? Approved at ${reviewedAt}`,
         thumbnailUrl: values.robloxAvatarUrl || guild.iconURL({ size: 256 }),
         imageUrl: null,
         fields: [
@@ -285,9 +285,9 @@ function buildAcceptedEmbed({ values, reviewerTag, reviewedAt, guild }) {
 function buildRejectedEmbed({ values, reviewerTag, reviewedAt, guild, reason }) {
     return buildVerificationEmbed({
         title: '? PLAYER VERIFICATION REJECTED',
-        description: '> ?? Unfortunately, your verification request was **rejected** by the verification staff.\nPlease review the reason below — you are welcome to try again later. ??',
+        description: '> ?? Unfortunately, your verification request was **rejected** by the verification staff.\nPlease review the reason below ï¿½ you are welcome to try again later. ??',
         color: 0xE74C3C,
-        footerText: `?? Kakuzu Verification System • ? Rejected at ${reviewedAt}`,
+        footerText: `?? Kakuzu Verification System ï¿½ ? Rejected at ${reviewedAt}`,
         thumbnailUrl: values.robloxAvatarUrl || guild.iconURL({ size: 256 }),
         imageUrl: null,
         fields: [
@@ -388,8 +388,8 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
                 const helperRobloxUsername = typeof h === 'string' ? 'Unknown' : (h.robloxUsername || 'Unknown');
                 const timeSpent = typeof h === 'object' ? raidStateManager.formatTimeSpent(h.timeSpentSeconds || 0) : '0m 0s';
                 const isMvp = helperUserId === mvpUserId;
-                const prefix = isMvp ? '?? MVP: ' : '• ';
-                return `${prefix}<@${helperUserId}> (Roblox: ${helperRobloxUsername}) — Time Spent: ${timeSpent}`;
+                const prefix = isMvp ? '?? MVP: ' : 'ï¿½ ';
+                return `${prefix}<@${helperUserId}> (Roblox: ${helperRobloxUsername}) ï¿½ Time Spent: ${timeSpent}`;
             }).join('\n')
             : 'No operators deployed.';
 
@@ -617,6 +617,143 @@ module.exports = {
             );
 
             return interaction.showModal(modal).catch(() => null);
+        }
+
+        // Handle channel selection for link embed
+        if (interaction.customId === "select_link_channel") {
+            const selectedChannel = interaction.channels.first();
+            
+            if (!selectedChannel) {
+                return interaction.reply({
+                    content: "Please select a valid channel.",
+                    flags: 64
+                }).catch(() => null);
+            }
+
+            // Create the link embed with button
+            const linkEmbed = new EmbedBuilder()
+                .setTitle('Link Your Roblox Account')
+                .setDescription('Click the button below to link your Discord account with your Roblox username.\n\nThis will verify your account and grant you raid access.')
+                .addFields([
+                    { name: 'Instructions', value: '1. Click the "Link Roblox" button\n2. Enter your exact Roblox username\n3. Submit the form', inline: false },
+                    { name: 'Benefits', value: 'â€¢ Request raids\nâ€¢ Accept raid operations\nâ€¢ Full access to bot features', inline: false }
+                ])
+                .setColor(0x9B59B6)
+                .setFooter({ text: 'Kakuzu Verification System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
+                .setTimestamp();
+
+            const linkButton = new ButtonBuilder()
+                .setCustomId('link_roblox')
+                .setLabel('Link Roblox')
+                .setStyle(ButtonStyle.Primary);
+
+            const buttonRow = new ActionRowBuilder().addComponents(linkButton);
+
+            await interaction.reply({
+                content: `Posting Roblox link embed in <#${selectedChannel.id}>`,
+                flags: 64
+            }).catch(() => null);
+
+            await interaction.client.channels.fetch(selectedChannel.id).then(channel => {
+                if (channel && channel.isTextBased()) {
+                    channel.send({
+                        embeds: [linkEmbed],
+                        components: [buttonRow]
+                    }).catch(err => console.error('Failed to send link embed:', err));
+                }
+            });
+        }
+
+        // Handle link roblox button click - open modal
+        if (interaction.customId === "link_roblox") {
+            const modal = new ModalBuilder()
+                .setCustomId("link_roblox_modal")
+                .setTitle("Link Roblox Account");
+
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId("roblox_username")
+                        .setLabel("Roblox Username")
+                        .setPlaceholder("Enter your exact Roblox username")
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                )
+            );
+
+            return interaction.showModal(modal).catch(() => null);
+        }
+
+        // Handle link roblox modal submission
+        if (interaction.customId === "link_roblox_modal") {
+            const robloxUsername = interaction.fields.getTextInputValue("roblox_username").trim();
+            const guildId = interaction.guild?.id;
+
+            if (!guildId) {
+                return interaction.reply({
+                    content: 'This command can only be used inside a server.',
+                    flags: 64
+                });
+            }
+
+            // Check if already verified
+            const existing = await verificationDb.getVerificationData(interaction.user.id, guildId);
+            if (existing && existing.is_verified) {
+                const alreadyVerifiedEmbed = new EmbedBuilder()
+                    .setTitle('Already Verified')
+                    .setDescription('Your Roblox account is already linked and verified. You are authorized to request raids and accept operations.')
+                    .setColor(0x9B59B6)
+                    .setFooter({ text: 'Kakuzu Verification System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
+                    .setTimestamp();
+
+                return interaction.reply({ embeds: [alreadyVerifiedEmbed], flags: 64 });
+            }
+
+            // Validate the Roblox username
+            const validation = await robloxApi.validateAndGetAvatar(robloxUsername);
+            if (!validation.success) {
+                const errorEmbed = new EmbedBuilder()
+                    .setTitle('Roblox Username Validation Failed')
+                    .setDescription(`\`\`\`\n${validation.error}\n\`\`\`\nPlease double-check your Roblox username spelling and try again.`)
+                    .setColor(0xE74C3C)
+                    .setFooter({ text: 'Kakuzu Verification System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
+                    .setTimestamp();
+
+                return interaction.reply({ embeds: [errorEmbed], flags: 64 });
+            }
+
+            const robloxUserId = validation.userId;
+            const robloxDisplayName = validation.displayName;
+            const robloxAvatarUrl = validation.avatarUrl;
+            const profileLink = `https://www.roblox.com/users/${robloxUserId}/profile`;
+
+            // Save the verification
+            await verificationDb.directLink(interaction.user.id, {
+                robloxUsername,
+                robloxDisplayName,
+                robloxUserId,
+                robloxAvatarUrl,
+                robloxPsLink: null,
+                killCount: null,
+                friendListLink: null,
+                verificationId: null
+            }, guildId);
+
+            const successEmbed = new EmbedBuilder()
+                .setTitle('Roblox Account Linked')
+                .setDescription('Your Discord account has been successfully linked and verified for raid access.')
+                .addFields([
+                    { name: 'Roblox Profile', value: `[${robloxDisplayName} (@${robloxUsername})](${profileLink})`, inline: false },
+                    { name: 'Roblox User ID', value: `\`${robloxUserId}\``, inline: true },
+                    { name: 'Verification Status', value: 'Verified', inline: true },
+                    { name: 'Raid Access', value: 'Granted', inline: true }
+                ])
+                .setColor(0x9B59B6)
+                .setThumbnail(robloxAvatarUrl || interaction.client.user.displayAvatarURL({ size: 64 }))
+                .setFooter({ text: 'Kakuzu Verification System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
+                .setTimestamp();
+
+            await interaction.reply({ embeds: [successEmbed], flags: 64 });
         }
 
         if (interaction.customId === "raid_application_step1") {
