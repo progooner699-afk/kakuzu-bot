@@ -1,4 +1,4 @@
-﻿const {
+const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
@@ -28,7 +28,7 @@ const RAID_CLOSE_ROLES = [
     'Management Supervisor',
     'Community Manager',
     'Senior Moderator',
-    '💣 ‖ SUPREME LEADER'
+    '?? ? SUPREME LEADER'
 ];
 
 // Roles that can accept/deny verifications are NO LONGER hardcoded by name.
@@ -126,12 +126,12 @@ function createRaidButtons(raid, member = null) {
 function createVerificationActionButtons(userId) {
     const acceptBtn = new ButtonBuilder()
         .setCustomId(`verify_accept_${userId}`)
-        .setLabel("✅ Accept Verification")
+        .setLabel("? Accept Verification")
         .setStyle(ButtonStyle.Success);
 
     const denyBtn = new ButtonBuilder()
         .setCustomId(`verify_deny_${userId}`)
-        .setLabel("❌ Deny Verification")
+        .setLabel("? Deny Verification")
         .setStyle(ButtonStyle.Danger);
 
     return new ActionRowBuilder().addComponents(acceptBtn, denyBtn);
@@ -161,9 +161,9 @@ function buildVerificationEmbed({ title, description, color, footerText, thumbna
 }
 
 function getVerificationFieldValue(value) {
-    if (value === null || value === undefined) return '—';
+    if (value === null || value === undefined) return '�';
     const stringValue = String(value).trim();
-    return stringValue || '—';
+    return stringValue || '�';
 }
 
 async function getVerificationTargetChannel(client, configuredChannelId, fallbackChannel) {
@@ -262,45 +262,45 @@ function getVerificationValues(verificationData, targetUserTag) {
 
 function buildAcceptedEmbed({ values, reviewerTag, reviewedAt, guild }) {
     return buildVerificationEmbed({
-        title: '🎉✅ PLAYER VERIFIED ✅🎉',
-        description: '> 🎊 **CONGRATULATIONS!** 🎊\nYour verification request has been **approved**.\nWelcome to the clan — we\'re thrilled to have you aboard! 🥳',
+        title: '??? PLAYER VERIFIED ???',
+        description: '> ?? **CONGRATULATIONS!** ??\nYour verification request has been **approved**.\nWelcome to the clan � we\'re thrilled to have you aboard! ??',
         color: 0x2ECC71,
-        footerText: `🔐 Kakuzu Verification System • ✅ Approved at ${reviewedAt}`,
+        footerText: `?? Kakuzu Verification System � ? Approved at ${reviewedAt}`,
         thumbnailUrl: values.robloxAvatarUrl || guild.iconURL({ size: 256 }),
         imageUrl: null,
         fields: [
-            { name: '👤 Player', value: values.targetUserTag, inline: false },
-            { name: '🎮 Roblox Profile', value: getVerificationFieldValue(values.robloxProfileValue), inline: true },
-            { name: '⚔️ Kill Count', value: getVerificationFieldValue(values.killCount), inline: true },
-            { name: '🔗 PS Link', value: getVerificationFieldValue(values.psLink), inline: true },
-            { name: '🖼️ Friend List', value: getVerificationFieldValue(values.friendList), inline: false },
-            { name: '📋 Status', value: '✅ **ACCEPTED**', inline: true },
-            { name: '🧑‍⚖️ Verified By', value: reviewerTag, inline: true },
-            { name: '🏷️ Verification ID', value: getVerificationFieldValue(values.verificationId), inline: true },
-            { name: '🕒 Verified At', value: reviewedAt, inline: false }
+            { name: '?? Player', value: values.targetUserTag, inline: false },
+            { name: '?? Roblox Profile', value: getVerificationFieldValue(values.robloxProfileValue), inline: true },
+            { name: '?? Kill Count', value: getVerificationFieldValue(values.killCount), inline: true },
+            { name: '?? PS Link', value: getVerificationFieldValue(values.psLink), inline: true },
+            { name: '??? Friend List', value: getVerificationFieldValue(values.friendList), inline: false },
+            { name: '?? Status', value: '? **ACCEPTED**', inline: true },
+            { name: '????? Verified By', value: reviewerTag, inline: true },
+            { name: '??? Verification ID', value: getVerificationFieldValue(values.verificationId), inline: true },
+            { name: '?? Verified At', value: reviewedAt, inline: false }
         ]
     });
 }
 
 function buildRejectedEmbed({ values, reviewerTag, reviewedAt, guild, reason }) {
     return buildVerificationEmbed({
-        title: '❌ PLAYER VERIFICATION REJECTED',
-        description: '> 😔 Unfortunately, your verification request was **rejected** by the verification staff.\nPlease review the reason below — you are welcome to try again later. 💪',
+        title: '? PLAYER VERIFICATION REJECTED',
+        description: '> ?? Unfortunately, your verification request was **rejected** by the verification staff.\nPlease review the reason below � you are welcome to try again later. ??',
         color: 0xE74C3C,
-        footerText: `🔐 Kakuzu Verification System • ❌ Rejected at ${reviewedAt}`,
+        footerText: `?? Kakuzu Verification System � ? Rejected at ${reviewedAt}`,
         thumbnailUrl: values.robloxAvatarUrl || guild.iconURL({ size: 256 }),
         imageUrl: null,
         fields: [
-            { name: '👤 Player', value: values.targetUserTag, inline: false },
-            { name: '🎮 Roblox Profile', value: getVerificationFieldValue(values.robloxProfileValue), inline: true },
-            { name: '⚔️ Kill Count', value: getVerificationFieldValue(values.killCount), inline: true },
-            { name: '🔗 PS Link', value: getVerificationFieldValue(values.psLink), inline: true },
-            { name: '🖼️ Friend List', value: getVerificationFieldValue(values.friendList), inline: false },
-            { name: '📝 Reason', value: getVerificationFieldValue(reason), inline: false },
-            { name: '📋 Status', value: '❌ **REJECTED**', inline: true },
-            { name: '🧑‍⚖️ Rejected By', value: reviewerTag, inline: true },
-            { name: '🏷️ Verification ID', value: getVerificationFieldValue(values.verificationId), inline: true },
-            { name: '🕒 Rejected At', value: reviewedAt, inline: false }
+            { name: '?? Player', value: values.targetUserTag, inline: false },
+            { name: '?? Roblox Profile', value: getVerificationFieldValue(values.robloxProfileValue), inline: true },
+            { name: '?? Kill Count', value: getVerificationFieldValue(values.killCount), inline: true },
+            { name: '?? PS Link', value: getVerificationFieldValue(values.psLink), inline: true },
+            { name: '??? Friend List', value: getVerificationFieldValue(values.friendList), inline: false },
+            { name: '?? Reason', value: getVerificationFieldValue(reason), inline: false },
+            { name: '?? Status', value: '? **REJECTED**', inline: true },
+            { name: '????? Rejected By', value: reviewerTag, inline: true },
+            { name: '??? Verification ID', value: getVerificationFieldValue(values.verificationId), inline: true },
+            { name: '?? Rejected At', value: reviewedAt, inline: false }
         ]
     });
 }
@@ -348,11 +348,11 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             raidsData.streakCount = 1;
         }
         if (outcome === 'whooped') {
-            resultTitle = '🔥 OBLITERATION DEPLOYMENT (WHOOPED) 🔥';
+            resultTitle = '?? OBLITERATION DEPLOYMENT (WHOOPED) ??';
             resultColor = 0xff0055;
             descriptionText = `Our combat deployment completely **WHOOPED** the opposition forces! A flawless victory.`;
         } else {
-            resultTitle = '🏆 OPERATION VICTORY 🏆';
+            resultTitle = '?? OPERATION VICTORY ??';
             resultColor = 0x00ff66;
             descriptionText = `Our active deployment successfully secured a decisive combat victory!`;
         }
@@ -363,11 +363,11 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             raidsData.streakType = 'LOSS';
             raidsData.streakCount = 1;
         }
-        resultTitle = '❌ DEPLOYMENT LOSS ❌';
+        resultTitle = '? DEPLOYMENT LOSS ?';
         resultColor = 0xff3333;
         descriptionText = `Our combat crew suffered an operational defeat against enemy forces during deployment.`;
     } else {
-        resultTitle = '⚖️ INDECISIVE CONCLUSION / CAN\'T SAY ⚖️';
+        resultTitle = '?? INDECISIVE CONCLUSION / CAN\'T SAY ??';
         resultColor = 0x888888;
         descriptionText = `The combat operation concluded indeterminately, or was cancelled mid-deployment.`;
     }
@@ -375,7 +375,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
     raidStateManager.saveRaids(interaction.guild.id, raidsData);
 
     const streakMessage = raidsData.streakCount > 0
-        ? `**Current Streak:** ${raidsData.streakType === 'WIN' ? '🔥' : '💀'} ${raidsData.streakCount} Matches consecutive!`
+        ? `**Current Streak:** ${raidsData.streakType === 'WIN' ? '??' : '??'} ${raidsData.streakCount} Matches consecutive!`
         : '**Current Streak:** None tracking';
 
     const gameLabel = raidStateManager.GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
@@ -388,8 +388,8 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
                 const helperRobloxUsername = typeof h === 'string' ? 'Unknown' : (h.robloxUsername || 'Unknown');
                 const timeSpent = typeof h === 'object' ? raidStateManager.formatTimeSpent(h.timeSpentSeconds || 0) : '0m 0s';
                 const isMvp = helperUserId === mvpUserId;
-                const prefix = isMvp ? '🏆 MVP: ' : '• ';
-                return `${prefix}<@${helperUserId}> (Roblox: ${helperRobloxUsername}) — Time Spent: ${timeSpent}`;
+                const prefix = isMvp ? '?? MVP: ' : '� ';
+                return `${prefix}<@${helperUserId}> (Roblox: ${helperRobloxUsername}) � Time Spent: ${timeSpent}`;
             }).join('\n')
             : 'No operators deployed.';
 
@@ -460,9 +460,9 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             topic: `Temporary upload channel for raid #${raid.raidId}. Will be removed after collection.`
         });
 
-        await interaction.followUp({ content: `📸 Upload any pictures or files for this raid result in ${tempChannel} now. Reply with \`done\` in that channel when finished, or wait 60 seconds. The result will be posted to the configured result channel automatically.`, ephemeral: true }).catch(() => null);
+        await interaction.followUp({ content: `?? Upload any pictures or files for this raid result in ${tempChannel} now. Reply with \`done\` in that channel when finished, or wait 60 seconds. The result will be posted to the configured result channel automatically.`, ephemeral: true }).catch(() => null);
 
-        await tempChannel.send({ content: `📸 **Upload pictures for Raid #${raid.raidId} here.**\nReply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 seconds and the bot will post whatever was uploaded.` }).catch(() => null);
+        await tempChannel.send({ content: `?? **Upload pictures for Raid #${raid.raidId} here.**\nReply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 seconds and the bot will post whatever was uploaded.` }).catch(() => null);
 
         const collector = tempChannel.createMessageCollector({
             filter: (msg) => {
@@ -503,7 +503,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
     }
 
     // Legacy fallback
-    await interaction.followUp({ content: '📸 Upload any pictures or files for this raid result in this channel. Reply with `done` when finished, or just wait 30 seconds. The result will be sent automatically after.', ephemeral: true }).catch(() => null);
+    await interaction.followUp({ content: '?? Upload any pictures or files for this raid result in this channel. Reply with `done` when finished, or just wait 30 seconds. The result will be sent automatically after.', ephemeral: true }).catch(() => null);
 
     const collectorChannel = interaction.channel || await interaction.client.channels.fetch(interaction.channelId).catch(() => null);
     if (!collectorChannel || !collectorChannel.isTextBased()) {
@@ -553,32 +553,98 @@ module.exports = {
             return;
         }
 
+        // Handle request_raid button - auto-detect game/region/server
+        if (interaction.customId === "request_raid") {
+            const verificationDb = require("../handlers/verificationDb");
+            const isVerified = await verificationDb.isUserVerified(interaction.user.id, interaction.guild.id);
+            if (!isVerified) {
+                return interaction.reply({
+                    content: "Raid Access Denied - Verification Required. Run /link-roblox first.",
+                    flags: 64
+                }).catch(() => null);
+            }
+
+            const verificationData = await verificationDb.getVerificationData(interaction.user.id, interaction.guild.id);
+            if (!verificationData || !verificationData.roblox_user_id) {
+                return interaction.reply({
+                    content: "Please run /link-roblox first.",
+                    flags: 64
+                }).catch(() => null);
+            }
+
+            const robloxUserId = verificationData.roblox_user_id;
+            const detection = await robloxApi.detectGameAndRegion(robloxUserId);
+
+            if (!detection.success) {
+                return interaction.reply({
+                    content: "Auto-Detection Failed: " + detection.error + ". Make sure you are in a Roblox game.",
+                    flags: 64
+                }).catch(() => null);
+            }
+
+            pendingGameSelections.set(interaction.user.id, detection.game);
+            pendingRegionSelections.set(interaction.user.id, detection.region);
+
+            const modal = new ModalBuilder()
+                .setCustomId("raid_application_step1")
+                .setTitle("Raid Request Application");
+
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId("enemyCount")
+                        .setLabel("Number of Enemies")
+                        .setPlaceholder("e.g., 5")
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId("helperLimit")
+                        .setLabel("Helpers Needed (1-20)")
+                        .setPlaceholder("e.g., 3")
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId("enemyClanName")
+                        .setLabel("Enemy Clan Name (Optional)")
+                        .setPlaceholder("Leave blank for not provided")
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(false)
+                )
+            );
+
+            return interaction.showModal(modal).catch(() => null);
+        }
+
         if (interaction.customId === "raid_application_step1") {
                 const userId = interaction.user.id;
                 if (!raidStateManager.canCreateRaid(userId, interaction.guild.id)) {
                     return interaction.reply({ content: "You already have an open raid or you are blocked from creating new raids.", flags: 64 }).catch(() => null);
                 }
 
-                const region = pendingRegionSelections.get(userId);
                 const game = pendingGameSelections.get(userId);
-                if (!region || !game) {
-                    pendingRegionSelections.delete(userId);
+                const region = pendingRegionSelections.get(userId);
+                
+                if (!game || !region) {
                     pendingGameSelections.delete(userId);
-                    return interaction.reply({ content: "Please select a game and region before continuing.", flags: 64 }).catch(() => null);
+                    pendingRegionSelections.delete(userId);
+                    return interaction.reply({ content: "Game detection expired. Please try again.", flags: 64 }).catch(() => null);
                 }
 
                 const partial = {
                     requesterId: userId,
                     requesterTag: interaction.user.tag,
                     targetGame: game,
-                    robloxUsername: interaction.fields.getTextInputValue("robloxUsername"),
-                    serverLink: interaction.fields.getTextInputValue("serverLink"),
-                    region,
+                    region: region,
                     enemyCount: interaction.fields.getTextInputValue("enemyCount"),
-                    helperLimit: interaction.fields.getTextInputValue("helperLimit")
+                    helperLimit: interaction.fields.getTextInputValue("helperLimit"),
+                    enemyClanName: interaction.fields.getTextInputValue("enemyClanName") || "not provided"
                 };
 
-                // Clear game/region selections now that Step 1 is stored
+                // Clear game/region selections
                 pendingGameSelections.delete(userId);
                 pendingRegionSelections.delete(userId);
                 pendingRaidApplications.set(userId, partial);
@@ -590,10 +656,53 @@ module.exports = {
 
                 const row = new ActionRowBuilder().addComponents(continueButton);
                 return interaction.reply({
-                    content: "✅ Step 1 saved! Click the button below to continue.",
+                    content: "Step 1 saved! Click the button below to continue.",
                     components: [row],
                     flags: 64
                 }).catch(() => null);
+            }
+
+            // Handle raid_step2_continue button - show step2 modal
+            if (interaction.customId === "raid_step2_continue") {
+                const userId = interaction.user.id;
+                const partial = pendingRaidApplications.get(userId);
+                
+                if (!partial) {
+                    return interaction.reply({ content: "Raid application expired. Please start over.", flags: 64 }).catch(() => null);
+                }
+
+                const modal = new ModalBuilder()
+                    .setCustomId("raid_application_step2")
+                    .setTitle("Raid Application - Step 2");
+
+                modal.addComponents(
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId("teamers")
+                            .setLabel("Number of Teamers")
+                            .setPlaceholder("e.g., 2")
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId("enemyClanPresent")
+                            .setLabel("Is Enemy Clan Present? (yes/no)")
+                            .setPlaceholder("yes or no")
+                            .setStyle(TextInputStyle.Short)
+                            .setRequired(true)
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new TextInputBuilder()
+                            .setCustomId("reason")
+                            .setLabel("Reason for Raid Request")
+                            .setPlaceholder("Explain why you need help")
+                            .setStyle(TextInputStyle.Paragraph)
+                            .setRequired(true)
+                    )
+                );
+
+                return interaction.showModal(modal).catch(() => null);
             }
 
             if (interaction.customId === "raid_application_step2") {
@@ -604,13 +713,10 @@ module.exports = {
                     return interaction.reply({ content: "Raid application expired. Please start over.", flags: 64 }).catch(() => null);
                 }
 
-                const robloxUsername = partial.robloxUsername;
-                const serverLink = partial.serverLink;
-                const region = partial.region;
                 const enemyCount = Number(partial.enemyCount);
                 const helperLimit = Number(partial.helperLimit);
+                const enemyClanName = partial.enemyClanName || "not provided";
                 const teamers = interaction.fields.getTextInputValue("teamers");
-                const enemyClanNames = interaction.fields.getTextInputValue("enemyClanNames");
                 const enemyClanPresent = interaction.fields.getTextInputValue("enemyClanPresent");
                 const reason = interaction.fields.getTextInputValue("reason");
 
@@ -620,31 +726,27 @@ module.exports = {
                 if (Number.isNaN(helperLimit) || helperLimit < 1 || helperLimit > 20) {
                     return interaction.reply({ content: "Helpers needed must be a number between 1 and 20.", flags: 64 }).catch(() => null);
                 }
-                if (!robloxUsername || !serverLink || !region || !reason) {
-                    return interaction.reply({ content: "All required fields must be filled in.", flags: 64 }).catch(() => null);
-                }
 
-                const robloxValidation = await robloxApi.validateAndGetAvatar(robloxUsername);
-                if (!robloxValidation.success) {
-                    return interaction.reply({ 
-                        content: `❌ **Roblox Username Validation Failed**\n${robloxValidation.error}`, 
-                        flags: 64 
-                    });
-                }
+                // Get Roblox data from verification
+                const verificationData = await verificationDb.getVerificationData(userId, interaction.guild.id);
+                const robloxUsername = verificationData?.roblox_username || 'Unknown';
+                const robloxDisplayName = verificationData?.roblox_display_name || robloxUsername;
+                const robloxUserId = verificationData?.roblox_user_id || "1";
+                const robloxAvatarUrl = verificationData?.roblox_avatar_url || null;
 
                 const raid = raidStateManager.createRaid({
                     requesterId: userId,
                     requesterTag: interaction.user.tag,
-                    targetGame: partial.targetGame || '',
+                    targetGame: partial.targetGame,
                     robloxUsername,
-                    robloxDisplayName: robloxValidation.displayName || robloxUsername,
-                    robloxUserId: robloxValidation.userId || "1",
-                    robloxAvatarUrl: robloxValidation.avatarUrl,
-                    serverLink,
-                    region,
+                    robloxDisplayName,
+                    robloxUserId,
+                    robloxAvatarUrl,
+                    serverLink: partial.serverLink || '',
+                    region: partial.region,
                     enemyCount,
                     teamers,
-                    enemyClanNames,
+                    enemyClanName,
                     enemyClanPresent,
                     reason,
                     helperLimit,
@@ -658,17 +760,17 @@ module.exports = {
 
                 // Require an explicitly configured raid channel. Do NOT fallback to the command channel.
                 if (!settings.raidChannel) {
-                    return interaction.reply({ content: '❌ Raid channel is not configured. Please run `/setchannels` and set the `raid_channel` first (Raid Alert channel).', flags: 64 }).catch(() => null);
+                    return interaction.reply({ content: '? Raid channel is not configured. Please run `/setchannels` and set the `raid_channel` first (Raid Alert channel).', flags: 64 }).catch(() => null);
                 }
 
                 const targetChannel = await interaction.client.channels.fetch(settings.raidChannel).catch(() => null);
 
                 if (!targetChannel || !targetChannel.isTextBased()) {
-                    return interaction.reply({ content: '❌ Configured raid channel is unavailable or not a text channel. Please reconfigure it with `/setchannels`.', flags: 64 }).catch(() => null);
+                    return interaction.reply({ content: '? Configured raid channel is unavailable or not a text channel. Please reconfigure it with `/setchannels`.', flags: 64 }).catch(() => null);
                 }
 
                 const completionEmbed = new EmbedBuilder()
-                    .setTitle('🚀 Raid Request Successfully Launched!')
+                    .setTitle('?? Raid Request Successfully Launched!')
                     .setDescription(`Operator <@${userId}> has successfully deployed a combat request!`)
                     .addFields([
                         { name: 'Raid Registry ID', value: `\`#${raid.raidId}\``, inline: true },
@@ -691,4 +793,5 @@ module.exports = {
             }
         }
     }
-};
+;
+

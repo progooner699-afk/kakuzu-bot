@@ -3,7 +3,7 @@ const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = re
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('requestraid')
-        .setDescription('Create a new raid request using the modal application workflow.'),
+        .setDescription('Request raid backup - auto-detects game, region & server from Roblox presence.'),
     async execute(interaction) {
         // Check verification first
         const verificationDb = require('../handlers/verificationDb');
