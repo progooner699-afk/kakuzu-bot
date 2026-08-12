@@ -403,6 +403,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
                 { name: 'Region Server', value: `\`${raid.region || 'Unknown'}\``, inline: true },
                 { name: 'Operation Game', value: `\`${gameLabel}\``, inline: true },
                 { name: 'Hostile Count', value: `\`${raid.enemyCount || 0}\``, inline: true },
+                { name: 'Hostile Names', value: raid.enemyNames ? `\`${raid.enemyNames}\`` : (raid.enemyClanNames ? `\`${raid.enemyClanNames}\`` : '`None`'), inline: true },
                 { name: 'Hostile Grouping', value: raid.enemyClanNames ? `\`${raid.enemyClanNames}\`` : '`None`', inline: true },
                 { name: 'Deployment Squad Roster', value: rosterValue, inline: false }
             ])
@@ -584,10 +585,10 @@ module.exports = {
             modal.addComponents(
                 new ActionRowBuilder().addComponents(
                     new TextInputBuilder()
-                        .setCustomId("enemyCount")
-                        .setLabel("Number of Enemies")
-                        .setPlaceholder("e.g., 5")
-                        .setStyle(TextInputStyle.Short)
+                        .setCustomId("enemyNames")
+                        .setLabel("Enemy Names")
+                        .setPlaceholder("e.g., Player1, Player2, Player3")
+                        .setStyle(TextInputStyle.Paragraph)
                         .setRequired(true)
                 ),
                 new ActionRowBuilder().addComponents(
@@ -771,17 +772,19 @@ module.exports = {
                 return interaction.reply({ content: "Game detection expired. Please try again.", flags: 64 }).catch(() => null);
             }
 
-            const enemyCount = Number(interaction.fields.getTextInputValue("enemyCount").trim());
+            const enemyNamesInput = interaction.fields.getTextInputValue("enemyNames").trim();
             const helperLimit = Number(interaction.fields.getTextInputValue("helperLimit"));
             const enemyClanName = interaction.fields.getTextInputValue("enemyClanName").trim();
             const reason = interaction.fields.getTextInputValue("reason");
 
-            if (Number.isNaN(enemyCount) || enemyCount <= 0) {
-                return interaction.reply({ content: "Please enter a valid number of enemies greater than 0.", flags: 64 }).catch(() => null);
+            if (!enemyNamesInput) {
+                return interaction.reply({ content: "Please enter the enemy names.", flags: 64 }).catch(() => null);
             }
             if (Number.isNaN(helperLimit) || helperLimit < 1 || helperLimit > 20) {
                 return interaction.reply({ content: "Helpers needed must be a number between 1 and 20.", flags: 64 }).catch(() => null);
             }
+
+            const enemyNames = enemyNamesInput.split(',').map(n => n.trim()).filter(Boolean);
 
             pendingGameSelections.delete(userId);
             pendingRegionSelections.delete(userId);
@@ -802,9 +805,10 @@ module.exports = {
                 robloxAvatarUrl,
                 serverLink: '',
                 region,
-                enemyCount,
+                enemyCount: enemyNames.length,
                 teamers: 'Not provided',
                 enemyClanNames: enemyClanName,
+                enemyNames: enemyNames.join(', '),
                 enemyClanPresent: 'NO',
                 reason,
                 helperLimit,
