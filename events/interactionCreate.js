@@ -585,8 +585,8 @@ module.exports = {
                 new ActionRowBuilder().addComponents(
                     new TextInputBuilder()
                         .setCustomId("enemyCount")
-                        .setLabel("Enemy Names")
-                        .setPlaceholder("e.g., Clan A, Clan B")
+                        .setLabel("Number of Enemies")
+                        .setPlaceholder("e.g., 5")
                         .setStyle(TextInputStyle.Short)
                         .setRequired(true)
                 ),
@@ -771,14 +771,13 @@ module.exports = {
                 return interaction.reply({ content: "Game detection expired. Please try again.", flags: 64 }).catch(() => null);
             }
 
-            const enemyCountInput = interaction.fields.getTextInputValue("enemyCount").trim();
+            const enemyCount = Number(interaction.fields.getTextInputValue("enemyCount").trim());
             const helperLimit = Number(interaction.fields.getTextInputValue("helperLimit"));
-            const enemyClanName = interaction.fields.getTextInputValue("enemyClanName") || "not provided";
+            const enemyClanName = interaction.fields.getTextInputValue("enemyClanName").trim();
             const reason = interaction.fields.getTextInputValue("reason");
 
-            const enemyCount = enemyCountInput ? enemyCountInput.length : 0;
-            if (!enemyCountInput) {
-                return interaction.reply({ content: "Please enter at least one enemy name.", flags: 64 }).catch(() => null);
+            if (Number.isNaN(enemyCount) || enemyCount <= 0) {
+                return interaction.reply({ content: "Please enter a valid number of enemies greater than 0.", flags: 64 }).catch(() => null);
             }
             if (Number.isNaN(helperLimit) || helperLimit < 1 || helperLimit > 20) {
                 return interaction.reply({ content: "Helpers needed must be a number between 1 and 20.", flags: 64 }).catch(() => null);
