@@ -394,7 +394,26 @@ async function detectGameAndRegion(userId) {
         detectedGame = 'jjk';
     } else if (gameName.includes('fish')) {
         detectedGame = 'fishtrap';
-        detectedRegion = 'NA';
+    }
+
+    // Try to detect the actual server region (e.g. Mumbai, Singapore) via the
+    // Roblox servers API using the user's current server id (gameId).
+    if (presence.gameId && presence.placeId) {
+        try {
+            const serversResponse = await fetch(
+                `https://games.roblox.com/v1/games/${presence.universeId}/servers/Public?limit=100`
+            );
+            if (serversResponse.ok) {
+                const serversData = await serversResponse.json();
+                const servers = serversData.data || [];
+                const currentServer = servers.find(s => s && String(s.id) === String(presence.gameId));
+                if (currentServer && currentServer.region) {
+                    detectedRegion = String(currentServer.region).toUpperCase();
+                }
+            }
+        } catch (err) {
+            // fall back to the default region detection
+        }
     }
 
     let serverLink = '';

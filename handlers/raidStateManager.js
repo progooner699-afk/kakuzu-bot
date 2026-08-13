@@ -225,16 +225,17 @@ function blacklistUser(userId, reason = 'Misuse of raid system', guildId) {
 }
 
 function createRaid(options) {
-    if (!canCreateRaid(options.requesterId, options.guildId)) {
+    const isDraft = options.draft === true;
+    if (!isDraft && !canCreateRaid(options.requesterId, options.guildId)) {
         throw new Error('User already has an active raid or is blocked from creating new raids.');
     }
     const raids = loadRaids(options.guildId);
-    resetLeaderboardsIfNeeded(raids);
+    if (!isDraft) resetLeaderboardsIfNeeded(raids);
     const nextId = raids.lastRaidId + 1;
     const teamersCount = getTeamersCount(options.teamers);
         const raid = {
         raidId: nextId,
-        status: 'OPEN',
+        status: isDraft ? 'PENDING' : 'OPEN',
         requesterId: options.requesterId,
         requesterTag: options.requesterTag,
         targetGame: normalizeText(options.targetGame || ''),
@@ -259,7 +260,9 @@ function createRaid(options) {
     };
     raids.lastRaidId = nextId;
     raids.raids.push(raid);
-    raids.activeRaidByOwner[raid.requesterId] = raid.raidId;
+    if (!isDraft && raid.requesterId) {
+        raids.activeRaidByOwner[raid.requesterId] = raid.raidId;
+    }
     saveRaids(options.guildId, raids);
     return raid;
 }
@@ -408,8 +411,7 @@ function formatRaidMessage(raid) {
             { name: 'Helpers Needed', value: `\`${helperCount} / ${raid.helperLimit || 0}\``, inline: true },
             { name: 'Live Status', value: statusText, inline: true },
             { name: '\u200b', value: '\u200b', inline: false },
-            { name: 'Teamers Names', value: raid.teamers ? `\`${raid.teamers}\`` : '`None`', inline: true },
-            { name: 'Enemy Clan Names', value: raid.enemyClanNames ? `\`${raid.enemyClanNames}\`` : '`None`', inline: true },
+            { name: 'Enemy Clan', value: raid.enemyClanNames ? `\`${raid.enemyClanNames}\`` : '`None`', inline: true },
             { name: '\u200b', value: '\u200b', inline: false },
             { name: 'Reason & Additional Details', value: `\`\`\`text\n${reasonText}\n\`\`\``, inline: false },
             { name: '\u200b', value: '\u200b', inline: false },
@@ -656,6 +658,29 @@ async function syncLeaderboardMessage(client, guildId) {
     await publishLeaderboard(client, guildId);
 }
 
+// Mark a previously-drafted (PENDING) raid as genuinely open. This is only
+// invoked AFTER the raid alert embed has actually been posted to the channel,
+// so a raid is never considered open until real helpers can see it.
+function setRaidOpen(raidId, guildId) {
+    const raids = loadRaids(guildId);
+    const raid = raids.raids.find(item => item.raidId === raidId);
+    if (!raid) return null;
+    raid.status = 'OPEN';
+    if (raid.requesterId) raids.activeRaidByOwner[raid.requesterId] = raidId;
+    saveRaids(guildId, raids);
+    return raid;
+}
+
+// Remove any raids this requester still has in the PENDING/draft state (e.g.
+// from an interrupted run that never posted its alert embed). This lets the
+// user retry without hitting a stale "already open raid" error.
+function cleanupPendingRaids(userId, guildId) {
+    const raids = loadRaids(guildId);
+    const before = raids.raids.length;
+    raids.raids = raids.raids.filter(r => !(r.status === 'PENDING' && r.requesterId === userId));
+    if (raids.raids.length !== before) saveRaids(guildId, raids);
+}
+
 module.exports = {
     ensureDataFiles,
     loadSettings,
@@ -667,6 +692,8 @@ module.exports = {
     isBlacklisted,
     blacklistUser,
     createRaid,
+    setRaidOpen,
+    cleanupPendingRaids,
     getRaidById,
     addHelper,
     removeHelper,

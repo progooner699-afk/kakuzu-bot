@@ -19,6 +19,7 @@ const pendingRaidApplications = new Map();
 const pendingRegionSelections = new Map();
 const pendingGameSelections = new Map();
 const pendingRaidOutcomes = new Map();
+const pendingServerLinks = new Map();
 
 // Region ping IDs are now configured per-guild via settings.regionPings
 
@@ -577,6 +578,7 @@ module.exports = {
 
             pendingGameSelections.set(interaction.user.id, detection.game);
             pendingRegionSelections.set(interaction.user.id, detection.region);
+            pendingServerLinks.set(interaction.user.id, detection.serverLink || '');
 
             const modal = new ModalBuilder()
                 .setCustomId("raid_application_step1")
@@ -759,12 +761,15 @@ module.exports = {
 
         if (interaction.customId === "raid_application_step1") {
             const userId = interaction.user.id;
-            if (!raidStateManager.canCreateRaid(userId, interaction.guild.id)) {
-                return interaction.reply({ content: "You already have an open raid or you are blocked from creating new raids.", flags: 64 }).catch(() => null);
+            const guildId = interaction.guild.id;
+            raidStateManager.cleanupPendingRaids(userId, guildId);
+            if (!raidStateManager.canCreateRaid(userId, guildId)) {
+                return interaction.reply({ content: "You already have an open raid. Close the existing raid first.", flags: 64 }).catch(() => null);
             }
 
             const game = pendingGameSelections.get(userId);
             const region = pendingRegionSelections.get(userId);
+            const serverLink = pendingServerLinks.get(userId) || '';
             
             if (!game || !region) {
                 pendingGameSelections.delete(userId);
@@ -788,6 +793,7 @@ module.exports = {
 
             pendingGameSelections.delete(userId);
             pendingRegionSelections.delete(userId);
+            pendingServerLinks.delete(userId);
 
             const verificationData = await verificationDb.getVerificationData(userId, interaction.guild.id);
             const robloxUsername = verificationData?.roblox_username || 'Unknown';
@@ -803,22 +809,22 @@ module.exports = {
                 robloxDisplayName,
                 robloxUserId,
                 robloxAvatarUrl,
-                serverLink: '',
+                serverLink,
                 region,
                 enemyCount: enemyNames.length,
-                teamers: 'Not provided',
                 enemyClanNames: enemyClanName,
                 enemyNames: enemyNames.join(', '),
                 enemyClanPresent: 'NO',
                 reason,
                 helperLimit,
-                guildId: interaction.guild.id
+                guildId: interaction.guild.id,
+                draft: true
             });
 
-            const settings = raidStateManager.loadSettings(interaction.guild.id);
+            const settings = raidStateManager.loadSettings(guildId);
             const content = raidStateManager.formatRaidMessage(raid);
             const raidButtonRow = createRaidButtons(raid, interaction.member);
-            const regionRoleInfo = getRegionRoleInfo(interaction.guild.id, raid.region);
+            const regionRoleInfo = getRegionRoleInfo(guildId, raid.region);
 
             if (!settings.raidChannel) {
                 return interaction.reply({ content: 'Raid channel is not configured. Please run `/setchannels` and set the `raid_channel` first (Raid Alert channel).', flags: 64 }).catch(() => null);
@@ -844,15 +850,236 @@ module.exports = {
 
             await interaction.reply({ embeds: [completionEmbed], flags: 64 }).catch(() => null);
 
-            const message = await targetChannel.send({
-                content: regionRoleInfo.mention || undefined,
-                embeds: [content],
-                components: [raidButtonRow],
-                allowedMentions: regionRoleInfo.allowedMentions
-            });
-            raidStateManager.updateRaidMessageReference(raid.raidId, targetChannel.id, message.id, interaction.guild.id);
+            try {
+                const message = await targetChannel.send({
+                    content: regionRoleInfo.mention || undefined,
+                    embeds: [content],
+                    components: [raidButtonRow],
+                    allowedMentions: regionRoleInfo.allowedMentions
+                });
+                raidStateManager.setRaidOpen(raid.raidId, guildId);
+                raidStateManager.updateRaidMessageReference(raid.raidId, targetChannel.id, message.id, guildId);
+            } catch (err) {
+                console.warn('Failed to post raid alert embed:', err?.message || err);
+                raidStateManager.cleanupPendingRaids(userId, guildId);
+                await interaction.followUp({ content: '⚠️ The raid alert could not be posted to the configured raid channel. Please ask an admin to verify the channel configuration and try again.', flags: 64 }).catch(() => null);
+            }
         }
+        // ===== RAID OPERATIONS: accept / leave / close / outcome / mvp =====
+        if (typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_accept_')) {
+            const raidId = Number(interaction.customId.split('_')[2]);
+            if (Number.isNaN(raidId)) {
+                await interaction.reply({ content: 'Invalid raid ID.', flags: 64 }).catch(() => null);
+                return;
+            }
+            const raid = raidStateManager.getRaidById(raidId, interaction.guild?.id);
+            if (!raid) {
+                await interaction.reply({ content: 'Raid not found.', flags: 64 }).catch(() => null);
+                return;
+            }
+            if (raid.status === 'CLOSED') {
+                await interaction.reply({ content: 'This raid is closed and cannot accept helpers.', flags: 64 }).catch(() => null);
+                return;
+            }
+            const isVerifiedHelper = await verificationDb.isUserVerified(interaction.user.id, interaction.guild.id);
+            if (!isVerifiedHelper) {
+                await interaction.reply({
+                    content: '🔒 **Raid Access Denied — Verification Required**\n\nYou must verify your Roblox account before accepting raids. Run `/link-roblox` with your Roblox username, then try again.',
+                    flags: 64
+                }).catch(() => null);
+                return;
+            }
+            const acceptModal = new ModalBuilder()
+                .setCustomId(`raid_acceptmodal_${raidId}`)
+                .setTitle('Join Raid Deployment Squad');
+            const robloxInput = new TextInputBuilder()
+                .setCustomId('helperRobloxUsername')
+                .setLabel('Enter your active Roblox Username')
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true);
+            acceptModal.addComponents(new ActionRowBuilder().addComponents(robloxInput));
+            await interaction.showModal(acceptModal).catch(() => null);
+            return;
         }
+
+        if (typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_leave_')) {
+            const raidId = Number(interaction.customId.split('_')[2]);
+            if (Number.isNaN(raidId)) return;
+            const result = raidStateManager.removeHelper(raidId, interaction.user.id, interaction.guild.id);
+            if (!result.success) {
+                await interaction.reply({ content: result.message, flags: 64 }).catch(() => null);
+                return;
+            }
+            const updated = result.raid;
+            const msg = raidStateManager.formatRaidMessage(updated);
+            const row = createRaidButtons(updated, interaction.member);
+            const channel = await interaction.client.channels.fetch(updated.channelId).catch(() => null);
+            if (channel) {
+                const message = await channel.messages.fetch(updated.messageId).catch(() => null);
+                if (message) await message.edit({ embeds: [msg], components: [row] }).catch(() => null);
+            }
+            await interaction.reply({ content: 'You have left the raid.', flags: 64 }).catch(() => null);
+            return;
+        }
+
+        if (typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_close_')) {
+            const raidId = Number(interaction.customId.split('_')[2]);
+            if (Number.isNaN(raidId)) return;
+            const raid = raidStateManager.getRaidById(raidId, interaction.guild?.id);
+            if (!raid) {
+                await interaction.reply({ content: 'Raid not found.', flags: 64 }).catch(() => null);
+                return;
+            }
+            if (!canCloseRaid(interaction.member, raid)) {
+                await interaction.reply({ content: 'Only the raid requester or an authorized staff member can close this raid.', flags: 64 }).catch(() => null);
+                return;
+            }
+            const outcomeRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`raid_outcome_win_${raidId}`).setLabel('🏆 Win').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId(`raid_outcome_whooped_${raidId}`).setLabel('🔥 Whooped').setStyle(ButtonStyle.Danger),
+                new ButtonBuilder().setCustomId(`raid_outcome_loss_${raidId}`).setLabel('❌ Loss').setStyle(ButtonStyle.Danger),
+                new ButtonBuilder().setCustomId(`raid_outcome_indeterminate_${raidId}`).setLabel('🤷 Can\'t Say').setStyle(ButtonStyle.Secondary)
+            );
+            await interaction.reply({
+                content: '📊 **Select the final raid outcome to compile streaks and log metrics:**',
+                components: [outcomeRow],
+                flags: 64
+            }).catch(() => null);
+            return;
+        }
+
+        if (typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_outcome_')) {
+            const parts = interaction.customId.split('_'); // raid_outcome_<outcome>_<raidId>
+            const outcome = parts[2];
+            const raidId = Number(parts[3]);
+            if (Number.isNaN(raidId)) return;
+            const raid = raidStateManager.getRaidById(raidId, interaction.guild?.id);
+            if (!raid || raid.status === 'CLOSED') {
+                await interaction.reply({ content: '❌ This raid record has already been locked.', flags: 64 }).catch(() => null);
+                return;
+            }
+            raidStateManager.closeRaid(raidId, { outcome }, interaction.guild.id);
+            raid.status = 'CLOSED';
+            raid.outcome = outcome;
+            if (raid.helpers && raid.helpers.length > 0) {
+                const mvpSelect = new StringSelectMenuBuilder()
+                    .setCustomId(`raid_mvp_select_${raidId}`)
+                    .setPlaceholder('Select the MVP helper')
+                    .setMinValues(1)
+                    .setMaxValues(1);
+                for (const helper of raid.helpers) {
+                    const helperUserId = typeof helper === 'string' ? helper : helper.userId;
+                    const helperName = typeof helper === 'string' ? 'Unknown' : (helper.robloxUsername || helper.robloxDisplayName || 'Unknown');
+                    mvpSelect.addOptions(
+                        new StringSelectMenuOptionBuilder()
+                            .setLabel(helperName)
+                            .setDescription('Discord: ' + helperUserId)
+                            .setValue(helperUserId)
+                    );
+                }
+                mvpSelect.addOptions(
+                    new StringSelectMenuOptionBuilder()
+                        .setLabel('⏭️ Skip MVP Selection')
+                        .setValue('skip')
+                );
+                pendingRaidOutcomes.set(raidId, outcome);
+                await interaction.reply({
+                    content: '🏆 **Select the MVP helper for this raid, or skip to proceed:**',
+                    components: [new ActionRowBuilder().addComponents(mvpSelect)],
+                    flags: 64
+                }).catch(() => null);
+                return;
+            }
+            await interaction.reply({ content: `✅ Combat operation logs compiled as **${outcome.toUpperCase()}**!`, flags: 64 }).catch(() => null);
+            await finalizeRaidOutcome(interaction, raid, outcome);
+            return;
+        }
+
+        if (interaction.isStringSelectMenu() && typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_mvp_select_')) {
+            const raidId = Number(interaction.customId.replace('raid_mvp_select_', ''));
+            if (Number.isNaN(raidId)) return;
+            const mvpUserId = interaction.values[0];
+            const outcome = pendingRaidOutcomes.get(raidId);
+            pendingRaidOutcomes.delete(raidId);
+            let raid = raidStateManager.getRaidById(raidId, interaction.guild.id);
+            if (!raid || raid.status !== 'CLOSED') {
+                await interaction.reply({ content: '❌ This raid has already been finalized.', flags: 64 }).catch(() => null);
+                return;
+            }
+            const actualOutcome = outcome || raid.outcome;
+            if (!actualOutcome) {
+                await interaction.reply({ content: '❌ Could not determine the raid outcome.', flags: 64 }).catch(() => null);
+                return;
+            }
+            if (mvpUserId !== 'skip') {
+                raidStateManager.setRaidMvp(raidId, mvpUserId, interaction.guild.id);
+                raid = raidStateManager.getRaidById(raidId, interaction.guild.id);
+            }
+            await interaction.update({
+                content: `🏆 MVP set to ${mvpUserId !== 'skip' ? '<@' + mvpUserId + '>' : 'none'}. Compiling raid result...`,
+                components: [],
+                flags: 64
+            }).catch(() => null);
+            await finalizeRaidOutcome(interaction, raid, actualOutcome);
+            return;
+        }
+
+        if (interaction.isModalSubmit() && typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_acceptmodal_')) {
+            const raidId = Number(interaction.customId.split('_')[2]);
+            const helperUsername = interaction.fields.getTextInputValue('helperRobloxUsername');
+            const guildId = interaction.guild.id;
+            const currentRaid = raidStateManager.getRaidById(raidId, guildId);
+            if (!currentRaid || currentRaid.status === 'CLOSED') {
+                await interaction.reply({ content: 'This raid operation is no longer active or closed.', flags: 64 }).catch(() => null);
+                return;
+            }
+            const robloxValidation = await robloxApi.validateAndGetAvatar(helperUsername);
+            if (!robloxValidation.success) {
+                await interaction.reply({ content: `❌ **Roblox Username Validation Failed**\n${robloxValidation.error}`, flags: 64 }).catch(() => null);
+                return;
+            }
+            const result = await raidStateManager.addHelper(raidId, interaction.user.id, {
+                username: helperUsername,
+                displayName: robloxValidation.displayName || helperUsername,
+                userId: robloxValidation.userId || "1"
+            }, guildId);
+            if (!result.success) {
+                await interaction.reply({ content: result.message, flags: 64 }).catch(() => null);
+                return;
+            }
+            const updated = result.raid;
+            const msg = raidStateManager.formatRaidMessage(updated);
+            const row = createRaidButtons(updated, interaction.member);
+            const channel = await interaction.client.channels.fetch(updated.channelId).catch(() => null);
+            if (channel) {
+                const message = await channel.messages.fetch(updated.messageId).catch(() => null);
+                if (message) await message.edit({ embeds: [msg], components: [row] }).catch(() => null);
+            }
+            // DM the helper the private server link.
+            const gameLabel = raidStateManager.GAME_CONFIG[updated.targetGame] || updated.targetGame || 'Unknown';
+            const helperDmEmbed = new EmbedBuilder()
+                .setTitle(`⚔️ Raid #${updated.raidId} — Join Deployment`)
+                .setDescription('You have been accepted as a helper for this raid.')
+                .addFields([
+                    { name: '🎮 Game', value: gameLabel, inline: true },
+                    { name: '🌍 Region', value: updated.region || 'Unknown', inline: true },
+                    { name: '📋 Raid ID', value: `#${updated.raidId}`, inline: true },
+                    { name: '🔗 Server Link', value: updated.serverLink ? `[Join Server](${updated.serverLink})` : 'No link provided', inline: false }
+                ])
+                .setColor(0xFFD700)
+                .setFooter({ text: 'Kakuzu Raid System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
+                .setTimestamp();
+            try {
+                const helperUser = await interaction.client.users.fetch(interaction.user.id);
+                await helperUser.send({ embeds: [helperDmEmbed] }).catch(() => null);
+            } catch (err) { /* DMs may be closed */ }
+            await interaction.reply({
+                content: `✅ **Raid Request Accepted!**\n- \`Raid ID:\` #${updated.raidId}\n- \`Server:\` ${updated.serverLink || 'No link provided'}`,
+                flags: 64
+            }).catch(() => null);
+            return;
+        }
+    }
     }
 ;
 
