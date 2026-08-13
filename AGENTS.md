@@ -54,10 +54,9 @@ Refactored the linking → request → join → close loop per the spec:
 * **Public buttons are never greyed globally** for unverified users — the deny
   happens at interaction time, not via `setDisabled`.
 * **Join delivery:** helpers receive an **ephemeral message with a native
-  `ButtonStyle.Link` button** to the Roblox launcher deep-link
-  `roblox://experiences/start?placeId=...&gameInstanceId=...`. The requester's
-  `placeId`/`serverId` are captured from Roblox presence, stored on the raid, and
-  resolved by `buildRobloxJoinLink`.
+  `ButtonStyle.Link` button** to an https Roblox "start" join URL. The requester's
+  `placeId`/`serverId` are captured from Roblox presence and stored on the raid,
+  and resolved by `buildRobloxJoinLink`.
 * **Presence polling** lowered to **15s** (`PRESENCE_POLL_INTERVAL` in ready.js).
 * **Auto-MVP:** on close/outcome the helper with the highest `timeSpentSeconds`
   is set as MVP automatically (manual picker removed).
@@ -95,8 +94,10 @@ Refactored the linking → request → join → close loop per the spec:
      (👤 Details / 🎯 Target / 🌐 Region / 👥 Helper Status / 💬 Description),
      code-blocked target & description, `Live Helpers (n/max)` with per-helper
      PFP lines, streak + region/ping line.
-   * `[ ↗️ JOIN SERVER ]` — `ButtonStyle.Link` (grey) to the Roblox deep-link
-     (`roblox://experiences/start?...`), built by `buildRobloxJoinLink`.
+   * `[ ↗️ JOIN SERVER ]` — `ButtonStyle.Link` (grey) to an https Roblox join URL
+     (`https://www.roblox.com/games/start?placeId=...` — Discord Link buttons
+     reject `roblox://` schemes, which would fail the whole alert), built by
+     `buildRobloxJoinLink`.
    * `[ Join Raid ]` — `ButtonStyle.Secondary` (grey). On click by a verified
      helper, opens the accept modal; the helper is then sent an ephemeral native
      Discord **Link** button (`ButtonStyle.Link`) to the same deep-link.

@@ -105,16 +105,20 @@ function buildUnverifiedMessage(guildId) {
 }
 
 /**
- * Builds the native Roblox launcher deep-link for a raid using the requester's
- * in-game place + server (job) ids. Falls back to the stored HTTPS server link.
+ * Builds the Roblox join URL for a raid (used by the public JOIN SERVER button
+ * and the helper's ephemeral link button).
+ * Discord Link-style buttons only accept http(s) URLs — a `roblox://` scheme is
+ * rejected by the API and would make the whole alert message fail to post. So we
+ * expose an https Roblox "start" link (the client redirects to the launcher) and
+ * fall back to the stored HTTPS server link when no place id is available.
  */
 function buildRobloxJoinLink(raid) {
     const placeId = raid && raid.placeId;
-    const serverId = raid && raid.serverId;
-    if (placeId && serverId) {
-        return `roblox://experiences/start?placeId=${placeId}&gameInstanceId=${serverId}`;
+    if (placeId) {
+        return `https://www.roblox.com/games/start?placeId=${placeId}`;
     }
-    return (raid && raid.serverLink) ? raid.serverLink : null;
+    const fallback = (raid && raid.serverLink) ? raid.serverLink : null;
+    return fallback && /^https?:\/\//i.test(fallback) ? fallback : null;
 }
 
 function normalizeRegion(region) {
