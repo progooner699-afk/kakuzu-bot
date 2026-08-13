@@ -1,0 +1,113 @@
+# 🗺️ KAKUZU DISCORD BOT — LIVE DEVELOPMENT MAP
+
+> **Read this first.** Any AI agent (or human) resuming work should start here for
+> the current state, architecture, and how to run/verify the bot. It is updated
+> continually as the project evolves.
+
+## 📌 PROJECT STATUS
+
+* **Status:** Stable — Recovery & Refactoring complete. All runtime files parse,
+  test suite passes, and the working tree is committed & pushed to `origin/main`.
+* **Framework:** Discord.js **v14** (`discord.js@^14.26.4`).
+* **Database:** SQLite via **`sql.js`** (a pure-JS/wasm SQLite port — **NOT**
+  `better-sqlite3`). Per-guild DB files at:
+  `data/guilds/<guildId>/verification.sqlite` (created on demand).
+  * Handle: `handlers/verificationDb.js` — exposes `isUserVerified`,
+    `getVerificationData`, `markVerified`, `acceptVerification`,
+    `rejectVerification`, `setVerificationLogMessage`,
+    `getPendingVerifications`, `directLink`.
+* **Backing store for raid/settings state:** `handlers/raidStateManager.js`
+  (in-memory maps + per-guild JSON under `data/`). Also exposes
+  `GAME_CONFIG`, `formatRaidMessage`, `formatTimeSpent`,
+  `pollHelperPresences` (Roblox Presence API helper-time tracking).
+* **HTTP dashboard:** Express + CORS on `process.env.PORT || 5000`
+  (`index.js`) — `/` health, `/api/stats`, `/api/action/restart`.
+* **Config/Secrets:** `config.json` (clientId), `.env` (`DISCORD_TOKEN`).
+  `.env` is git-ignored; `config.json` is committed.
+
+## 🔁 IMPORTANT RECOVERY NOTE (as of latest commit)
+
+The repo was **already clean & pushed** (`HEAD == origin/main`) at commit
+`c0685c3` when this map was written. During the recovery session:
+
+1. `events/interactionCreate.js` had a **brace imbalance** (one stray closing
+   `}` in the step-1 block). It was re-validated: brace balance **344 open / 344
+   close, diff 0**, and `node --check events\interactionCreate.js` → **exit 0**.
+2. The raid report card had **mangled emoji** (lossy `?? MVP:` + `U+FFFD`
+   replacement chars). Fixed to `🏆 MVP:` / `✅` / `⏱️ Time Spent`.
+3. Files under `scripts/` are **disposable patch fragments** from the recovery —
+   several do **not** parse on purpose (they are search/replace snippets). Ignore
+   them; they are not runtime code and are git-ignored/stale.
+## ⚙️ PIPELINE ARCHITECTURE
+
+1. **Roblox Linking / Verification (`/link-roblox`):**
+   * Staff-only (Administrator **or** Manage Messages) command. Posts an
+     embed + channel-select (`select_link_channel`) so an admin picks where the
+     link embed goes.
+   * In that channel the `[ Link Roblox 🔗 ]` button (`link_roblox`) opens a
+     modal (`link_roblox_modal`) → username validated via Roblox API
+     (`handlers/robloxApi.js`) → `verificationDb.directLink(...)` grants raid
+     access **immediately** (no moderator approval round-trip).
+2. **Unverified Request/Accept handling:** If an unverified user clicks
+   `request_raid` (or a `Join`), the bot replies **ephemeral** telling them to
+   run `/link-roblox`. Public buttons are **never** greyed out for unverified
+   users — the deny is an ephemeral message in the detected verification area.
+3. **Automatic game, region & server-link detection:** `handlers/robloxApi.js`
+   queries the Roblox Presence API (`presence.roblox.com`) for active
+   `InGame` status → Place ID / Job ID / IP region (e.g., Mumbai, Frankfurt,
+   Ashburn) to build the Roblox deep-link `roblox://experiences/start?...`.
+4. **Active Raid Embed Controls (`createRaidButtons` in interactionCreate.js):**
+   * `[ Join ]` — `ButtonStyle.Secondary` (grey). On click by a verified helper,
+     opens the accept modal; the helper is then DM'd a native Discord **Link
+     button** (`ButtonStyle.Link`) to the Roblox deep-link (discord shows the
+     external-link icon automatically).
+   * `[ Close Raid ]` — `ButtonStyle.Secondary`. Executable **only** by the raid
+     requester or an authorized staff role (see `canCloseRaid`).
+5. **Session Tracking & Results:**
+   * `events/ready.js` starts a 60s interval → `raidStateManager.pollHelperPresences`
+     tracks helper time. If no `ROBLOX_API_KEY` is set it no-ops and falls back
+     to join→close delta.
+   * On `[ Close Raid ]` → outcome picker (`raid_outcome_*`: Win / Whooped /
+     Loss / Can't Say) → optional MVP selector (`raid_mvp_select_`, or skip) →
+     raid closed, streak/metrics compiled, final Raid Result embed posted
+     (see `buildReportCardEmbed` + outcome helpers starting ~line 236).
+
+## 📂 KEY FILES
+
+| Path | Purpose |
+| ---- | ------- |
+| `index.js` | Bot bootstrap, intents, command loading, Express dashboard, `client.login`. |
+| `events/ready.js` | On-ready guild command registration + helper-presence polling loop. |
+| `events/interactionCreate.js` | **Main interaction hub** (buttons, modals, selects). Contains verification decision helpers, link flow, raid application step 1, and the RAID OPERATIONS section (`raid_accept_`, `raid_leave_`, `raid_close_`, `raid_outcome_`, `raid_mvp_select_`). |
+| `handlers/raidStateManager.js` | Raid CRUD + persistence + presence polling. |
+| `handlers/robloxApi.js` | Roblox API/Presence calls, username validation, deep-links. |
+| `handlers/verificationDb.js` | sql.js persistence for verification records. |
+| `handlers/verificationHelpers.js` | `formatRobloxProfileValue` and friends. |
+| `handlers/commandHandler.js` | Loads commands from `commands/` into `client.commands`. |
+| `commands/deploy-commands.js` | `registerGuildCommands(guildId)` — used by `ready.js`; also a standalone CLI (`npm run deploy-commands`). |
+| `commands/*.js` | Slash commands (link-roblox, requestraid, verify-help, close-raid, channel config, setregionping, verificationadminrole, botinfo, announcement, forceshutallraids, etc.). |
+
+## ✅ RECENT KEY DECISIONS (commit `c0685c3`)
+
+* Removed the moderator "verification gate" — linking **auto-verifies** via
+  `directLink`.
+* Auto-verify on raid **accept** (helper modal writes a verification row).
+* Fixed region detection; hide public Roblox links; button styling updates
+  (grey secondary for Join / Close Raid).
+
+## 🧪 RUN & VERIFY
+
+```bash
+npm install
+npm test                 # node --test  (suite: test/, plus scripts/require_test.js boot check)
+node --check events\interactionCreate.js
+npm run deploy-commands  # optional manual register
+node index.js            # requires .env with DISCORD_TOKEN
+```
+
+## 📎 GIT
+
+* Remote: `origin` → `https://github.com/progooner699-afk/kakuzu-bot.git`
+* Branch: `main`.
+* Keep `AGENTS.md` current whenever the architecture or running commands change,
+  and keep `.gitignore` covering `.env`, `node_modules`, and stray `scripts/`.

@@ -389,8 +389,8 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
                 const helperRobloxUsername = typeof h === 'string' ? 'Unknown' : (h.robloxUsername || 'Unknown');
                 const timeSpent = typeof h === 'object' ? raidStateManager.formatTimeSpent(h.timeSpentSeconds || 0) : '0m 0s';
                 const isMvp = helperUserId === mvpUserId;
-                const prefix = isMvp ? '?? MVP: ' : '� ';
-                return `${prefix}<@${helperUserId}> (Roblox: ${helperRobloxUsername}) � Time Spent: ${timeSpent}`;
+                const prefix = isMvp ? '🏆 MVP: ' : '✅ ';
+                return `${prefix}<@${helperUserId}> (Roblox: ${helperRobloxUsername}) ⏱️ Time Spent: ${timeSpent}`;
             }).join('\n')
             : 'No operators deployed.';
 
