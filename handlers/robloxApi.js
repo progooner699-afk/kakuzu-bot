@@ -355,6 +355,8 @@ async function getUserPresence(userId) {
         return {
             success: true,
             gameId: placeId.toString(),
+            universeId: presence.universeId,
+            placeId,
             gameName,
             serverId: gameId,
             joinScript
@@ -397,8 +399,8 @@ async function detectGameAndRegion(userId) {
     }
 
     // Try to detect the actual server region (e.g. Mumbai, Singapore) via the
-    // Roblox servers API using the user's current server id (gameId).
-    if (presence.gameId && presence.placeId) {
+    // Roblox servers API using the user's current server id.
+    if (presence.serverId && presence.universeId) {
         try {
             const serversResponse = await fetch(
                 `https://games.roblox.com/v1/games/${presence.universeId}/servers/Public?limit=100`
@@ -406,7 +408,7 @@ async function detectGameAndRegion(userId) {
             if (serversResponse.ok) {
                 const serversData = await serversResponse.json();
                 const servers = serversData.data || [];
-                const currentServer = servers.find(s => s && String(s.id) === String(presence.gameId));
+                const currentServer = servers.find(s => s && String(s.id) === String(presence.serverId));
                 if (currentServer && currentServer.region) {
                     detectedRegion = String(currentServer.region).toUpperCase();
                 }
@@ -424,8 +426,8 @@ async function detectGameAndRegion(userId) {
         }
     }
 
-    if (!serverLink && presence.gameId) {
-        serverLink = `https://www.roblox.com/games/${presence.gameId}`;
+    if (!serverLink && presence.placeId) {
+        serverLink = `https://www.roblox.com/games/${presence.placeId}`;
     }
 
     return {

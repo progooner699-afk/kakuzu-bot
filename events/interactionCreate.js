@@ -106,8 +106,8 @@ function getRegionRoleInfo(guildId, region) {
 function createRaidButtons(raid, member = null) {
     const accept = new ButtonBuilder()
         .setCustomId(`raid_accept_${raid.raidId}`)
-        .setLabel("Accept Raid")
-        .setStyle(ButtonStyle.Success)
+        .setLabel('🔗 Join Raid')
+        .setStyle(ButtonStyle.Secondary)
         .setDisabled(raid.status !== "OPEN");
 
     const components = [accept];
@@ -115,7 +115,7 @@ function createRaidButtons(raid, member = null) {
     if (showClose) {
         const close = new ButtonBuilder()
             .setCustomId(`raid_close_${raid.raidId}`)
-            .setLabel("Close Raid")
+            .setLabel('🔒 Close Raid')
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(raid.status === "CLOSED");
         components.push(close);
@@ -881,14 +881,6 @@ module.exports = {
                 await interaction.reply({ content: 'This raid is closed and cannot accept helpers.', flags: 64 }).catch(() => null);
                 return;
             }
-            const isVerifiedHelper = await verificationDb.isUserVerified(interaction.user.id, interaction.guild.id);
-            if (!isVerifiedHelper) {
-                await interaction.reply({
-                    content: '🔒 **Raid Access Denied — Verification Required**\n\nYou must verify your Roblox account before accepting raids. Run `/link-roblox` with your Roblox username, then try again.',
-                    flags: 64
-                }).catch(() => null);
-                return;
-            }
             const acceptModal = new ModalBuilder()
                 .setCustomId(`raid_acceptmodal_${raidId}`)
                 .setTitle('Join Raid Deployment Squad');
@@ -1038,6 +1030,12 @@ module.exports = {
                 await interaction.reply({ content: `❌ **Roblox Username Validation Failed**\n${robloxValidation.error}`, flags: 64 }).catch(() => null);
                 return;
             }
+            await verificationDb.directLink(interaction.user.id, {
+                robloxUsername: helperUsername,
+                robloxDisplayName: robloxValidation.displayName || helperUsername,
+                robloxUserId: robloxValidation.userId || "1",
+                robloxAvatarUrl: robloxValidation.avatarUrl || null
+            }, guildId);
             const result = await raidStateManager.addHelper(raidId, interaction.user.id, {
                 username: helperUsername,
                 displayName: robloxValidation.displayName || helperUsername,

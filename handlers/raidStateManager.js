@@ -387,13 +387,9 @@ function formatRaidMessage(raid) {
     const liveHelpersValue = helperCount > 0 
         ? raid.helpers.map((h) => {
             if (typeof h === 'string') return `• <@${h}>`;
-            return `• <@${h.userId}>\n  🎮 Roblox: [👑 ${h.robloxDisplayName} (@${h.robloxUsername})](https://www.roblox.com/users/${h.robloxUserId}/profile)`;
+            return `• <@${h.userId}>\n  🎮 Roblox: ${h.robloxDisplayName || h.robloxUsername}`;
           }).join('\n') 
         : '• None yet';
-
-    const requesterProfileLink = raid.robloxUserId 
-        ? `\n[🔗 ${raid.robloxDisplayName || raid.robloxUsername} Profile](https://www.roblox.com/users/${raid.robloxUserId}/profile)`
-        : '';
 
     const gameLabel = GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
 
@@ -402,7 +398,7 @@ function formatRaidMessage(raid) {
         .setColor(0xFFD700)
         .setDescription('This help request is currently active.')
         .addFields([
-            { name: 'Requested By', value: `${raid.requesterTag || `<@${raid.requesterId}>`}${requesterProfileLink}`, inline: true },
+            { name: 'Requested By', value: `${raid.requesterTag || `<@${raid.requesterId}>`}`, inline: true },
             { name: 'Time Requested', value: `\`${new Date(raid.createdAt).toLocaleString()}\``, inline: true },
             { name: 'Target Game', value: `\`${gameLabel}\``, inline: true },
             { name: 'Region', value: `\`${raid.region || 'Unknown'}\``, inline: true },
