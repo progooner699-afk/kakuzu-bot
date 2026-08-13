@@ -23,7 +23,10 @@ const defaultSettings = {
     // Persistent per-guild counter used to generate unique verification IDs
     verificationRequestCounter: 0,
     // regionPings: mapping of normalized region -> array of role IDs (strings)
-    regionPings: {}
+    regionPings: {},
+    // Channel where the official /link-roblox verification embed lives. Used to
+    // dynamically point unverified users to the correct channel in guard messages.
+    verificationChannel: null
 };
 
 const defaultRaids = {
@@ -244,6 +247,8 @@ function createRaid(options) {
         robloxUserId: options.robloxUserId || "1",
         robloxAvatarUrl: options.robloxAvatarUrl || null,
         serverLink: normalizeText(options.serverLink),
+        placeId: normalizeText(options.placeId),
+        serverId: normalizeText(options.serverId),
         region: normalizeText(options.region),
         enemyCount: Number(options.enemyCount) || 0,
         teamers: normalizeText(options.teamers),

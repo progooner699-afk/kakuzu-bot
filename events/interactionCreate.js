@@ -20,6 +20,8 @@ const pendingRegionSelections = new Map();
 const pendingGameSelections = new Map();
 const pendingRaidOutcomes = new Map();
 const pendingServerLinks = new Map();
+const pendingPlaceIds = new Map();
+const pendingServerIds = new Map();
 
 // Region ping IDs are now configured per-guild via settings.regionPings
 
@@ -64,6 +66,12 @@ function canCloseRaid(member, raid) {
     if (!member || !raid) return false;
     if (member.id === raid.requesterId) return true;
     if (member.permissions.has(PermissionsBitField.Flags.Administrator)) return true;
+    const guildId = member.guild && member.guild.id;
+    if (guildId) {
+        // Users granted the configured verification/admin role (per guild settings).
+        const roleIds = getVerificationAdminRoleIds(guildId);
+        if (roleIds.some(id => member.roles.cache.has(id))) return true;
+    }
     return member.roles.cache.some(role => RAID_CLOSE_ROLES.includes(role.name));
 }
 
@@ -74,6 +82,39 @@ function canModerateVerification(member) {
     if (!guildId) return false;
     const roleIds = getVerificationAdminRoleIds(guildId);
     return roleIds.some(id => member.roles.cache.has(id));
+}
+
+/**
+ * Returns a mention for the guild's configured /link-roblox verification channel,
+ * or null if none has been set up yet. It is persisted when an admin selects the
+ * channel for the link embed, so guard messages can point users to the exact spot.
+ */
+function getVerificationChannelMention(guildId) {
+    try {
+        const settings = raidStateManager.loadSettings(guildId) || {};
+        if (settings.verificationChannel) return `<#${settings.verificationChannel}>`;
+    } catch (err) { /* ignore */ }
+    return null;
+}
+
+function buildUnverifiedMessage(guildId) {
+    const mention = getVerificationChannelMention(guildId);
+    return mention
+        ? `🔒 You are not verified! Please link your Roblox account in ${mention} first.`
+        : '🔒 You are not verified! Please link your Roblox account using the Link Roblox embed first.';
+}
+
+/**
+ * Builds the native Roblox launcher deep-link for a raid using the requester's
+ * in-game place + server (job) ids. Falls back to the stored HTTPS server link.
+ */
+function buildRobloxJoinLink(raid) {
+    const placeId = raid && raid.placeId;
+    const serverId = raid && raid.serverId;
+    if (placeId && serverId) {
+        return `roblox://experiences/start?placeId=${placeId}&gameInstanceId=${serverId}`;
+    }
+    return (raid && raid.serverLink) ? raid.serverLink : null;
 }
 
 function normalizeRegion(region) {
@@ -106,7 +147,7 @@ function getRegionRoleInfo(guildId, region) {
 function createRaidButtons(raid, member = null) {
     const accept = new ButtonBuilder()
         .setCustomId(`raid_accept_${raid.raidId}`)
-        .setLabel('🔗 Join Raid')
+        .setLabel('Join')
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(raid.status !== "OPEN");
 
@@ -115,7 +156,7 @@ function createRaidButtons(raid, member = null) {
     if (showClose) {
         const close = new ButtonBuilder()
             .setCustomId(`raid_close_${raid.raidId}`)
-            .setLabel('🔒 Close Raid')
+            .setLabel('Close Raid')
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(raid.status === "CLOSED");
         components.push(close);
@@ -561,7 +602,7 @@ module.exports = {
             const isVerified = Boolean(verificationData?.is_verified && verificationData?.roblox_user_id);
             if (!isVerified) {
                 return interaction.reply({
-                    content: "Raid Access Denied - Verification Required. Link your Roblox account first by using the link embed button.",
+                    content: buildUnverifiedMessage(interaction.guild.id),
                     flags: 64
                 }).catch(() => null);
             }
@@ -579,6 +620,8 @@ module.exports = {
             pendingGameSelections.set(interaction.user.id, detection.game);
             pendingRegionSelections.set(interaction.user.id, detection.region);
             pendingServerLinks.set(interaction.user.id, detection.serverLink || '');
+            pendingPlaceIds.set(interaction.user.id, detection.placeId || '');
+            pendingServerIds.set(interaction.user.id, detection.serverId || '');
 
             const modal = new ModalBuilder()
                 .setCustomId("raid_application_step1")
@@ -647,10 +690,16 @@ module.exports = {
 
             const linkButton = new ButtonBuilder()
                 .setCustomId('link_roblox')
-                .setLabel('Link Roblox')
-                .setStyle(ButtonStyle.Primary);
+                .setLabel('🔗 Link Roblox')
+                .setStyle(ButtonStyle.Success);
 
             const buttonRow = new ActionRowBuilder().addComponents(linkButton);
+
+            // Persist the chosen channel so unverified-user guard messages can
+            // dynamically link to this exact spot for the /link-roblox embed.
+            const linkSettings = raidStateManager.loadSettings(interaction.guild.id) || {};
+            linkSettings.verificationChannel = selectedChannel.id;
+            raidStateManager.saveSettings(interaction.guild.id, linkSettings);
 
             await interaction.reply({
                 content: `Posting Roblox link embed in <#${selectedChannel.id}>`,
@@ -744,7 +793,7 @@ module.exports = {
 
             const successEmbed = new EmbedBuilder()
                 .setTitle('Roblox Account Linked')
-                .setDescription('Your Discord account has been successfully linked and verified for raid access.')
+                .setDescription(`✅ Successfully linked as ${robloxDisplayName}!`)
                 .addFields([
                     { name: 'Roblox Profile', value: `[${robloxDisplayName} (@${robloxUsername})](${profileLink})`, inline: false },
                     { name: 'Roblox User ID', value: `\`${robloxUserId}\``, inline: true },
@@ -770,6 +819,8 @@ module.exports = {
             const game = pendingGameSelections.get(userId);
             const region = pendingRegionSelections.get(userId);
             const serverLink = pendingServerLinks.get(userId) || '';
+            const placeId = pendingPlaceIds.get(userId) || '';
+            const serverId = pendingServerIds.get(userId) || '';
             
             if (!game || !region) {
                 pendingGameSelections.delete(userId);
@@ -794,6 +845,8 @@ module.exports = {
             pendingGameSelections.delete(userId);
             pendingRegionSelections.delete(userId);
             pendingServerLinks.delete(userId);
+            pendingPlaceIds.delete(userId);
+            pendingServerIds.delete(userId);
 
             const verificationData = await verificationDb.getVerificationData(userId, interaction.guild.id);
             const robloxUsername = verificationData?.roblox_username || 'Unknown';
@@ -810,6 +863,8 @@ module.exports = {
                 robloxUserId,
                 robloxAvatarUrl,
                 serverLink,
+                placeId,
+                serverId,
                 region,
                 enemyCount: enemyNames.length,
                 enemyClanNames: enemyClanName,
@@ -879,6 +934,12 @@ module.exports = {
             }
             if (raid.status === 'CLOSED') {
                 await interaction.reply({ content: 'This raid is closed and cannot accept helpers.', flags: 64 }).catch(() => null);
+                return;
+            }
+            const joiningData = await verificationDb.getVerificationData(interaction.user.id, interaction.guild?.id);
+            const joiningVerified = Boolean(joiningData?.is_verified && joiningData?.roblox_user_id);
+            if (!joiningVerified) {
+                await interaction.reply({ content: buildUnverifiedMessage(interaction.guild.id), flags: 64 }).catch(() => null);
                 return;
             }
             const acceptModal = new ModalBuilder()
@@ -951,39 +1012,30 @@ module.exports = {
                 return;
             }
             raidStateManager.closeRaid(raidId, { outcome }, interaction.guild.id);
-            raid.status = 'CLOSED';
-            raid.outcome = outcome;
-            if (raid.helpers && raid.helpers.length > 0) {
-                const mvpSelect = new StringSelectMenuBuilder()
-                    .setCustomId(`raid_mvp_select_${raidId}`)
-                    .setPlaceholder('Select the MVP helper')
-                    .setMinValues(1)
-                    .setMaxValues(1);
-                for (const helper of raid.helpers) {
-                    const helperUserId = typeof helper === 'string' ? helper : helper.userId;
-                    const helperName = typeof helper === 'string' ? 'Unknown' : (helper.robloxUsername || helper.robloxDisplayName || 'Unknown');
-                    mvpSelect.addOptions(
-                        new StringSelectMenuOptionBuilder()
-                            .setLabel(helperName)
-                            .setDescription('Discord: ' + helperUserId)
-                            .setValue(helperUserId)
-                    );
+            let finalRaid = raidStateManager.getRaidById(raidId, interaction.guild.id) || raid;
+            finalRaid.status = 'CLOSED';
+            finalRaid.outcome = outcome;
+            // Auto-calculate the MVP from the helper who spent the most active time.
+            const autoHelpers = Array.isArray(finalRaid.helpers)
+                ? finalRaid.helpers.filter(h => typeof h === 'object' && h.userId)
+                : [];
+            if (autoHelpers.length > 0) {
+                let bestTime = -1;
+                let mvpUserId = null;
+                for (const h of autoHelpers) {
+                    const t = Number(h.timeSpentSeconds) || 0;
+                    if (t > bestTime) {
+                        bestTime = t;
+                        mvpUserId = h.userId;
+                    }
                 }
-                mvpSelect.addOptions(
-                    new StringSelectMenuOptionBuilder()
-                        .setLabel('⏭️ Skip MVP Selection')
-                        .setValue('skip')
-                );
-                pendingRaidOutcomes.set(raidId, outcome);
-                await interaction.reply({
-                    content: '🏆 **Select the MVP helper for this raid, or skip to proceed:**',
-                    components: [new ActionRowBuilder().addComponents(mvpSelect)],
-                    flags: 64
-                }).catch(() => null);
-                return;
+                // Fallback when no presence/join time was recorded.
+                if (bestTime <= 0) mvpUserId = autoHelpers[0].userId;
+                raidStateManager.setRaidMvp(raidId, mvpUserId, interaction.guild.id);
+                finalRaid = raidStateManager.getRaidById(raidId, interaction.guild.id) || finalRaid;
             }
             await interaction.reply({ content: `✅ Combat operation logs compiled as **${outcome.toUpperCase()}**!`, flags: 64 }).catch(() => null);
-            await finalizeRaidOutcome(interaction, raid, outcome);
+            await finalizeRaidOutcome(interaction, finalRaid, outcome);
             return;
         }
 
@@ -1066,16 +1118,23 @@ module.exports = {
                 ])
                 .setColor(0xFFD700)
                 .setFooter({ text: 'Kakuzu Raid System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
-                .setTimestamp();
-            try {
-                const helperUser = await interaction.client.users.fetch(interaction.user.id);
-                await helperUser.send({ embeds: [helperDmEmbed] }).catch(() => null);
-            } catch (err) { /* DMs may be closed */ }
-            await interaction.reply({
-                content: `✅ **Raid Request Accepted!**\n- \`Raid ID:\` #${updated.raidId}\n- \`Server:\` ${updated.serverLink || 'No link provided'}`,
-                flags: 64
-            }).catch(() => null);
-            return;
+                try {
+                    const helperUser = await interaction.client.users.fetch(interaction.user.id);
+                    await helperUser.send({ embeds: [helperDmEmbed] }).catch(() => null);
+                } catch (err) { /* DMs may be closed */ }
+                const deepLink = buildRobloxJoinLink(updated);
+                const joinRow = deepLink
+                    ? new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel("Launch Roblox").setURL(deepLink)
+                    )
+                    : null;
+                await interaction.reply({
+                    content: `✅ **Raid Request Accepted!**`,
+                    embeds: [helperDmEmbed],
+                    components: joinRow ? [joinRow] : [],
+                    flags: 64
+                }).catch(() => null);
+                return;
         }
     }
     }

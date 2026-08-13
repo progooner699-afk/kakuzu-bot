@@ -38,16 +38,49 @@ The repo was **already clean & pushed** (`HEAD == origin/main`) at commit
 3. Files under `scripts/` are **disposable patch fragments** from the recovery —
    several do **not** parse on purpose (they are search/replace snippets). Ignore
    them; they are not runtime code and are git-ignored/stale.
+
+## ✅ VERIFICATION PIPELINE REFACTOR (this commit)
+
+Refactored the linking → request → join → close loop per the spec:
+
+* **/link-roblox embed** uses a **green** (`ButtonStyle.Success`) `🔗 Link Roblox`
+  button. The admin-selected channel is **persisted** per-guild as
+  `settings.verificationChannel` so guard messages point users to the exact spot.
+  Linking success replies `✅ Successfully linked as <name>!` (ephemeral; no
+  pre-verification is required to link an account).
+* **Unverified User Guard:** clicking `request_raid` or `Join` while unverified
+  now replies an **ephemeral** `🔒 You are not verified! Please link your Roblox
+  account in <#CHANNEL> first.` using the dynamically detected channel.
+* **Public buttons are never greyed globally** for unverified users — the deny
+  happens at interaction time, not via `setDisabled`.
+* **Join delivery:** helpers receive an **ephemeral message with a native
+  `ButtonStyle.Link` button** to the Roblox launcher deep-link
+  `roblox://experiences/start?placeId=...&gameInstanceId=...`. The requester's
+  `placeId`/`serverId` are captured from Roblox presence, stored on the raid, and
+  resolved by `buildRobloxJoinLink`.
+* **Presence polling** lowered to **15s** (`PRESENCE_POLL_INTERVAL` in ready.js).
+* **Auto-MVP:** on close/outcome the helper with the highest `timeSpentSeconds`
+  is set as MVP automatically (manual picker removed).
+* **Raid closure** restricted to the requester, Discord Administrator, the
+  configured verification/admin roles, or the hardcoded names in
+  `RAID_CLOSE_ROLES`.
+* **Roblox API cleanup:** `handlers/robloxApi.js` had duplicated
+  `validateAndGetAvatar` / `getUserPresence` / `detectGameAndRegion` (from
+  overlapping edits). Deduplicated to single definitions; `detectGameAndRegion`
+  now also returns `placeId` + `serverId`.
+
 ## ⚙️ PIPELINE ARCHITECTURE
 
 1. **Roblox Linking / Verification (`/link-roblox`):**
    * Staff-only (Administrator **or** Manage Messages) command. Posts an
      embed + channel-select (`select_link_channel`) so an admin picks where the
-     link embed goes.
-   * In that channel the `[ Link Roblox 🔗 ]` button (`link_roblox`) opens a
+     link embed goes; the chosen channel is persisted as
+     `settings.verificationChannel`.
+   * In that channel a **green** `🔗 Link Roblox` button (`link_roblox`) opens a
      modal (`link_roblox_modal`) → username validated via Roblox API
      (`handlers/robloxApi.js`) → `verificationDb.directLink(...)` grants raid
-     access **immediately** (no moderator approval round-trip).
+     access **immediately** (no moderator approval round-trip), then replies
+     `✅ Successfully linked as <name>!` (ephemeral).
 2. **Unverified Request/Accept handling:** If an unverified user clicks
    `request_raid` (or a `Join`), the bot replies **ephemeral** telling them to
    run `/link-roblox`. Public buttons are **never** greyed out for unverified
@@ -64,13 +97,14 @@ The repo was **already clean & pushed** (`HEAD == origin/main`) at commit
    * `[ Close Raid ]` — `ButtonStyle.Secondary`. Executable **only** by the raid
      requester or an authorized staff role (see `canCloseRaid`).
 5. **Session Tracking & Results:**
-   * `events/ready.js` starts a 60s interval → `raidStateManager.pollHelperPresences`
+   * `events/ready.js` starts a 15s interval → `raidStateManager.pollHelperPresences`
      tracks helper time. If no `ROBLOX_API_KEY` is set it no-ops and falls back
      to join→close delta.
    * On `[ Close Raid ]` → outcome picker (`raid_outcome_*`: Win / Whooped /
-     Loss / Can't Say) → optional MVP selector (`raid_mvp_select_`, or skip) →
-     raid closed, streak/metrics compiled, final Raid Result embed posted
-     (see `buildReportCardEmbed` + outcome helpers starting ~line 236).
+     Loss / Can't Say) → the helper with the most `timeSpentSeconds` is set as
+     MVP automatically → raid closed, streak/metrics compiled, final Raid Result
+     embed posted (see `buildReportCardEmbed` + outcome helpers starting ~line
+     236).
 
 ## 📂 KEY FILES
 

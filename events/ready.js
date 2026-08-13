@@ -2,7 +2,7 @@ const { registerGuildCommands } = require('../commands/deploy-commands');
 const raidStateManager = require('../handlers/raidStateManager');
 
 /** How often (ms) to poll Roblox presence for active raid helpers. */
-const PRESENCE_POLL_INTERVAL = 60 * 1000; // 60 seconds
+const PRESENCE_POLL_INTERVAL = 15 * 1000; // 15 seconds
 
 module.exports = {
     name: 'clientReady',
@@ -32,7 +32,7 @@ module.exports = {
         console.log(`✅ Commands registered in ${ok}/${guilds.length} guild(s).`);
 
         // Background helper time-tracking engine (Option B: Roblox Presence API polling).
-        // Polls every 60s for helpers in active raids. If no ROBLOX_API_KEY is set,
+        // Polls every 15s for helpers in active raids. If no ROBLOX_API_KEY is set,
         // pollHelperPresences silently no-ops and time is tracked via join-to-close delta.
         console.log('⏱️  Starting background helper time-tracking (presence polling)...');
         setInterval(async () => {
