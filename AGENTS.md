@@ -89,13 +89,20 @@ Refactored the linking → request → join → close loop per the spec:
    queries the Roblox Presence API (`presence.roblox.com`) for active
    `InGame` status → Place ID / Job ID / IP region (e.g., Mumbai, Frankfurt,
    Ashburn) to build the Roblox deep-link `roblox://experiences/start?...`.
-4. **Active Raid Embed Controls (`createRaidButtons` in interactionCreate.js):**
-   * `[ Join ]` — `ButtonStyle.Secondary` (grey). On click by a verified helper,
-     opens the accept modal; the helper is then DM'd a native Discord **Link
-     button** (`ButtonStyle.Link`) to the Roblox deep-link (discord shows the
-     external-link icon automatically).
-   * `[ Close Raid ]` — `ButtonStyle.Secondary`. Executable **only** by the raid
-     requester or an authorized staff role (see `canCloseRaid`).
+4. **Active Raid Alert & Controls (`formatRaidMessage` + `createRaidButtons`):**
+   * Alert embed layout: `# 🚨 Raid Alert #<id>` title, ACTIVE subtitle with
+     Discord `<t:...:F>` timestamp, requester avatar thumbnail, `###` sections
+     (👤 Details / 🎯 Target / 🌐 Region / 👥 Helper Status / 💬 Description),
+     code-blocked target & description, `Live Helpers (n/max)` with per-helper
+     PFP lines, streak + region/ping line.
+   * `[ ↗️ JOIN SERVER ]` — `ButtonStyle.Link` (grey) to the Roblox deep-link
+     (`roblox://experiences/start?...`), built by `buildRobloxJoinLink`.
+   * `[ Join Raid ]` — `ButtonStyle.Secondary` (grey). On click by a verified
+     helper, opens the accept modal; the helper is then sent an ephemeral native
+     Discord **Link** button (`ButtonStyle.Link`) to the same deep-link.
+   * `[ 🔒 CLOSE RAID ]` — `ButtonStyle.Secondary` (`close_raid_<id>`,
+     handled alongside the legacy `raid_close_<id>`). Executable **only** by the
+     raid requester or an authorized staff role (see `canCloseRaid`).
 5. **Session Tracking & Results:**
    * `events/ready.js` starts a 15s interval → `raidStateManager.pollHelperPresences`
      tracks helper time. If no `ROBLOX_API_KEY` is set it no-ops and falls back

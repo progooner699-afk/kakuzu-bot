@@ -145,26 +145,43 @@ function getRegionRoleInfo(guildId, region) {
 }
 
 function createRaidButtons(raid, member = null) {
-    const accept = new ButtonBuilder()
-        .setCustomId(`raid_accept_${raid.raidId}`)
-        .setLabel('Join')
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(raid.status !== "OPEN");
+    const components = [];
 
-    const components = [accept];
-    const showClose = canCloseRaid(member, raid);
-    if (showClose) {
-        const close = new ButtonBuilder()
-            .setCustomId(`raid_close_${raid.raidId}`)
-            .setLabel('Close Raid')
+    // New-style public quick-launch: native external-link button to the game.
+    const joinServerUrl = buildRobloxJoinLink(raid);
+    if (joinServerUrl) {
+        components.push(
+            new ButtonBuilder()
+                .setStyle(ButtonStyle.Link)
+                .setEmoji('↗️')
+                .setLabel('JOIN SERVER')
+                .setURL(joinServerUrl)
+        );
+    }
+
+    // Interactive join for verified helpers — registers + tracks session time.
+    components.push(
+        new ButtonBuilder()
+            .setCustomId(`raid_accept_${raid.raidId}`)
+            .setLabel('Join Raid')
             .setStyle(ButtonStyle.Secondary)
-            .setDisabled(raid.status === "CLOSED");
-        components.push(close);
+            .setDisabled(raid.status !== "OPEN")
+    );
+
+    // Close — restricted to the requester / staff via canCloseRaid.
+    if (canCloseRaid(member, raid)) {
+        components.push(
+            new ButtonBuilder()
+                .setCustomId(`close_raid_${raid.raidId}`)
+                .setEmoji('🔒')
+                .setLabel('CLOSE RAID')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(raid.status === "CLOSED")
+        );
     }
 
     return new ActionRowBuilder().addComponents(components);
 }
-
 function createVerificationActionButtons(userId) {
     const acceptBtn = new ButtonBuilder()
         .setCustomId(`verify_accept_${userId}`)
@@ -482,7 +499,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
         if (alertChannel && alertChannel.isTextBased()) {
             const baseAlertMsg = await alertChannel.messages.fetch(raid.messageId).catch(() => null);
             if (baseAlertMsg) {
-                const updatedAlertEmbed = raidStateManager.formatRaidMessage(raid);
+                const updatedAlertEmbed = raidStateManager.formatRaidMessage(raid, interaction.guild.id);
                 const cleanClosedRow = createRaidButtons(raid, interaction.member);
                 await baseAlertMsg.edit({ embeds: [updatedAlertEmbed], components: [cleanClosedRow] }).catch(() => null);
             }
@@ -877,7 +894,7 @@ module.exports = {
             });
 
             const settings = raidStateManager.loadSettings(guildId);
-            const content = raidStateManager.formatRaidMessage(raid);
+            const content = raidStateManager.formatRaidMessage(raid, guildId);
             const raidButtonRow = createRaidButtons(raid, interaction.member);
             const regionRoleInfo = getRegionRoleInfo(guildId, raid.region);
 
@@ -964,7 +981,7 @@ module.exports = {
                 return;
             }
             const updated = result.raid;
-            const msg = raidStateManager.formatRaidMessage(updated);
+            const msg = raidStateManager.formatRaidMessage(updated, interaction.guild.id);
             const row = createRaidButtons(updated, interaction.member);
             const channel = await interaction.client.channels.fetch(updated.channelId).catch(() => null);
             if (channel) {
@@ -975,7 +992,7 @@ module.exports = {
             return;
         }
 
-        if (typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_close_')) {
+        if (typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_close_') || interaction.customId.startsWith('close_raid_')) {
             const raidId = Number(interaction.customId.split('_')[2]);
             if (Number.isNaN(raidId)) return;
             const raid = raidStateManager.getRaidById(raidId, interaction.guild?.id);
@@ -1098,7 +1115,7 @@ module.exports = {
                 return;
             }
             const updated = result.raid;
-            const msg = raidStateManager.formatRaidMessage(updated);
+            const msg = raidStateManager.formatRaidMessage(updated, interaction.guild.id);
             const row = createRaidButtons(updated, interaction.member);
             const channel = await interaction.client.channels.fetch(updated.channelId).catch(() => null);
             if (channel) {

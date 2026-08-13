@@ -384,49 +384,93 @@ function updateRaidMessageReference(raidId, channelId, messageId, guildId) {
     saveRaids(guildId, raids);
 }
 
-function formatRaidMessage(raid) {
+function formatRaidMessage(raid, guildId = null) {
     const helperCount = (raid.helpers && raid.helpers.length) || 0;
-    const statusText = raid.status === 'OPEN' ? '🟢 `OPEN`' : raid.status === 'FULL' ? '🟠 `FULL`' : '🔴 `CLOSED`';
+    const statusLine = raid.status === 'FULL'
+        ? '🟠 **Status:** Full'
+        : raid.status === 'CLOSED'
+            ? '🔴 **Status:** Closed'
+            : '🟢 **Status:** Open';
     const reasonText = raid.reason ? raid.reason : 'No details provided';
+    const gameLabel = GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
+    const requestedBy = raid.requesterTag ? raid.requesterTag : `<@${raid.requesterId}>`;
+    const createdMs = Number(raid.createdAt) || Date.now();
+    const createdTs = Math.floor(createdMs / 1000);
 
-    const liveHelpersValue = helperCount > 0 
+    // Current win/loss streak from the per-guild lobby data (when guild id is known).
+    let streakText = '—';
+    if (guildId) {
+        try {
+            const raids = loadRaids(guildId);
+            if (raids.streakType && Number(raids.streakCount) > 0) {
+                streakText = `${raids.streakType === 'WIN' ? '🏆' : '💀'} ${raids.streakCount} consecutive ${raids.streakType.toLowerCase()}`;
+            }
+        } catch (err) { /* ignore */ }
+    }
+
+    const liveHelpersValue = helperCount > 0
         ? raid.helpers.map((h) => {
-            if (typeof h === 'string') return `• <@${h}>`;
-            return `• <@${h.userId}>\n  🎮 Roblox: ${h.robloxDisplayName || h.robloxUsername}`;
-          }).join('\n') 
+            if (typeof h === 'string') return `• 🖼️ <@${h}>`;
+            const helperName = h.robloxDisplayName || h.robloxUsername || 'Unknown';
+            return `• 🖼️ <@${h.userId}> (${helperName})`;
+        }).join('\n')
         : '• None yet';
 
-    const gameLabel = GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
+    const divider = '────────────────────────────────────────────────────';
+    const alertStateText = raid.status === 'CLOSED'
+        ? `🔒 **This alert has been closed.** <t:${createdTs}:F>`
+        : `🚨 **This alert is currently ACTIVE.** <t:${createdTs}:F>`;
+
+    const descriptionLines = [
+        alertStateText,
+        '',
+        '### 👤 Details',
+        '**Requested By**              **Time Requested**',
+        `${requestedBy}      <t:${createdTs}:F>`,
+        '',
+        statusLine,
+        `**Game:** \`${gameLabel}\``,
+        '',
+        divider,
+        '',
+        '### 🎯 Target',
+        '```',
+        `Enemy Clan: ${raid.enemyClanNames || 'None'}`, 
+        `Targets: ${raid.enemyNames || 'None'}`, 
+        '```',
+        '',
+        divider,
+        '',
+        '### 🌐 Region',
+        `\`${raid.region || 'Unknown'}\`  •  📶 **Ping:** \`N/A\`ms`,
+        `**Win Streak:** ${streakText}`,
+        '',
+        divider,
+        '',
+        '### 👥 Helper Status',
+        `**Live Helpers (\`${helperCount}/${raid.helperLimit || 0}\`)**`,
+        liveHelpersValue,
+        '',
+        divider,
+        '',
+        '### 💬 Description',
+        '```',
+        reasonText,
+        '```'
+    ];
 
     const embed = new EmbedBuilder()
-        .setTitle('🚨 Raid Alert')
+        .setTitle(`# 🚨 Raid Alert #${raid.raidId}`)
         .setColor(0xFFD700)
-        .setDescription('This help request is currently active.')
-        .addFields([
-            { name: 'Requested By', value: `${raid.requesterTag || `<@${raid.requesterId}>`}`, inline: true },
-            { name: 'Time Requested', value: `\`${new Date(raid.createdAt).toLocaleString()}\``, inline: true },
-            { name: 'Target Game', value: `\`${gameLabel}\``, inline: true },
-            { name: 'Region', value: `\`${raid.region || 'Unknown'}\``, inline: true },
-            { name: '\u200b', value: '\u200b', inline: false },
-            { name: 'Enemy Names', value: raid.enemyNames ? `\`${raid.enemyNames}\`` : '`None`', inline: true },
-            { name: 'Helpers Needed', value: `\`${helperCount} / ${raid.helperLimit || 0}\``, inline: true },
-            { name: 'Live Status', value: statusText, inline: true },
-            { name: '\u200b', value: '\u200b', inline: false },
-            { name: 'Enemy Clan', value: raid.enemyClanNames ? `\`${raid.enemyClanNames}\`` : '`None`', inline: true },
-            { name: '\u200b', value: '\u200b', inline: false },
-            { name: 'Reason & Additional Details', value: `\`\`\`text\n${reasonText}\n\`\`\``, inline: false },
-            { name: '\u200b', value: '\u200b', inline: false },
-            { name: `Live Helpers (${helperCount}/${raid.helperLimit || 0})`, value: liveHelpersValue, inline: false }
-        ])
-        .setFooter({ text: `Requested by ${raid.requesterTag || raid.requesterId} • ${new Date(raid.createdAt).toLocaleString()}` });
-    
+        .setDescription(descriptionLines.join('\n'))
+        .setFooter({ text: `Requested by ${requestedBy} • ${new Date(createdMs).toLocaleString()}` });
+
     if (raid.robloxAvatarUrl) {
         embed.setThumbnail(raid.robloxAvatarUrl);
     }
-    
+
     return embed;
 }
-
 function setRaidMvp(raidId, mvpUserId, guildId) {
     const raids = loadRaids(guildId);
     const raid = raids.raids.find(item => item.raidId === raidId);

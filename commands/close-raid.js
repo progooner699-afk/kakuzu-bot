@@ -49,7 +49,7 @@ module.exports = {
         if (alertChannel && alertChannel.isTextBased()) {
             const alertMessage = await alertChannel.messages.fetch(updatedRaid.messageId).catch(() => null);
             if (alertMessage) {
-                const closedEmbed = raidStateManager.formatRaidMessage(updatedRaid);
+                const closedEmbed = raidStateManager.formatRaidMessage(updatedRaid, interaction.guild.id);
                 await alertMessage.edit({ embeds: [closedEmbed], components: [] }).catch(() => null);
             }
         }
