@@ -413,48 +413,38 @@ function formatRaidMessage(raid, guildId = null) {
         }).join(', ')
         : 'None';
 
-    const DIVIDER = '---';
-
-    const desc = [
-        '# ' + statusEmoji + ' 🚨 RAID ALERT',
-        '',
-        DIVIDER,
-        '',
-        '## 📋 DETAILS',
-        '> **Game:** ' + gameLabel,
-        '> **Raid ID:** `' + raid.raidId + '`',
-        '> **Target:** ' + requestedBy,
-        '> **Region:** `' + (raid.region || 'Unknown') + '`',
-        '> **Status:** ' + statusEmoji + ' ' + statusText,
-        '> **Time Requested:** <t:' + createdTs + ':f>',
-        '',
-        DIVIDER,
-        '',
-        '## 📋 IN-GAME HELPERS',
-        '> **Helpers:** `' + helperNamesList + '`',
-        '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
-        '',
-        DIVIDER,
-        '',
-        '## 📝 DESCRIPTION',
-        '```',
-        reasonText,
-        '```',
-        '',
-        DIVIDER,
-        '',
-        '## LIVE HELPERS',
-        '`' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
-        '',
-        liveHelpersValue,
-        '',
-        DIVIDER,
-    ].join('\n');
-
     const embed = new EmbedBuilder()
         .setTitle('RAID ALERT')
         .setColor(0xFFD700)
-        .setDescription(desc)
+        .setDescription(statusEmoji + ' \u{1F6A8} **RAID ALERT**')
+        .addFields([
+            {
+                name: '\u{1F4CB} DETAILS',
+                value: '**Game:** ' + gameLabel + '\n' +
+                    '**Raid ID:** `' + raid.raidId + '`\n' +
+                    '**Target:** ' + requestedBy + '\n' +
+                    '**Region:** `' + (raid.region || 'Unknown') + '`\n' +
+                    '**Status:** ' + statusEmoji + ' ' + statusText + '\n' +
+                    '**Time Requested:** <t:' + createdTs + ':f>',
+                inline: false
+            },
+            {
+                name: '\u{1F4CB} IN-GAME HELPERS',
+                value: '**Helpers:** `' + helperNamesList + '`\n' +
+                    '**Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
+                inline: false
+            },
+            {
+                name: '\u{1F4DD} DESCRIPTION',
+                value: '```' + '\n' + reasonText + '\n' + '```',
+                inline: false
+            },
+            {
+                name: 'LIVE HELPERS',
+                value: '`' + helperCount + ' / ' + (raid.helperLimit || 0) + '`' + '\n\n' + liveHelpersValue,
+                inline: false
+            }
+        ])
         .setFooter({ text: 'Raid #' + raid.raidId + ' \u2022 ' + new Date(createdMs).toLocaleDateString() })
         .setTimestamp();
 
