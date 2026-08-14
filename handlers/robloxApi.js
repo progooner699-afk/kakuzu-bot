@@ -258,12 +258,31 @@ async function detectGameAndRegion(userId) {
         serverLink = `https://www.roblox.com/games/${presence.placeId}`;
     }
 
+    // Fetch the Roblox game icon (thumbnail) to render as the embed's media image.
+    let gameIconUrl = '';
+    if (presence.universeId) {
+        try {
+            const thumbResponse = await fetch(
+                `https://thumbnails.roblox.com/v1/games/icons?universeIds=${presence.universeId}&size=512x512&format=Png&isCircular=false`
+            );
+            if (thumbResponse.ok) {
+                const thumbData = await thumbResponse.json();
+                if (thumbData.data && thumbData.data.length > 0) {
+                    gameIconUrl = thumbData.data[0].imageUrl || '';
+                }
+            }
+        } catch (err) {
+            // ignore — thumbnail is optional
+        }
+    }
+
     return {
         success: true,
         game: detectedGame,
         region: detectedRegion,
         serverLink,
         gameName: presence.gameName,
+        gameIconUrl,
         placeId: presence.placeId,
         serverId: presence.serverId
     };

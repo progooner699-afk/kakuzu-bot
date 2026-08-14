@@ -249,6 +249,7 @@ function createRaid(options) {
         serverLink: normalizeText(options.serverLink),
         placeId: normalizeText(options.placeId),
         serverId: normalizeText(options.serverId),
+        gameThumbnailUrl: normalizeText(options.gameThumbnailUrl),
         region: normalizeText(options.region),
         enemyCount: Number(options.enemyCount) || 0,
         teamers: normalizeText(options.teamers),
@@ -387,10 +388,10 @@ function updateRaidMessageReference(raidId, channelId, messageId, guildId) {
 function formatRaidMessage(raid, guildId = null) {
     const helperCount = (raid.helpers && raid.helpers.length) || 0;
     const statusLine = raid.status === 'FULL'
-        ? '🟠 **Status:** Full'
+        ? '🟠 Full'
         : raid.status === 'CLOSED'
-            ? '🔴 **Status:** Closed'
-            : '🟢 **Status:** Open';
+            ? '🔴 Closed'
+            : '🟢 Open';
     const reasonText = raid.reason ? raid.reason : 'No details provided';
     const gameLabel = GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
     const requestedBy = raid.requesterTag ? raid.requesterTag : `<@${raid.requesterId}>`;
@@ -408,15 +409,29 @@ function formatRaidMessage(raid, guildId = null) {
         } catch (err) { /* ignore */ }
     }
 
+    // Live helper rows. Discord renders only a single thumbnail + single image per
+    // embed, so individual helper PFPs cannot be inlined here — show name + time.
     const liveHelpersValue = helperCount > 0
         ? raid.helpers.map((h) => {
-            if (typeof h === 'string') return `• 🖼️ <@${h}>`;
-            const helperName = h.robloxDisplayName || h.robloxUsername || 'Unknown';
-            return `• 🖼️ <@${h.userId}> (${helperName})`;
+            if (typeof h === 'string') return `• <@${h}>`;
+            const helperName = h.robloxDisplayName || h.robloxUsername || `<@${h.userId}>`;
+            const timeSpent = (h && h.timeSpentSeconds) ? ` ⏱️ ${formatTimeSpent(h.timeSpentSeconds)}` : '';
+            return `• ${helperName}${timeSpent}`;
         }).join('\n')
-        : '• None yet';
+        : '• *None active... waiting for helpers to join*';
 
-    const divider = '────────────────────────────────────────────────────';
+    const bar = '┃';
+    const targetLines = [
+        `${bar} Enemy Clan: ${raid.enemyClanNames || 'None'}`,
+        `${bar} Targets: ${raid.enemyNames || 'None'}`
+    ];
+    const serverLines = [
+        `${bar} Region: \`${raid.region || 'Unknown'}\``,
+        `${bar} Ping: 📶 \`N/A\`ms`,
+        `${bar} Win Streak: ${streakText}`
+    ];
+    const notesLines = reasonText.split('\n').map((l) => `${bar} ${l}`);
+
     const alertStateText = raid.status === 'CLOSED'
         ? `🔒 **This alert has been closed.** <t:${createdTs}:F>`
         : `🚨 **This alert is currently ACTIVE.** <t:${createdTs}:F>`;
@@ -425,37 +440,26 @@ function formatRaidMessage(raid, guildId = null) {
         alertStateText,
         '',
         '### 👤 Details',
-        '**Requested By**              **Time Requested**',
-        `${requestedBy}      <t:${createdTs}:F>`,
+        `**Requested By:** ${requestedBy}    **Time:** <t:${createdTs}:F>`,
+        `**Status:** ${statusLine}   **Game:** ${gameLabel}`,
         '',
-        statusLine,
-        `**Game:** \`${gameLabel}\``,
-        '',
-        divider,
-        '',
-        '### 🎯 Target',
+        '### 🎯 Target Info',
         '```',
-        `Enemy Clan: ${raid.enemyClanNames || 'None'}`, 
-        `Targets: ${raid.enemyNames || 'None'}`, 
+        ...targetLines,
         '```',
         '',
-        divider,
-        '',
-        '### 🌐 Region',
-        `\`${raid.region || 'Unknown'}\`  •  📶 **Ping:** \`N/A\`ms`,
-        `**Win Streak:** ${streakText}`,
-        '',
-        divider,
+        '### 🌐 Server Info',
+        '```',
+        ...serverLines,
+        '```',
         '',
         '### 👥 Helper Status',
         `**Live Helpers (\`${helperCount}/${raid.helperLimit || 0}\`)**`,
         liveHelpersValue,
         '',
-        divider,
-        '',
-        '### 💬 Description',
+        '### 💬 Notes',
         '```',
-        reasonText,
+        ...notesLines,
         '```'
     ];
 
@@ -465,8 +469,14 @@ function formatRaidMessage(raid, guildId = null) {
         .setDescription(descriptionLines.join('\n'))
         .setFooter({ text: `Requested by ${requestedBy} • ${new Date(createdMs).toLocaleString()}` });
 
+    // Roblox PFP of the raid requester — right-side thumbnail.
     if (raid.robloxAvatarUrl) {
         embed.setThumbnail(raid.robloxAvatarUrl);
+    }
+
+    // Roblox game icon image — the large media thumbnail.
+    if (raid.gameThumbnailUrl) {
+        embed.setImage(raid.gameThumbnailUrl);
     }
 
     return embed;

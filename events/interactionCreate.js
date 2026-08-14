@@ -22,6 +22,7 @@ const pendingRaidOutcomes = new Map();
 const pendingServerLinks = new Map();
 const pendingPlaceIds = new Map();
 const pendingServerIds = new Map();
+const pendingGameThumbnails = new Map();
 
 // Region ping IDs are now configured per-guild via settings.regionPings
 
@@ -643,6 +644,7 @@ module.exports = {
             pendingServerLinks.set(interaction.user.id, detection.serverLink || '');
             pendingPlaceIds.set(interaction.user.id, detection.placeId || '');
             pendingServerIds.set(interaction.user.id, detection.serverId || '');
+            pendingGameThumbnails.set(interaction.user.id, detection.gameIconUrl || '');
 
             const modal = new ModalBuilder()
                 .setCustomId("raid_application_step1")
@@ -842,6 +844,7 @@ module.exports = {
             const serverLink = pendingServerLinks.get(userId) || '';
             const placeId = pendingPlaceIds.get(userId) || '';
             const serverId = pendingServerIds.get(userId) || '';
+            const gameThumbnailUrl = pendingGameThumbnails.get(userId) || '';
             
             if (!game || !region) {
                 pendingGameSelections.delete(userId);
@@ -868,6 +871,7 @@ module.exports = {
             pendingServerLinks.delete(userId);
             pendingPlaceIds.delete(userId);
             pendingServerIds.delete(userId);
+            pendingGameThumbnails.delete(userId);
 
             const verificationData = await verificationDb.getVerificationData(userId, interaction.guild.id);
             const robloxUsername = verificationData?.roblox_username || 'Unknown';
@@ -886,6 +890,7 @@ module.exports = {
                 serverLink,
                 placeId,
                 serverId,
+                gameThumbnailUrl,
                 region,
                 enemyCount: enemyNames.length,
                 enemyClanNames: enemyClanName,
