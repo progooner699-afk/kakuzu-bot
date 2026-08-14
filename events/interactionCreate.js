@@ -152,13 +152,12 @@ function getRegionRoleInfo(guildId, region) {
 function createRaidButtons(raid, member = null) {
     const components = [];
 
-    // New-style public quick-launch: native external-link button to the game.
+    // Public quick-launch: native external-link button to the Roblox game.
     const joinServerUrl = buildRobloxJoinLink(raid);
     if (joinServerUrl) {
         components.push(
             new ButtonBuilder()
                 .setStyle(ButtonStyle.Link)
-                .setEmoji('↗️')
                 .setLabel('JOIN SERVER')
                 .setURL(joinServerUrl)
         );
