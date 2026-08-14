@@ -404,42 +404,41 @@ function formatRaidMessage(raid, guildId = null) {
         }).join('\n')
         : '• *None active... waiting for helpers to join*';
 
+    const helperNamesList = helperCount > 0
+        ? raid.helpers.map((h) => {
+            if (typeof h === 'string') return '<@' + h + '>';
+            return h.robloxDisplayName || h.robloxUsername || ('<@' + h.userId + '>');
+        }).join(', ')
+        : 'None';
+
     const desc = [
-        '**STATUS:** ' + statusText,
+        '# \u{1F6A8} RAID ALERT',
         '',
-        '> # ' + requestedBy,
+        '## \u{1F4CB} DETAILS',
+        '> **Game:** ' + gameLabel,
+        '> **Raid ID:** `' + raid.raidId + '`',
+        '> **Target:** ' + requestedBy,
+        '> **Region:** `' + (raid.region || 'Unknown') + '`',
+        '> **Status:** `' + statusText + '`',
+        '> **Time Requested:** <t:' + createdTs + ':f>',
         '',
-        '> ## Enemy Clan',
-        '',
-        (raid.enemyClanNames ? '`' + raid.enemyClanNames + '`' : '`None`') + '  •  Helpers Needed: `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
-        '',
-        '> ## Region',
-        '',
-        '`' + (raid.region || 'Unknown') + '`',
-        '',
-        '> ## Enemy Names',
-        '',
-        '```' + '\n' + (raid.enemyNames || 'None') + '\n' + '```',
-        '',
-        '> ## Live Helpers (' + helperCount + '/' + (raid.helperLimit || 0) + ')',
+        '## \u{1F91D} HELPERS NEEDED',
+        '> **Helpers:** `' + helperNamesList + '`',
+        '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
         '',
         liveHelpersValue,
         '',
-        '> ## Details',
-        '',
-        '```text' + '\n' + reasonText + '\n' + '```',
+        '## \u{1F4DD} REASON / ADDITIONAL DETAILS',
+        '```',
+        reasonText,
+        '```',
     ].join('\n');
 
     const embed = new EmbedBuilder()
-        .setTitle('# RAID ALERT #' + raid.raidId)
+        .setTitle('RAID ALERT')
         .setColor(0xFFD700)
         .setDescription(desc)
-        .addFields([
-            { name: 'Time Requested', value: '<t:' + createdTs + ':f>', inline: true },
-            { name: 'Game', value: '`' + gameLabel + '`', inline: true },
-            { name: 'Raid ID', value: '`' + '#' + raid.raidId + '`', inline: true }
-        ])
-        .setFooter({ text: 'Raid #' + raid.raidId + ' • ' + new Date(createdMs).toLocaleDateString() })
+        .setFooter({ text: 'Raid #' + raid.raidId + ' \u2022 ' + new Date(createdMs).toLocaleDateString() })
         .setTimestamp();
 
     if (raid.robloxAvatarUrl) {
