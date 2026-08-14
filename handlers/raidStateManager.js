@@ -412,16 +412,16 @@ function formatRaidMessage(raid, guildId = null) {
             { name: 'REQUESTED BY', value: `${requestedBy}`, inline: true },
             { name: 'TIME REQUESTED', value: `<t:${createdTs}:f>`, inline: true },
             { name: 'GAME', value: `\`${gameLabel}\``, inline: true },
-            { name: 'ENEMY CLAN', value: raid.enemyClanNames ? `\`${raid.enemyClanNames}\`` : '`None`', inline: true },
+            { name: '# Enemy Clan :', value: raid.enemyClanNames ? `\`${raid.enemyClanNames}\`` : '`None`', inline: true },
             { name: 'HELPERS NEEDED', value: `\`${helperCount} / ${raid.helperLimit || 0}\``, inline: true },
             { name: 'REGION', value: `\`${raid.region || 'Unknown'}\``, inline: true },
             { name: 'RAID ID', value: `\`#${raid.raidId}\``, inline: true },
             { name: '\u200b', value: '\u200b', inline: false },
-            { name: 'ENEMY NAMES', value: raid.enemyNames ? `\`\`\`${raid.enemyNames}\`\`\`` : '`None`', inline: false },
+            { name: '# Enemy Names :', value: raid.enemyNames ? `\`\`\`${raid.enemyNames}\`\`\`` : '`None`', inline: false },
             { name: '\u200b', value: '\u200b', inline: false },
-            { name: `LIVE HELPERS (${helperCount}/${raid.helperLimit || 0})`, value: liveHelpersValue, inline: false },
+            { name: `# Live Helpers (${helperCount}/${raid.helperLimit || 0}) :`, value: liveHelpersValue, inline: false },
             { name: '\u200b', value: '\u200b', inline: false },
-            { name: 'REASON & DETAILS', value: `\`\`\`text\n${reasonText}\n\`\`\``, inline: false }
+            { name: '# Details :', value: `\`\`\`text\n${reasonText}\n\`\`\``, inline: false }
         ])
         .setFooter({ text: `Raid #${raid.raidId} • ${new Date(createdMs).toLocaleDateString()}` })
         .setTimestamp();
