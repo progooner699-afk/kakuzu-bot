@@ -164,15 +164,6 @@ function createRaidButtons(raid, member = null) {
         );
     }
 
-    // Interactive join for verified helpers — registers + tracks session time.
-    components.push(
-        new ButtonBuilder()
-            .setCustomId(`raid_accept_${raid.raidId}`)
-            .setLabel('Join Raid')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(raid.status !== "OPEN")
-    );
-
     // Close — restricted to the requester / staff via canCloseRaid.
     if (canCloseRaid(member, raid)) {
         components.push(
