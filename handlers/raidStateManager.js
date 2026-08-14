@@ -413,7 +413,7 @@ function formatRaidMessage(raid, guildId = null) {
         }).join(', ')
         : 'None';
 
-    const DIVIDER = '▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰';
+    const DIVIDER = '---';
 
     const desc = [
         '# ' + statusEmoji + ' 🚨 RAID ALERT',
