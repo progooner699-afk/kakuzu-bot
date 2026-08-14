@@ -294,11 +294,12 @@ async function addHelper(raidId, userId, robloxData, guildId) {
     if (await leaderboardDb.hasAcceptedRaid(raidId, userId, guildId)) return { success: false, message: 'You have already accepted this raid alert.' };
     if (raid.helpers.length >= raid.helperLimit) return { success: false, message: 'Raid is already full.' };
     
-        raid.helpers.push({
+    raid.helpers.push({
         userId: userId,
         robloxUsername: robloxData.username,
         robloxDisplayName: robloxData.displayName,
         robloxUserId: robloxData.userId,
+        robloxAvatarUrl: robloxData.avatarUrl || null,
         joinTime: Date.now(),
         timeSpentSeconds: 0
     });
@@ -387,65 +388,47 @@ function updateRaidMessageReference(raidId, channelId, messageId, guildId) {
 
 function formatRaidMessage(raid, guildId = null) {
     const helperCount = (raid.helpers && raid.helpers.length) || 0;
-    const statusEmoji = raid.status === 'CLOSED' ? '🔴' : (raid.status === 'FULL' ? '🟠' : '🟢');
-    const statusText = raid.status === 'CLOSED' ? 'Closed' : (raid.status === 'FULL' ? 'Full' : 'Open');
-    const alertStateWord = raid.status === 'CLOSED' ? 'CLOSED' : (raid.status === 'FULL' ? 'FULL' : 'ACTIVE');
-    const reasonText = raid.reason ? raid.reason : 'No details provided';
+    const statusText = raid.status === 'OPEN' ? 'OPEN' : raid.status === 'FULL' ? 'FULL' : 'CLOSED';
     const gameLabel = GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
-    const requestedBy = raid.requesterTag ? raid.requesterTag : `<@${raid.requesterId}>`; 
+    const requestedBy = raid.requesterTag ? raid.requesterTag : `<@${raid.requesterId}>`;
     const createdMs = Number(raid.createdAt) || Date.now();
     const createdTs = Math.floor(createdMs / 1000);
+    const reasonText = raid.reason ? raid.reason : 'No details provided';
 
-    // Current win/loss streak from the per-guild lobby data (when guild id is known).
-    let streakText = '—';
-    if (guildId) {
-        try {
-            const raids = loadRaids(guildId);
-            if (raids.streakType && Number(raids.streakCount) > 0) {
-                streakText = `${raids.streakType === 'WIN' ? '🏆' : '💀'} ${raids.streakCount} consecutive ${raids.streakType.toLowerCase()}`;
-            }
-        } catch (err) { /* ignore */ }
-    }
-
-    // Discord embeds support only ONE thumbnail + ONE image per embed, so individual
-    // helper headshots cannot be tiled inline next to a name. Helpers are listed as a
-    // compact mention + Roblox name row with their accumulated session time.
     const liveHelpersValue = helperCount > 0
         ? raid.helpers.map((h) => {
-            if (typeof h === 'string') return `• <@${h}>`; 
-            const helperName = h.robloxDisplayName || h.robloxUsername || `<@${h.userId}>`; 
-            const timeSpent = (h && h.timeSpentSeconds) ? ` ⏱️ ${formatTimeSpent(h.timeSpentSeconds)}` : '';
-            return `• <@${h.userId}> (${helperName})${timeSpent}`; 
-        }).join('\n')
+            if (typeof h === 'string') return `• <@${h}>`;
+            const helperName = h.robloxDisplayName || h.robloxUsername || `<@${h.userId}>`;
+            const timeSpent = (h && h.timeSpentSeconds) ? ` ⏱ ${formatTimeSpent(h.timeSpentSeconds)}` : '';
+            return `• <@${h.userId}> — **${helperName}**${timeSpent}`;
+          }).join('\n')
         : '• *None active... waiting for helpers to join*';
 
     const embed = new EmbedBuilder()
-        .setTitle(`# 🚨 Raid Alert #${raid.raidId}`)
-        // Neutral left border instead of the yellow accent line.
-        .setColor(0x566270)
-        .setDescription(`**This alert is currently ${alertStateWord}.** <t:${createdTs}:F>`)
-        .setFooter({ text: `Requested by ${requestedBy} • ${new Date(createdMs).toLocaleString()}` });
+        .setTitle(`RAID ALERT #${raid.raidId}`)
+        .setColor(0xFFD700)
+        .setDescription(`**STATUS:** ${statusText}`)
+        .addFields([
+            { name: 'REQUESTED BY', value: `${requestedBy}`, inline: true },
+            { name: 'TIME REQUESTED', value: `<t:${createdTs}:f>`, inline: true },
+            { name: 'GAME', value: `\`${gameLabel}\``, inline: true },
+            { name: 'ENEMY CLAN', value: raid.enemyClanNames ? `\`${raid.enemyClanNames}\`` : '`None`', inline: true },
+            { name: 'HELPERS NEEDED', value: `\`${helperCount} / ${raid.helperLimit || 0}\``, inline: true },
+            { name: 'REGION', value: `\`${raid.region || 'Unknown'}\``, inline: true },
+            { name: 'RAID ID', value: `\`#${raid.raidId}\``, inline: true },
+            { name: '\u200b', value: '\u200b', inline: false },
+            { name: 'ENEMY NAMES', value: raid.enemyNames ? `\`\`\`${raid.enemyNames}\`\`\`` : '`None`', inline: false },
+            { name: '\u200b', value: '\u200b', inline: false },
+            { name: `LIVE HELPERS (${helperCount}/${raid.helperLimit || 0})`, value: liveHelpersValue, inline: false },
+            { name: '\u200b', value: '\u200b', inline: false },
+            { name: 'REASON & DETAILS', value: `\`\`\`text\n${reasonText}\n\`\`\``, inline: false }
+        ])
+        .setFooter({ text: `Raid #${raid.raidId} • ${new Date(createdMs).toLocaleDateString()}` })
+        .setTimestamp();
 
-    // Roblox PFP of the raid requester — top-right thumbnail.
     if (raid.robloxAvatarUrl) {
         embed.setThumbnail(raid.robloxAvatarUrl);
     }
-
-    // Roblox game artwork banner — wide bottom media image.
-    if (raid.gameThumbnailUrl) {
-        embed.setImage(raid.gameThumbnailUrl);
-    }
-
-    // Compact, wide layout: side-by-side inline fields instead of tall stacked panels.
-    embed.addFields([
-        { name: 'Requested By', value: requestedBy, inline: true },
-        { name: 'Time Requested', value: `<t:${createdTs}:F>`, inline: true },
-        { name: 'Status / Game', value: `${statusEmoji} ${statusText} | ${gameLabel}`, inline: true },
-        { name: 'Target Info', value: `Enemy Clan: ${raid.enemyClanNames || 'None'}\nTargets: ${raid.enemyNames || 'None'}`, inline: true },
-        { name: 'Server Info', value: `Region: ${raid.region || 'Unknown'} | Ping: N/Ams\nWin Streak: ${streakText}`, inline: true },
-        { name: `Live Helpers (${helperCount}/${raid.helperLimit || 0})`, value: liveHelpersValue, inline: false },
-        { name: 'Additional Details & Reason', value: reasonText, inline: false }
-    ]);
 
     return embed;
 }

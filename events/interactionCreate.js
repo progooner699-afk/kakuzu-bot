@@ -177,7 +177,6 @@ function createRaidButtons(raid, member = null) {
         components.push(
             new ButtonBuilder()
                 .setCustomId(`close_raid_${raid.raidId}`)
-                .setEmoji('🔒')
                 .setLabel('CLOSE RAID')
                 .setStyle(ButtonStyle.Secondary)
                 .setDisabled(raid.status === "CLOSED")
@@ -961,12 +960,6 @@ module.exports = {
                 await interaction.reply({ content: 'This raid is closed and cannot accept helpers.', flags: 64 }).catch(() => null);
                 return;
             }
-            const joiningData = await verificationDb.getVerificationData(interaction.user.id, interaction.guild?.id);
-            const joiningVerified = Boolean(joiningData?.is_verified && joiningData?.roblox_user_id);
-            if (!joiningVerified) {
-                await interaction.reply({ content: buildUnverifiedMessage(interaction.guild.id), flags: 64 }).catch(() => null);
-                return;
-            }
             const acceptModal = new ModalBuilder()
                 .setCustomId(`raid_acceptmodal_${raidId}`)
                 .setTitle('Join Raid Deployment Squad');
@@ -1116,7 +1109,8 @@ module.exports = {
             const result = await raidStateManager.addHelper(raidId, interaction.user.id, {
                 username: helperUsername,
                 displayName: robloxValidation.displayName || helperUsername,
-                userId: robloxValidation.userId || "1"
+                userId: robloxValidation.userId || "1",
+                avatarUrl: robloxValidation.avatarUrl || null
             }, guildId);
             if (!result.success) {
                 await interaction.reply({ content: result.message, flags: 64 }).catch(() => null);
@@ -1130,36 +1124,33 @@ module.exports = {
                 const message = await channel.messages.fetch(updated.messageId).catch(() => null);
                 if (message) await message.edit({ embeds: [msg], components: [row] }).catch(() => null);
             }
-            // DM the helper the private server link.
+            // Send the helper their deployment info.
             const gameLabel = raidStateManager.GAME_CONFIG[updated.targetGame] || updated.targetGame || 'Unknown';
-            const helperDmEmbed = new EmbedBuilder()
-                .setTitle(`⚔️ Raid #${updated.raidId} — Join Deployment`)
+            const helperEmbed = new EmbedBuilder()
+                .setTitle(`Raid #${updated.raidId} — Join Deployment`)
                 .setDescription('You have been accepted as a helper for this raid.')
                 .addFields([
-                    { name: '🎮 Game', value: gameLabel, inline: true },
-                    { name: '🌍 Region', value: updated.region || 'Unknown', inline: true },
-                    { name: '📋 Raid ID', value: `#${updated.raidId}`, inline: true },
-                    { name: '🔗 Server Link', value: updated.serverLink ? `[Join Server](${updated.serverLink})` : 'No link provided', inline: false }
+                    { name: 'Game', value: gameLabel, inline: true },
+                    { name: 'Region', value: updated.region || 'Unknown', inline: true },
+                    { name: 'Raid ID', value: `#${updated.raidId}`, inline: true },
+                    { name: 'Server Link', value: updated.serverLink ? `[Join Server](${updated.serverLink})` : 'No link provided', inline: false }
                 ])
                 .setColor(0xFFD700)
                 .setFooter({ text: 'Kakuzu Raid System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
-                try {
-                    const helperUser = await interaction.client.users.fetch(interaction.user.id);
-                    await helperUser.send({ embeds: [helperDmEmbed] }).catch(() => null);
-                } catch (err) { /* DMs may be closed */ }
-                const deepLink = buildRobloxJoinLink(updated);
-                const joinRow = deepLink
-                    ? new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel("Launch Roblox").setURL(deepLink)
-                    )
-                    : null;
-                await interaction.reply({
-                    content: `✅ **Raid Request Accepted!**`,
-                    embeds: [helperDmEmbed],
-                    components: joinRow ? [joinRow] : [],
-                    flags: 64
-                }).catch(() => null);
-                return;
+                .setTimestamp();
+            const deepLink = buildRobloxJoinLink(updated);
+            const joinRow = deepLink
+                ? new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Join Server').setURL(deepLink)
+                )
+                : null;
+            await interaction.reply({
+                content: `✅ Raid Request Accepted!`,
+                embeds: [helperEmbed],
+                components: joinRow ? [joinRow] : [],
+                flags: 64
+            }).catch(() => null);
+            return;
         }
     }
     }
