@@ -395,6 +395,8 @@ function formatRaidMessage(raid, guildId = null) {
     const createdTs = Math.floor(createdMs / 1000);
     const reasonText = raid.reason ? raid.reason : 'No details provided';
 
+    const statusEmoji = statusText === 'OPEN' ? '\u{1F7E2}' : statusText === 'FULL' ? '\u{1F7E0}' : '\u{1F534}';
+
     const liveHelpersValue = helperCount > 0
         ? raid.helpers.map((h) => {
             if (typeof h === 'string') return '• <@' + h + '>';
@@ -411,27 +413,42 @@ function formatRaidMessage(raid, guildId = null) {
         }).join(', ')
         : 'None';
 
+    const DIVIDER = '▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰';
+
     const desc = [
-        '# \u{1F6A8} RAID ALERT',
+        '# ' + statusEmoji + ' 🚨 RAID ALERT',
         '',
-        '## \u{1F4CB} DETAILS',
+        DIVIDER,
+        '',
+        '## 📋 DETAILS',
         '> **Game:** ' + gameLabel,
         '> **Raid ID:** `' + raid.raidId + '`',
         '> **Target:** ' + requestedBy,
         '> **Region:** `' + (raid.region || 'Unknown') + '`',
-        '> **Status:** `' + statusText + '`',
+        '> **Status:** ' + statusEmoji + ' ' + statusText,
         '> **Time Requested:** <t:' + createdTs + ':f>',
         '',
-        '## \u{1F91D} HELPERS NEEDED',
+        DIVIDER,
+        '',
+        '## 📋 IN-GAME HELPERS',
         '> **Helpers:** `' + helperNamesList + '`',
         '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
         '',
-        liveHelpersValue,
+        DIVIDER,
         '',
-        '## \u{1F4DD} REASON / ADDITIONAL DETAILS',
+        '## 📝 DESCRIPTION',
         '```',
         reasonText,
         '```',
+        '',
+        DIVIDER,
+        '',
+        '## LIVE HELPERS',
+        '`' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
+        '',
+        liveHelpersValue,
+        '',
+        DIVIDER,
     ].join('\n');
 
     const embed = new EmbedBuilder()
