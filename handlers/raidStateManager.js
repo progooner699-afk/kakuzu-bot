@@ -390,40 +390,51 @@ function formatRaidMessage(raid, guildId = null) {
     const helperCount = (raid.helpers && raid.helpers.length) || 0;
     const statusText = raid.status === 'OPEN' ? 'OPEN' : raid.status === 'FULL' ? 'FULL' : 'CLOSED';
     const gameLabel = GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
-    const requestedBy = raid.requesterTag ? raid.requesterTag : `<@${raid.requesterId}>`;
+    const requestedBy = raid.requesterTag ? raid.requesterTag : '<@' + raid.requesterId + '>';
     const createdMs = Number(raid.createdAt) || Date.now();
     const createdTs = Math.floor(createdMs / 1000);
     const reasonText = raid.reason ? raid.reason : 'No details provided';
 
     const liveHelpersValue = helperCount > 0
         ? raid.helpers.map((h) => {
-            if (typeof h === 'string') return `• <@${h}>`;
-            const helperName = h.robloxDisplayName || h.robloxUsername || `<@${h.userId}>`;
-            const timeSpent = (h && h.timeSpentSeconds) ? ` ⏱ ${formatTimeSpent(h.timeSpentSeconds)}` : '';
-            return `• <@${h.userId}> — **${helperName}**${timeSpent}`;
-          }).join('\n')
+            if (typeof h === 'string') return '• <@' + h + '>';
+            const helperName = h.robloxDisplayName || h.robloxUsername || ('<@' + h.userId + '>');
+            const timeSpent = (h && h.timeSpentSeconds) ? ' ⏱ ' + formatTimeSpent(h.timeSpentSeconds) : '';
+            return '• <@' + h.userId + '> — **' + helperName + '**' + timeSpent;
+        }).join('\n')
         : '• *None active... waiting for helpers to join*';
 
+    const desc = [
+        '**STATUS:** ' + statusText,
+        '',
+        '# ' + requestedBy,
+        '',
+        '## Enemy Clan',
+        (raid.enemyClanNames ? '`' + raid.enemyClanNames + '`' : '`None`') + '  •  Helpers Needed: `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
+        '',
+        '## Region',
+        '`' + (raid.region || 'Unknown') + '`',
+        '',
+        '## Enemy Names',
+        '```' + '\n' + (raid.enemyNames || 'None') + '\n' + '```',
+        '',
+        '## Live Helpers (' + helperCount + '/' + (raid.helperLimit || 0) + ')',
+        liveHelpersValue,
+        '',
+        '## Details',
+        '```text' + '\n' + reasonText + '\n' + '```',
+    ].join('\n');
+
     const embed = new EmbedBuilder()
-        .setTitle(`RAID ALERT #${raid.raidId}`)
+        .setTitle('# RAID ALERT #' + raid.raidId)
         .setColor(0xFFD700)
-        .setDescription(`**STATUS:** ${statusText}`)
+        .setDescription(desc)
         .addFields([
-            { name: 'REQUESTED BY', value: `${requestedBy}`, inline: true },
-            { name: 'TIME REQUESTED', value: `<t:${createdTs}:f>`, inline: true },
-            { name: 'GAME', value: `\`${gameLabel}\``, inline: true },
-            { name: '# Enemy Clan :', value: raid.enemyClanNames ? `\`${raid.enemyClanNames}\`` : '`None`', inline: true },
-            { name: 'HELPERS NEEDED', value: `\`${helperCount} / ${raid.helperLimit || 0}\``, inline: true },
-            { name: 'REGION', value: `\`${raid.region || 'Unknown'}\``, inline: true },
-            { name: 'RAID ID', value: `\`#${raid.raidId}\``, inline: true },
-            { name: '\u200b', value: '\u200b', inline: false },
-            { name: '# Enemy Names :', value: raid.enemyNames ? `\`\`\`${raid.enemyNames}\`\`\`` : '`None`', inline: false },
-            { name: '\u200b', value: '\u200b', inline: false },
-            { name: `# Live Helpers (${helperCount}/${raid.helperLimit || 0}) :`, value: liveHelpersValue, inline: false },
-            { name: '\u200b', value: '\u200b', inline: false },
-            { name: '# Details :', value: `\`\`\`text\n${reasonText}\n\`\`\``, inline: false }
+            { name: 'Time Requested', value: '<t:' + createdTs + ':f>', inline: true },
+            { name: 'Game', value: '`' + gameLabel + '`', inline: true },
+            { name: 'Raid ID', value: '`' + '#' + raid.raidId + '`', inline: true }
         ])
-        .setFooter({ text: `Raid #${raid.raidId} • ${new Date(createdMs).toLocaleDateString()}` })
+        .setFooter({ text: 'Raid #' + raid.raidId + ' • ' + new Date(createdMs).toLocaleDateString() })
         .setTimestamp();
 
     if (raid.robloxAvatarUrl) {
