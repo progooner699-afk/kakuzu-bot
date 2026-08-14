@@ -387,9 +387,9 @@ function updateRaidMessageReference(raidId, channelId, messageId, guildId) {
 
 function formatRaidMessage(raid, guildId = null) {
     const helperCount = (raid.helpers && raid.helpers.length) || 0;
-    const alertStateWord = raid.status === 'CLOSED' ? 'CLOSED' : (raid.status === 'FULL' ? 'FULL' : 'ACTIVE');
     const statusEmoji = raid.status === 'CLOSED' ? '🔴' : (raid.status === 'FULL' ? '🟠' : '🟢');
     const statusText = raid.status === 'CLOSED' ? 'Closed' : (raid.status === 'FULL' ? 'Full' : 'Open');
+    const alertStateWord = raid.status === 'CLOSED' ? 'CLOSED' : (raid.status === 'FULL' ? 'FULL' : 'ACTIVE');
     const reasonText = raid.reason ? raid.reason : 'No details provided';
     const gameLabel = GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
     const requestedBy = raid.requesterTag ? raid.requesterTag : `<@${raid.requesterId}>`; 
@@ -407,9 +407,9 @@ function formatRaidMessage(raid, guildId = null) {
         } catch (err) { /* ignore */ }
     }
 
-    // Discord renders only ONE thumbnail + ONE image per embed, so individual helper
-    // headshots cannot be tiled inline next to a name. Helpers show as a compact
-    // mention + Roblox name row with their accumulated session time.
+    // Discord embeds support only ONE thumbnail + ONE image per embed, so individual
+    // helper headshots cannot be tiled inline next to a name. Helpers are listed as a
+    // compact mention + Roblox name row with their accumulated session time.
     const liveHelpersValue = helperCount > 0
         ? raid.helpers.map((h) => {
             if (typeof h === 'string') return `• <@${h}>`; 
@@ -419,55 +419,11 @@ function formatRaidMessage(raid, guildId = null) {
         }).join('\n')
         : '• *None active... waiting for helpers to join*';
 
-    const body = [
-        `**This alert is currently ${alertStateWord}.** <t:${createdTs}:F>`,
-        '',
-        '> **Details**',
-        '',
-        '---',
-        '',
-        `Requested By: ${requestedBy}`,
-        `Time Requested: <t:${createdTs}:F>`,
-        `Status / Game: ${statusEmoji} ${statusText} | ${gameLabel}`,
-        '',
-        '> **Target Info**',
-        '',
-        '---',
-        '',
-        '```',
-        `Enemy Clan: ${raid.enemyClanNames || 'None'}`,
-        `Targets: ${raid.enemyNames || 'None'}`,
-        '```',
-        '',
-        '> **Server Info**',
-        '',
-        '---',
-        '',
-        '```',
-        `Region: ${raid.region || 'Unknown'} | Ping: N/Ams`,
-        `Win Streak: ${streakText}`,
-        '```',
-        '',
-        `> **Live Helpers (${helperCount}/${raid.helperLimit || 0})**`,
-        '',
-        '---',
-        '',
-        liveHelpersValue,
-        '',
-        '> **Additional Details & Reason**',
-        '',
-        '---',
-        '',
-        '```',
-        reasonText,
-        '```'
-    ];
-
     const embed = new EmbedBuilder()
         .setTitle(`# 🚨 Raid Alert #${raid.raidId}`)
-        // Yellow accent line removed — use a subtle neutral left border.
+        // Neutral left border instead of the yellow accent line.
         .setColor(0x566270)
-        .setDescription(body.join('\n'))
+        .setDescription(`**This alert is currently ${alertStateWord}.** <t:${createdTs}:F>`)
         .setFooter({ text: `Requested by ${requestedBy} • ${new Date(createdMs).toLocaleString()}` });
 
     // Roblox PFP of the raid requester — top-right thumbnail.
@@ -479,6 +435,17 @@ function formatRaidMessage(raid, guildId = null) {
     if (raid.gameThumbnailUrl) {
         embed.setImage(raid.gameThumbnailUrl);
     }
+
+    // Compact, wide layout: side-by-side inline fields instead of tall stacked panels.
+    embed.addFields([
+        { name: 'Requested By', value: requestedBy, inline: true },
+        { name: 'Time Requested', value: `<t:${createdTs}:F>`, inline: true },
+        { name: 'Status / Game', value: `${statusEmoji} ${statusText} | ${gameLabel}`, inline: true },
+        { name: 'Target Info', value: `Enemy Clan: ${raid.enemyClanNames || 'None'}\nTargets: ${raid.enemyNames || 'None'}`, inline: true },
+        { name: 'Server Info', value: `Region: ${raid.region || 'Unknown'} | Ping: N/Ams\nWin Streak: ${streakText}`, inline: true },
+        { name: `Live Helpers (${helperCount}/${raid.helperLimit || 0})`, value: liveHelpersValue, inline: false },
+        { name: 'Additional Details & Reason', value: reasonText, inline: false }
+    ]);
 
     return embed;
 }
