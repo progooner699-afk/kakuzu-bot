@@ -390,20 +390,18 @@ function formatRaidMessage(raid, guildId = null) {
     const helperCount = (raid.helpers && raid.helpers.length) || 0;
     const statusText = raid.status === 'OPEN' ? 'OPEN' : raid.status === 'FULL' ? 'FULL' : 'CLOSED';
     const gameLabel = GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
-    const requestedBy = raid.requesterTag ? raid.requesterTag : '<@' + raid.requesterId + '>';
     const createdMs = Number(raid.createdAt) || Date.now();
     const createdTs = Math.floor(createdMs / 1000);
     const reasonText = raid.reason ? raid.reason : 'No details provided';
 
     const statusEmoji = statusText === 'OPEN' ? '\u{1F7E2}' : statusText === 'FULL' ? '\u{1F7E0}' : '\u{1F534}';
-    const DIV = '\u2500'.repeat(28);
 
     const liveHelpersValue = helperCount > 0
         ? raid.helpers.map((h) => {
-            if (typeof h === 'string') return '> \u2022 <@' + h + '>';
+            if (typeof h === 'string') return '• <@' + h + '>';
             const helperName = h.robloxDisplayName || h.robloxUsername || '<@' + h.userId + '>';
             const timeSpent = (h && h.timeSpentSeconds) ? ' \u23F1 ' + formatTimeSpent(h.timeSpentSeconds) : '';
-            return '> \u2022 <@' + h.userId + '> \u2014 **' + helperName + '**' + timeSpent;
+            return '• <@' + h.userId + '> \u2014 **' + helperName + '**' + timeSpent;
         }).join('\n')
         : '';
 
@@ -423,24 +421,27 @@ function formatRaidMessage(raid, guildId = null) {
         .setDescription('\u{1F6A8} **RAID ALERT**')
         .addFields([
             {
-                name: '**\u{1F4CB} DETAILS :**',
-                value: '> **Game:** ' + gameLabel + '\n' +
-                    '> **Raid ID:** `' + raid.raidId + '`\n' +
-                    '> **Target:** ' + targetDisplay + '\n' +
-                    '> **Region:** `' + (raid.region || 'Unknown') + '`\n' +
-                    '> **Status:** `' + statusEmoji + ' ' + statusText + '`\n' +
-                    '> **Time Requested:** <t:' + createdTs + ':f>' + '\n' + DIV,
+                name: '\u200B',
+                value: '>>> **📋 DETAILS :**\n' +
+                    '**Game:** ' + gameLabel + '\n' +
+                    '**Raid ID:** `' + raid.raidId + '`\n' +
+                    '**Target:** ' + targetDisplay + '\n' +
+                    '**Region:** `' + (raid.region || 'Unknown') + '`\n' +
+                    '**Status:** `' + statusEmoji + ' ' + statusText + '`\n' +
+                    '**Time Requested:** <t:' + createdTs + ':f>',
                 inline: false
             },
             {
-                name: '**\u{1F4CB} IN-GAME HELPERS :**',
-                value: '> **Helpers:** `' + helperNamesList + '`\n' +
-                    '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`' + '\n' + DIV,
+                name: '\u200B',
+                value: '>>> **📋 IN-GAME HELPERS :**\n' +
+                    '**Helpers:** `' + helperNamesList + '`\n' +
+                    '**Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
                 inline: false
             },
             {
-                name: '**\u{1F4DD} DESCRIPTION**',
-                value: '```' + '\n' + reasonText + '\n' + '```',
+                name: '\u200B',
+                value: '>>> **📝 DESCRIPTION**\n' +
+                    '```' + '\n' + reasonText + '\n' + '```',
                 inline: false
             }
         ])
@@ -454,8 +455,8 @@ function formatRaidMessage(raid, guildId = null) {
     embeds.push(embed);
 
     if (helperCount > 0) {
-        const helpersDesc = '## LIVE HELPERS' + '\n\n' +
-            '`' + helperCount + ' / ' + (raid.helperLimit || 0) + '`' + '\n\n' +
+        const helpersDesc = '## LIVE HELPERS\n\n' +
+            '`' + helperCount + ' / ' + (raid.helperLimit || 0) + '`\n\n' +
             liveHelpersValue;
 
         const helpersEmbed = new EmbedBuilder()
@@ -477,6 +478,7 @@ function setRaidMvp(raidId, mvpUserId, guildId) {
     saveRaids(guildId, raids);
     return raid;
 }
+
 async function pollHelperPresences(client, guildId) {
     const apiKey = process.env.ROBLOX_API_KEY;
     if (!apiKey) return;
