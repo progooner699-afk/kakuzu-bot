@@ -396,7 +396,7 @@ function formatRaidMessage(raid, guildId = null) {
     const reasonText = raid.reason ? raid.reason : 'No details provided';
 
     const statusEmoji = statusText === 'OPEN' ? '\u{1F7E2}' : statusText === 'FULL' ? '\u{1F7E0}' : '\u{1F534}';
-    const DIV = '\u2500'.repeat(44);
+    const DIV = '\u2500'.repeat(28);
 
     const liveHelpersValue = helperCount > 0
         ? raid.helpers.map((h) => {
@@ -429,18 +429,18 @@ function formatRaidMessage(raid, guildId = null) {
                     '> **Target:** ' + targetDisplay + '\n' +
                     '> **Region:** `' + (raid.region || 'Unknown') + '`\n' +
                     '> **Status:** `' + statusEmoji + ' ' + statusText + '`\n' +
-                    '> **Time Requested:** <t:' + createdTs + ':f>' + '\n\n' + DIV,
+                    '> **Time Requested:** <t:' + createdTs + ':f>' + '\n> ' + DIV,
                 inline: false
             },
             {
                 name: '**\u{1F4CB} IN-GAME HELPERS :**',
                 value: '> **Helpers:** `' + helperNamesList + '`\n' +
-                    '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`' + '\n\n' + DIV,
+                    '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`' + '\n> ' + DIV,
                 inline: false
             },
             {
                 name: '**\u{1F4DD} DESCRIPTION**',
-                value: '```' + '\n' + reasonText + '\n' + '```' + '\n\n' + DIV,
+                value: '```' + '\n' + reasonText + '\n' + '```',
                 inline: false
             }
         ])
