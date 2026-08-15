@@ -430,6 +430,7 @@ function formatRaidMessage(raid, guildId = null) {
         '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
         '',
         '# \u{1F4DD} DESCRIPTION',
+        '',
         '```' + '\n' + reasonText + '\n' + '```',
         '',
     ].join('\n');
