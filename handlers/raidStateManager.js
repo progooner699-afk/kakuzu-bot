@@ -412,9 +412,8 @@ function formatRaidMessage(raid, guildId = null) {
         .setDescription('\u{1F6A8} **RAID ALERT**')
         .addFields([
             {
-                name: '\u200B',
-                value: '> **📋 DETAILS :**\n' +
-                    '> **Game:** ' + gameLabel + '\n' +
+                name: '\u{1F4CB} DETAILS :',
+                value: '> **Game:** ' + gameLabel + '\n' +
                     '> **Raid ID:** `' + raid.raidId + '`\n' +
                     '> **Target:** ' + targetDisplay + '\n' +
                     '> **Region:** `' + (raid.region || 'Unknown') + '`\n' +
@@ -424,15 +423,23 @@ function formatRaidMessage(raid, guildId = null) {
             },
             {
                 name: '\u200B',
-                value: '> **📋 IN-GAME HELPERS :**\n' +
-                    '> **Helpers:** `' + helperNamesList + '`\n' +
+                value: '\u200B',
+                inline: false
+            },
+            {
+                name: '\u{1F4CB} IN-GAME HELPERS :',
+                value: '> **Helpers:** `' + helperNamesList + '`\n' +
                     '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
                 inline: false
             },
             {
                 name: '\u200B',
-                value: '**📝 DESCRIPTION**\n' +
-                    '```' + '\n' + reasonText + '\n' + '```',
+                value: '\u200B',
+                inline: false
+            },
+            {
+                name: '\u{1F4DD} DESCRIPTION',
+                value: '```' + '\n' + reasonText + '\n' + '```',
                 inline: false
             }
         ])
@@ -476,6 +483,7 @@ function setRaidMvp(raidId, mvpUserId, guildId) {
     saveRaids(guildId, raids);
     return raid;
 }
+
 
 async function pollHelperPresences(client, guildId) {
     const apiKey = process.env.ROBLOX_API_KEY;
