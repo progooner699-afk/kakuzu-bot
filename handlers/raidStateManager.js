@@ -429,13 +429,13 @@ function formatRaidMessage(raid, guildId = null) {
                     '> **Target:** ' + targetDisplay + '\n' +
                     '> **Region:** `' + (raid.region || 'Unknown') + '`\n' +
                     '> **Status:** `' + statusEmoji + ' ' + statusText + '`\n' +
-                    '> **Time Requested:** <t:' + createdTs + ':f>' + '\n> ' + DIV,
+                    '> **Time Requested:** <t:' + createdTs + ':f>' + '\n' + DIV,
                 inline: false
             },
             {
                 name: '**\u{1F4CB} IN-GAME HELPERS :**',
                 value: '> **Helpers:** `' + helperNamesList + '`\n' +
-                    '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`' + '\n> ' + DIV,
+                    '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`' + '\n' + DIV,
                 inline: false
             },
             {
