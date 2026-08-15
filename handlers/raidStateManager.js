@@ -422,7 +422,7 @@ function formatRaidMessage(raid, guildId = null) {
         .setDescription('\u{1F6A8} **RAID ALERT**')
         .addFields([
             {
-                name: '# \u{1F4CB} DETAILS :',
+                name: '**\u{1F4CB} DETAILS :**',
                 value: '> **Game:** ' + gameLabel + '\n' +
                     '> **Raid ID:** `' + raid.raidId + '`\n' +
                     '> **Target:** ' + targetDisplay + '\n' +
@@ -432,13 +432,13 @@ function formatRaidMessage(raid, guildId = null) {
                 inline: false
             },
             {
-                name: '# \u{1F4CB} IN-GAME HELPERS :',
+                name: '**\u{1F4CB} IN-GAME HELPERS :**',
                 value: '> **Helpers:** `' + helperNamesList + '`\n' +
                     '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
                 inline: false
             },
             {
-                name: '# \u{1F4DD} DESCRIPTION',
+                name: '**\u{1F4DD} DESCRIPTION**',
                 value: '```' + '\n' + reasonText + '\n' + '```',
                 inline: false
             }
