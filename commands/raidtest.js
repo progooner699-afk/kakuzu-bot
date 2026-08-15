@@ -10,6 +10,7 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
+    SeparatorBuilder
 } = require('discord.js');
 const raidStateManager = require('../handlers/raidStateManager');
 
