@@ -100,7 +100,7 @@ module.exports = {
 
         await targetChannel.send({
             embeds: embeds,
-            components: [row]
+            components: [new ActionRowBuilder().addComponents(new SeparatorBuilder().setSpacing('lg')), row]
         });
 
         await interaction.reply({
