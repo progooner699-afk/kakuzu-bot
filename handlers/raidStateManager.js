@@ -399,52 +399,51 @@ function formatRaidMessage(raid, guildId = null) {
 
     const liveHelpersValue = helperCount > 0
         ? raid.helpers.map((h) => {
-            if (typeof h === 'string') return '• <@' + h + '>';
-            const helperName = h.robloxDisplayName || h.robloxUsername || ('<@' + h.userId + '>');
-            const timeSpent = (h && h.timeSpentSeconds) ? ' ⏱ ' + formatTimeSpent(h.timeSpentSeconds) : '';
-            return '• <@' + h.userId + '> — **' + helperName + '**' + timeSpent;
+            if (typeof h === 'string') return '> \u2022 <@' + h + '>';
+            const helperName = h.robloxDisplayName || h.robloxUsername || '<@' + h.userId + '>';
+            const timeSpent = (h && h.timeSpentSeconds) ? ' \u23F1 ' + formatTimeSpent(h.timeSpentSeconds) : '';
+            return '> \u2022 <@' + h.userId + '> \u2014 **' + helperName + '**' + timeSpent;
         }).join('\n')
-        : '• *None active... waiting for helpers to join*';
+        : '';
 
     const helperNamesList = helperCount > 0
         ? raid.helpers.map((h) => {
             if (typeof h === 'string') return '<@' + h + '>';
-            return h.robloxDisplayName || h.robloxUsername || ('<@' + h.userId + '>');
+            return h.robloxDisplayName || h.robloxUsername || '<@' + h.userId + '>';
         }).join(', ')
         : 'None';
 
+    const targetDisplay = raid.robloxUsername || '<@' + raid.requesterId + '>';
+
+    const desc = [
+        '\u{1F6A8} **RAID ALERT**',
+        '',
+        '# \u{1F4CB} DETAILS :',
+        '---',
+        '> **Game:** ' + gameLabel,
+        '> **Raid ID:** `' + raid.raidId + '`',
+        '> **Target:** ' + targetDisplay,
+        '> **Region:** `' + (raid.region || 'Unknown') + '`',
+        '> **Status:** `' + statusEmoji + ' ' + statusText + '`',
+        '> **Time Requested:** <t:' + createdTs + ':f>',
+        '',
+        '# \u{1F4CB} IN-GAME HELPERS :',
+        '---',
+        '> **Helpers:** `' + helperNamesList + '`',
+        '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
+        '',
+        '# \u{1F4DD} DESCRIPTION',
+        '---',
+        '```',
+        reasonText,
+        '```',
+    ].join('\n');
+
+    const embeds = [];
+
     const embed = new EmbedBuilder()
         .setTitle('RAID ALERT')
-        .setColor(0xFFD700)
-        .setDescription(statusEmoji + ' \u{1F6A8} **RAID ALERT**')
-        .addFields([
-            {
-                name: '\u{1F4CB} DETAILS',
-                value: '**Game:** ' + gameLabel + '\n' +
-                    '**Raid ID:** `' + raid.raidId + '`\n' +
-                    '**Target:** ' + requestedBy + '\n' +
-                    '**Region:** `' + (raid.region || 'Unknown') + '`\n' +
-                    '**Status:** ' + statusEmoji + ' ' + statusText + '\n' +
-                    '**Time Requested:** <t:' + createdTs + ':f>',
-                inline: false
-            },
-            {
-                name: '\u{1F4CB} IN-GAME HELPERS',
-                value: '**Helpers:** `' + helperNamesList + '`\n' +
-                    '**Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
-                inline: false
-            },
-            {
-                name: '\u{1F4DD} DESCRIPTION',
-                value: '```' + '\n' + reasonText + '\n' + '```',
-                inline: false
-            },
-            {
-                name: 'LIVE HELPERS',
-                value: '`' + helperCount + ' / ' + (raid.helperLimit || 0) + '`' + '\n\n' + liveHelpersValue,
-                inline: false
-            }
-        ])
+        .setDescription(desc)
         .setFooter({ text: 'Raid #' + raid.raidId + ' \u2022 ' + new Date(createdMs).toLocaleDateString() })
         .setTimestamp();
 
@@ -452,7 +451,26 @@ function formatRaidMessage(raid, guildId = null) {
         embed.setThumbnail(raid.robloxAvatarUrl);
     }
 
-    return embed;
+    embeds.push(embed);
+
+    if (helperCount > 0) {
+        const helpersDesc = [
+            '## LIVE HELPERS',
+            '',
+            '`' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
+            '',
+            liveHelpersValue,
+        ].join('\n');
+
+        const helpersEmbed = new EmbedBuilder()
+            .setDescription(helpersDesc)
+            .setFooter({ text: 'Raid #' + raid.raidId + ' \u2022 ' + new Date(createdMs).toLocaleDateString() })
+            .setTimestamp();
+
+        embeds.push(helpersEmbed);
+    }
+
+    return embeds;
 }
 function setRaidMvp(raidId, mvpUserId, guildId) {
     const raids = loadRaids(guildId);
@@ -462,7 +480,6 @@ function setRaidMvp(raidId, mvpUserId, guildId) {
     saveRaids(guildId, raids);
     return raid;
 }
-
 async function pollHelperPresences(client, guildId) {
     const apiKey = process.env.ROBLOX_API_KEY;
     if (!apiKey) return;

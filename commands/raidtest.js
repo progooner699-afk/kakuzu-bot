@@ -59,7 +59,7 @@ module.exports = {
         };
 
         // Generate the raid alert embed using the real formatter
-        const embed = raidStateManager.formatRaidMessage(fakeRaid, interaction.guild.id);
+        const embeds = raidStateManager.formatRaidMessage(fakeRaid, interaction.guild.id);
 
         // Simple test buttons
         const joinUrl = 'https://www.roblox.com/games/start?placeId=' + fakeRaid.placeId;
@@ -99,7 +99,7 @@ module.exports = {
         }
 
         await targetChannel.send({
-            embeds: [embed],
+            embeds: embeds,
             components: [row]
         });
 
