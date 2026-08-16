@@ -94,6 +94,10 @@ Refactored the linking → request → join → close loop per the spec:
      (👤 Details / 🎯 Target / 🌐 Region / 👥 Helper Status / 💬 Description),
      code-blocked target & description, `Live Helpers (n/max)` with per-helper
      PFP lines, streak + region/ping line.
+   * Sections are separated by a thin `─` divider line — a module-level
+     `EMBED_DIVIDER` const (`'\u2500'.repeat(44)`) inside `formatRaidMessage`,
+     inserted after the RAID ALERT banner, after DETAILS, after IN-GAME
+     HELPERS, and under the `## LIVE HELPERS` heading.
    * `[ ↗️ JOIN SERVER ]` — `ButtonStyle.Link` (grey) to an https Roblox join URL
      (`https://www.roblox.com/games/start?placeId=...` — Discord Link buttons
      reject `roblox://` schemes, which would fail the whole alert), built by

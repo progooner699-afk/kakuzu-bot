@@ -386,6 +386,11 @@ function updateRaidMessageReference(raidId, channelId, messageId, guildId) {
     saveRaids(guildId, raids);
 }
 
+// Thin horizontal divider line rendered between embed sections (a run of
+// U+2500 BOX DRAWINGS LIGHT HORIZONTAL characters). Kept as a unicode escape
+// so the raw file encoding can never be mangled by an editor.
+const EMBED_DIVIDER = '\u2500'.repeat(44);
+
 function formatRaidMessage(raid, guildId = null) {
     const helperCount = (raid.helpers && raid.helpers.length) || 0;
     const statusText = raid.status === 'OPEN' ? 'OPEN' : raid.status === 'FULL' ? 'FULL' : 'CLOSED';
@@ -409,7 +414,7 @@ function formatRaidMessage(raid, guildId = null) {
 
     const embed = new EmbedBuilder()
         .setTitle('RAID ALERT')
-        .setDescription('\u{1F6A8} **RAID ALERT**')
+        .setDescription('\u{1F6A8} **RAID ALERT**\n\n' + EMBED_DIVIDER)
         .addFields([
             {
                 name: '\u{1F4CB} DETAILS :',
@@ -423,7 +428,7 @@ function formatRaidMessage(raid, guildId = null) {
             },
             {
                 name: '\u200B',
-                value: '\u200B',
+                value: EMBED_DIVIDER,
                 inline: false
             },
             {
@@ -434,7 +439,7 @@ function formatRaidMessage(raid, guildId = null) {
             },
             {
                 name: '\u200B',
-                value: '\u200B',
+                value: EMBED_DIVIDER,
                 inline: false
             },
             {
@@ -461,6 +466,7 @@ function formatRaidMessage(raid, guildId = null) {
         }).join('\n');
 
         const helpersDesc = '## LIVE HELPERS\n\n' +
+            EMBED_DIVIDER + '\n\n' +
             '`' + helperCount + ' / ' + (raid.helperLimit || 0) + '`\n\n' +
             liveHelpersList;
 
