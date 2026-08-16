@@ -10,7 +10,7 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
-    SeparatorBuilder
+
 } = require('discord.js');
 const raidStateManager = require('../handlers/raidStateManager');
 
@@ -101,7 +101,7 @@ module.exports = {
 
         await targetChannel.send({
             embeds: embeds,
-            components: [new ActionRowBuilder().addComponents(new SeparatorBuilder().setSpacing('lg')), row]
+            components: [row]
         });
 
         await interaction.reply({

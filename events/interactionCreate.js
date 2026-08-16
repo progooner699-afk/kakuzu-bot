@@ -9,8 +9,7 @@
     EmbedBuilder,
     ChannelType,
     StringSelectMenuBuilder,
-    StringSelectMenuOptionBuilder,
-    SeparatorBuilder
+    StringSelectMenuOptionBuilder
 } = require("discord.js");
 const raidStateManager = require("../handlers/raidStateManager");
 const robloxApi = require("../handlers/robloxApi");
@@ -505,7 +504,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             if (baseAlertMsg) {
                 const updatedAlertEmbeds = raidStateManager.formatRaidMessage(raid, interaction.guild.id);
                 const cleanClosedRow = createRaidButtons(raid, interaction.member);
-                await baseAlertMsg.edit({ embeds: updatedAlertEmbeds, components: [new ActionRowBuilder().addComponents(new SeparatorBuilder().setSpacing('lg')), cleanClosedRow] }).catch(() => null);
+                await baseAlertMsg.edit({ embeds: updatedAlertEmbeds, components: [cleanClosedRow] }).catch(() => null);
             }
         }
     } catch (e) { /* ignore */ }
@@ -934,7 +933,7 @@ module.exports = {
                 const message = await targetChannel.send({
                     content: regionRoleInfo.mention || undefined,
                     embeds: embeds,
-                    components: [new ActionRowBuilder().addComponents(new SeparatorBuilder().setSpacing("lg")), raidButtonRow],
+                    components: [raidButtonRow],
                     allowedMentions: regionRoleInfo.allowedMentions
                 });
                 raidStateManager.setRaidOpen(raid.raidId, guildId);
@@ -988,7 +987,7 @@ module.exports = {
             const channel = await interaction.client.channels.fetch(updated.channelId).catch(() => null);
             if (channel) {
                 const message = await channel.messages.fetch(updated.messageId).catch(() => null);
-                if (message) await message.edit({ embeds: embeds, components: [new ActionRowBuilder().addComponents(new SeparatorBuilder().setSpacing("lg")), row] }).catch(() => null);
+                if (message) await message.edit({ embeds: embeds, components: [row] }).catch(() => null);
             }
             await interaction.reply({ content: 'You have left the raid.', flags: 64 }).catch(() => null);
             return;
@@ -1123,7 +1122,7 @@ module.exports = {
             const channel = await interaction.client.channels.fetch(updated.channelId).catch(() => null);
             if (channel) {
                 const message = await channel.messages.fetch(updated.messageId).catch(() => null);
-                if (message) await message.edit({ embeds: embeds, components: [new ActionRowBuilder().addComponents(new SeparatorBuilder().setSpacing("lg")), row] }).catch(() => null);
+                if (message) await message.edit({ embeds: embeds, components: [row] }).catch(() => null);
             }
             // Send the helper their deployment info.
             const gameLabel = raidStateManager.GAME_CONFIG[updated.targetGame] || updated.targetGame || 'Unknown';
