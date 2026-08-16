@@ -88,7 +88,14 @@ Refactored the linking → request → join → close loop per the spec:
    queries the Roblox Presence API (`presence.roblox.com`) for active
    `InGame` status → Place ID / Job ID / IP region (e.g., Mumbai, Frankfurt,
    Ashburn) to build the Roblox deep-link `roblox://experiences/start?...`.
-4. **Active Raid Alert & Controls (`formatRaidMessage` + `createRaidButtons`):**
+4. **Active Raid Alert & Controls (`buildRaidAlertPayload` + `createRaidButtons`):**
+   * The alert is now a **native Components V2 message** (message flag
+     `1 << 15` / `IS_COMPONENTS_V2`). `handlers/raidV2.js` builds the payload
+     from Text Display (`type: 10`) + **Separator (`type: 14`, `divider: true`)**,
+     which renders the sleek native horizontal line between sections. Because
+     V2 disables `content` + `embeds`, the region-role ping is sent as a
+     separate message first, and the embed builder `formatRaidMessage` is kept
+     purely as an automatic fallback.
    * Alert embed layout: `# 🚨 Raid Alert #<id>` title, ACTIVE subtitle with
      Discord `<t:...:F>` timestamp, requester avatar thumbnail, `###` sections
      (👤 Details / 🎯 Target / 🌐 Region / 👥 Helper Status / 💬 Description),
@@ -98,6 +105,10 @@ Refactored the linking → request → join → close loop per the spec:
      `EMBED_DIVIDER` const (`'\u2500'.repeat(44)`) inside `formatRaidMessage`,
      inserted after the RAID ALERT banner, after DETAILS, after IN-GAME
      HELPERS, and under the `## LIVE HELPERS` heading.
+   * V2 alert lifecycle: a successful V2 post sets `alertFormat: 'v2'` on the
+     raid record (`raidV2.markAlertV2`); all later edits (accept / leave /
+     close / outcome) branch on that flag and **edit `components` only** (no
+     embeds), while historically posted alerts keep using the embed path.
    * `[ ↗️ JOIN SERVER ]` — `ButtonStyle.Link` (grey) to an https Roblox join URL
      (`https://www.roblox.com/games/start?placeId=...` — Discord Link buttons
      reject `roblox://` schemes, which would fail the whole alert), built by
@@ -126,6 +137,7 @@ Refactored the linking → request → join → close loop per the spec:
 | `events/ready.js` | On-ready guild command registration + helper-presence polling loop. |
 | `events/interactionCreate.js` | **Main interaction hub** (buttons, modals, selects). Contains verification decision helpers, link flow, raid application step 1, and the RAID OPERATIONS section (`raid_accept_`, `raid_leave_`, `raid_close_`, `raid_outcome_`, `raid_mvp_select_`). |
 | `handlers/raidStateManager.js` | Raid CRUD + persistence + presence polling. |
+| `handlers/raidV2.js` | Native Components V2 raid alert builder (`buildRaidAlertPayload`, `markAlertV2`). |
 | `handlers/robloxApi.js` | Roblox API/Presence calls, username validation, deep-links. |
 | `handlers/verificationDb.js` | sql.js persistence for verification records. |
 | `handlers/verificationHelpers.js` | `formatRobloxProfileValue` and friends. |

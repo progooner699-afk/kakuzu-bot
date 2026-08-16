@@ -13,6 +13,7 @@ const {
 
 } = require('discord.js');
 const raidStateManager = require('../handlers/raidStateManager');
+const raidV2 = require('../handlers/raidV2');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -99,13 +100,17 @@ module.exports = {
             });
         }
 
-        await targetChannel.send({
-            embeds: embeds,
-            components: [row]
-        });
-
+        let v2Posted = false;
+        const v2Payload = raidV2.buildRaidAlertPayload(fakeRaid, row);
+        try {
+            await targetChannel.send(v2Payload);
+            v2Posted = true;
+        } catch (v2Err) {
+            console.warn('Components V2 send failed, falling back to embeds:', (v2Err && v2Err.message) || v2Err);
+            await targetChannel.send({ embeds: embeds, components: [row] });
+        }
         await interaction.reply({
-            content: 'Test raid alert posted to channel — Raid #999 (fake data)',
+            content: 'Test raid alert posted to channel — Raid #999 (fake data) ' + (v2Posted ? '(native V2)' : '(embed fallback)'),
             flags: 64
         });
     }

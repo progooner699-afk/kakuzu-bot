@@ -12,6 +12,7 @@
     StringSelectMenuOptionBuilder
 } = require("discord.js");
 const raidStateManager = require("../handlers/raidStateManager");
+const raidV2 = require("../handlers/raidV2");
 const robloxApi = require("../handlers/robloxApi");
 const verificationDb = require("../handlers/verificationDb");
 const { formatRobloxProfileValue } = require("../handlers/verificationHelpers");
@@ -504,7 +505,12 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             if (baseAlertMsg) {
                 const updatedAlertEmbeds = raidStateManager.formatRaidMessage(raid, interaction.guild.id);
                 const cleanClosedRow = createRaidButtons(raid, interaction.member);
-                await baseAlertMsg.edit({ embeds: updatedAlertEmbeds, components: [cleanClosedRow] }).catch(() => null);
+                if (raid.alertFormat === 'v2') {
+                    const payload = raidV2.buildRaidAlertPayload(raid, cleanClosedRow);
+                    await baseAlertMsg.edit({ components: payload.components }).catch(() => null);
+                } else {
+                    await baseAlertMsg.edit({ embeds: updatedAlertEmbeds, components: [cleanClosedRow] }).catch(() => null);
+                }
             }
         }
     } catch (e) { /* ignore */ }
@@ -930,18 +936,30 @@ module.exports = {
             await interaction.reply({ embeds: [completionEmbed], flags: 64 }).catch(() => null);
 
             try {
-                const message = await targetChannel.send({
-                    content: regionRoleInfo.mention || undefined,
-                    embeds: embeds,
-                    components: [raidButtonRow],
-                    allowedMentions: regionRoleInfo.allowedMentions
-                });
+                const v2Payload = raidV2.buildRaidAlertPayload(raid, raidButtonRow);
+                if (regionRoleInfo.mention) {
+                    await targetChannel.send({ content: regionRoleInfo.mention, allowedMentions: regionRoleInfo.allowedMentions }).catch(() => null);
+                }
+                const v2Message = await targetChannel.send(v2Payload);
+                raidV2.markAlertV2(raid.raidId, guildId);
                 raidStateManager.setRaidOpen(raid.raidId, guildId);
-                raidStateManager.updateRaidMessageReference(raid.raidId, targetChannel.id, message.id, guildId);
+                raidStateManager.updateRaidMessageReference(raid.raidId, targetChannel.id, v2Message.id, guildId);
             } catch (err) {
-                console.warn('Failed to post raid alert embed:', err?.message || err);
-                raidStateManager.cleanupPendingRaids(userId, guildId);
-                await interaction.followUp({ content: '⚠️ The raid alert could not be posted to the configured raid channel. Please ask an admin to verify the channel configuration and try again.', flags: 64 }).catch(() => null);
+                console.warn('Components V2 alert failed, falling back to embed:', (err && err.message) || err);
+                try {
+                    const message = await targetChannel.send({
+                        content: regionRoleInfo.mention || undefined,
+                        embeds: embeds,
+                        components: [raidButtonRow],
+                        allowedMentions: regionRoleInfo.allowedMentions
+                    });
+                    raidStateManager.setRaidOpen(raid.raidId, guildId);
+                    raidStateManager.updateRaidMessageReference(raid.raidId, targetChannel.id, message.id, guildId);
+                } catch (err2) {
+                    console.warn('Failed to post raid alert embed:', (err2 && err2.message) || err2);
+                    raidStateManager.cleanupPendingRaids(userId, guildId);
+                    await interaction.followUp({ content: '⚠️ The raid alert could not be posted to the configured raid channel. Please ask an admin to verify the channel configuration and try again.', flags: 64 }).catch(() => null);
+                }
             }
         }
         // ===== RAID OPERATIONS: accept / leave / close / outcome / mvp =====
@@ -987,7 +1005,13 @@ module.exports = {
             const channel = await interaction.client.channels.fetch(updated.channelId).catch(() => null);
             if (channel) {
                 const message = await channel.messages.fetch(updated.messageId).catch(() => null);
-                if (message) await message.edit({ embeds: embeds, components: [row] }).catch(() => null);
+                if (message) {
+                    if (updated.alertFormat === 'v2') {
+                        await message.edit({ components: raidV2.buildRaidAlertPayload(updated, row).components }).catch(() => null);
+                    } else {
+                        await message.edit({ embeds: embeds, components: [row] }).catch(() => null);
+                    }
+                }
             }
             await interaction.reply({ content: 'You have left the raid.', flags: 64 }).catch(() => null);
             return;
@@ -1122,7 +1146,13 @@ module.exports = {
             const channel = await interaction.client.channels.fetch(updated.channelId).catch(() => null);
             if (channel) {
                 const message = await channel.messages.fetch(updated.messageId).catch(() => null);
-                if (message) await message.edit({ embeds: embeds, components: [row] }).catch(() => null);
+                if (message) {
+                    if (updated.alertFormat === 'v2') {
+                        await message.edit({ components: raidV2.buildRaidAlertPayload(updated, row).components }).catch(() => null);
+                    } else {
+                        await message.edit({ embeds: embeds, components: [row] }).catch(() => null);
+                    }
+                }
             }
             // Send the helper their deployment info.
             const gameLabel = raidStateManager.GAME_CONFIG[updated.targetGame] || updated.targetGame || 'Unknown';

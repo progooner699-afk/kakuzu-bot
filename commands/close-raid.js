@@ -1,5 +1,6 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const raidStateManager = require('../handlers/raidStateManager');
+const raidV2 = require('../handlers/raidV2');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -49,8 +50,12 @@ module.exports = {
         if (alertChannel && alertChannel.isTextBased()) {
             const alertMessage = await alertChannel.messages.fetch(updatedRaid.messageId).catch(() => null);
             if (alertMessage) {
-                const closedEmbeds = raidStateManager.formatRaidMessage(updatedRaid, interaction.guild.id);
-                await alertMessage.edit({ embeds: closedEmbeds, components: [] }).catch(() => null);
+                if (updatedRaid.alertFormat === 'v2') {
+                    await alertMessage.edit({ components: raidV2.buildRaidAlertPayload(updatedRaid).components }).catch(() => null);
+                } else {
+                    const closedEmbeds = raidStateManager.formatRaidMessage(updatedRaid, interaction.guild.id);
+                    await alertMessage.edit({ embeds: closedEmbeds, components: [] }).catch(() => null);
+                }
             }
         }
 
