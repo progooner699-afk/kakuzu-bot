@@ -446,6 +446,11 @@ function formatRaidMessage(raid, guildId = null) {
                 name: '\u{1F4DD} DESCRIPTION',
                 value: '```' + '\n' + reasonText + '\n' + '```',
                 inline: false
+            },
+            {
+                name: String.fromCharCode(0x200B),
+                value: EMBED_DIVIDER,
+                inline: false
             }
         ])
         .setFooter({ text: 'Raid #' + raid.raidId + ' \u2022 ' + new Date(createdMs).toLocaleDateString() })

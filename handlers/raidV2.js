@@ -10,6 +10,13 @@ const RAID_ALERT_V2_FLAGS = 1 << 15;
 // sequence mangling in the source file itself).
 const NL10 = String.fromCharCode(10);
 
+// Accent color for the container left color bar (Raid Alert red).
+const ALERT_ACCENT_COLOR = 0xFF0000;
+
+// Thin horizontal rule (U+2500) rendered directly beneath each section title in
+// the V2 alert, mirroring the embed fallback EMBED_DIVIDER rule.
+const DIVIDER = String.fromCharCode(0x2500).repeat(44);
+
 function buildRaidAlertPayload(raid, buttons) {
     if (buttons === undefined) buttons = null;
     const helperCount = (raid.helpers && raid.helpers.length) || 0;
@@ -21,7 +28,7 @@ function buildRaidAlertPayload(raid, buttons) {
     const statusEmoji = statusText === 'OPEN' ? '🟢' : statusText === 'FULL' ? '🟠' : '🔴';
     const targetDisplay = raid.robloxUsername || '<@' + raid.requesterId + '>';
 
-    const helperNamesList = helperCount > 0
+    const helperNamesText = helperCount > 0
         ? raid.helpers.map(function (h) {
             if (typeof h === 'string') return '<@' + h + '>';
             const name = h.robloxDisplayName || h.robloxUsername || (h.userId ? '<@' + h.userId + '>' : 'Unknown');
@@ -29,36 +36,40 @@ function buildRaidAlertPayload(raid, buttons) {
         }).join(', ')
         : 'None';
 
-    const components = [];
     const text = function (content) { return { type: 10, content: content }; };
-    const divider = function () { return { type: 14, divider: true, spacing: 1 }; };
+    const separator = function () { return { type: 14, divider: true, spacing: 1 }; };
+    const section = function (tds) { return { type: 9, components: tds }; };
 
-    // --- Header ---
-    components.push(text('### 🚨 RAID ALERT #' + raid.raidId));
-    components.push(text('**' + statusEmoji + ' ' + statusText + '** • <t:' + createdTs + ':F>' +
-        (raid.region ? NL10 + '> **Region:** `' + raid.region + '`' : '')));
-    components.push(divider());
+    const containerContents = [];
 
-    // --- Details ---
-    components.push(text('### 📋 DETAILS' + NL10 +
+    // --- Section 1: header (title + status) ---
+    containerContents.push(section([
+        text('### 🚨 RAID ALERT #' + raid.raidId + NL10 + DIVIDER),
+        text('**' + statusEmoji + ' ' + statusText + '** • <t:' + createdTs + ':F>' +
+            (raid.region ? NL10 + '> **Region:** `' + raid.region + '`' : ''))
+    ]));
+    containerContents.push(separator());
+
+    // --- Section 2: details ---
+    containerContents.push(section([text('### 📋 DETAILS' + NL10 + DIVIDER + NL10 +
         '> **Game:** ' + gameLabel + NL10 +
         '> **Raid ID:** `' + raid.raidId + '`' + NL10 +
         '> **Target:** ' + targetDisplay +
         (raid.region ? NL10 + '> **Region:** `' + raid.region + '`' : '') + NL10 +
         '> **Status:** `' + statusEmoji + ' ' + statusText + '`' + NL10 +
-        '> **Time Requested:** <t:' + createdTs + ':f>'));
-    components.push(divider());
+        '> **Time Requested:** <t:' + createdTs + ':f>')]));
+    containerContents.push(separator());
 
-    // --- In-game helpers ---
-    components.push(text('### ⚔️ IN-GAME HELPERS' + NL10 +
-        '> **Helpers:** `' + helperNamesList + '`' + NL10 +
-        '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`'));
-    components.push(divider());
+    // --- Section 3: in-game helpers ---
+    containerContents.push(section([text('### ⚔️ IN-GAME HELPERS' + NL10 + DIVIDER + NL10 +
+        '> **Helpers:** `' + helperNamesText + '`' + NL10 +
+        '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`')]));
+    containerContents.push(separator());
 
-    // --- Description ---
-    components.push(text('### 📝 DESCRIPTION' + NL10 + '```' + NL10 + reasonText + NL10 + '```'));
+    // --- Section 4: description ---
+    containerContents.push(section([text('### 📝 DESCRIPTION' + NL10 + DIVIDER + NL10 + '```' + NL10 + reasonText + NL10 + '```')]));
 
-    // --- Live helpers ---
+    // --- Section 5: live helpers ---
     if (helperCount > 0) {
         const liveHelpersList = raid.helpers.map(function (h) {
             if (typeof h === 'string') return '• <@' + h + '>';
@@ -66,17 +77,19 @@ function buildRaidAlertPayload(raid, buttons) {
             const timeSpent = (h && h.timeSpentSeconds) ? ' ⏱ ' + rsm.formatTimeSpent(h.timeSpentSeconds) : '';
             return '• <@' + h.userId + '> — **' + name + '**' + timeSpent;
         }).join(NL10);
-        components.push(divider());
-        components.push(text('### 👥 LIVE HELPERS (' + helperCount + ' / ' + (raid.helperLimit || 0) + ')' + NL10 + liveHelpersList));
+        containerContents.push(separator());
+        containerContents.push(section([text('### 👥 LIVE HELPERS (' + helperCount + ' / ' + (raid.helperLimit || 0) + ')' + NL10 + DIVIDER + NL10 + liveHelpersList)]));
     }
 
-    // --- Button row (legacy ActionRow still works on V2 messages) ---
+    // --- Button row attached to the container ---
     if (buttons) {
         const rows = Array.isArray(buttons) ? buttons : [buttons];
-        rows.forEach(function (r) { components.push(typeof r.toJSON === "function" ? r.toJSON() : r); });
+        rows.forEach(function (r) { containerContents.push(typeof r.toJSON === "function" ? r.toJSON() : r); });
     }
 
-    return { flags: RAID_ALERT_V2_FLAGS, components: components };
+    const container = { type: 17, accent_color: ALERT_ACCENT_COLOR, components: containerContents };
+
+    return { flags: RAID_ALERT_V2_FLAGS, components: [container] };
 }
 
 function markAlertV2(raidId, guildId) {
@@ -90,6 +103,8 @@ function markAlertV2(raidId, guildId) {
 
 module.exports = {
     RAID_ALERT_V2_FLAGS: RAID_ALERT_V2_FLAGS,
+    ALERT_ACCENT_COLOR: ALERT_ACCENT_COLOR,
     buildRaidAlertPayload: buildRaidAlertPayload,
     markAlertV2: markAlertV2
 };
+
