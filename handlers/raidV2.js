@@ -5,6 +5,7 @@ const {
     SectionBuilder,
     TextDisplayBuilder,
     SeparatorBuilder,
+    SeparatorSpacingSize,
     ThumbnailBuilder
 } = require('discord.js');
 
@@ -97,7 +98,9 @@ async function buildRaidAlertPayload(raid, buttons) {
     const container = new ContainerBuilder().setAccentColor(ALERT_ACCENT_COLOR).toJSON();
 
     const text = function (content) { return new TextDisplayBuilder().setContent(content).toJSON(); };
-    const separator = function () { return new SeparatorBuilder().setDivider(true).setSpacing(1).toJSON(); }; // type 14
+    // Native V2 Separator with the divider line explicitly ON (this is what
+    // actually draws the horizontal bar) and Small spacing.
+    const separator = function () { return new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small).toJSON(); }; // type 14
 
     const containerContents = [];
     const sections = [];
