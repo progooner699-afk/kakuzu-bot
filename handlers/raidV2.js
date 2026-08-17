@@ -92,9 +92,11 @@ async function buildRaidAlertPayload(raid, buttons) {
     // makes the whole alert look like a boxed embed). Container type = 17.
     // The ContainerBuilder is serialized while its component list is still
     // empty; the raw section/separator/row JSON is attached afterwards because
-    // SectionBuilder in @discordjs/builders 1.14.x REQUIRES an accessory to
-    // serialize, so accessory-less sections (IN-GAME HELPERS / DESCRIPTION /
-    // LIVE HELPERS) must be emitted as plain type-9 JSON.
+        // a Section (type 9) ALWAYS requires an accessory (Discord rejects
+    // accessory-less Sections with BASE_TYPE_REQUIRED), so blocks without a
+    // thumbnail/button (IN-GAME HELPERS / DESCRIPTION / LIVE HELPERS, and the
+    // header when there is no requester avatar) are emitted as TextDisplay
+    // (type 10) via text() instead - no accessory is required.
     const container = new ContainerBuilder().setAccentColor(ALERT_ACCENT_COLOR).toJSON();
 
     const text = function (content) { return new TextDisplayBuilder().setContent(content).toJSON(); };
@@ -118,12 +120,13 @@ async function buildRaidAlertPayload(raid, buttons) {
         headerSection.setThumbnailAccessory(new ThumbnailBuilder().setURL(requesterAvatarUrl));
         sections.push(headerSection.toJSON());
     } else {
-        // No live avatar available — emit the section as plain JSON so the
-        // SectionBuilder accessory-required validation is bypassed.
-        sections.push({
-            type: 9,
-            components: headerSection.components.map(function (c) { return c.toJSON(); })
-        });
+        // No requester avatar - a Section (type 9) ALWAYS needs an accessory,
+        // so merge the header's text displays into a single TextDisplay (type 10),
+        // which needs no accessory and won't be rejected by Discord.
+        const headerTexts = headerSection.components
+            .map(function (c) { var j = c.toJSON(); return j && j.content; })
+            .filter(Boolean);
+        sections.push(text(headerTexts.join(NL10)));
     }
 
     // --- Section 2: details — carries the static game thumbnail ---
@@ -143,17 +146,17 @@ async function buildRaidAlertPayload(raid, buttons) {
     );
 
     // --- Section 3: in-game helpers ---
-    sections.push({ type: 9, components: [text('### ⚔️ IN-GAME HELPERS' + NL10 +
+    sections.push(text('### ⚔️ IN-GAME HELPERS' + NL10 +
         '> **Helpers:** `' + helperNamesText + '`' + NL10 +
-        '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`')] });
+        '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`'));
 
     // --- Section 4: description (plain text, no quote bar) ---
-    sections.push({ type: 9, components: [text('### 📝 DESCRIPTION' + NL10 + '```' + NL10 + reasonText + NL10 + '```')] });
+    sections.push(text('### 📝 DESCRIPTION' + NL10 + '```' + NL10 + reasonText + NL10 + '```'));
 
     // --- Section 5: live helpers (quote-bar'd @user — ⏱ time rows) ---
     if (helperCount > 0) {
         const liveHelpersList = raid.helpers.map(formatLiveHelperRow).join(NL10);
-        sections.push({ type: 9, components: [text('### 👥 LIVE HELPERS (' + helperCount + ' / ' + (raid.helperLimit || 0) + ')' + NL10 + liveHelpersList)] });
+        sections.push(text('### 👥 LIVE HELPERS (' + helperCount + ' / ' + (raid.helperLimit || 0) + ')' + NL10 + liveHelpersList));
     }
 
     // Every section/title block is followed by a native V2 Separator (type 14).

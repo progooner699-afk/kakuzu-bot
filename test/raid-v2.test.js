@@ -30,15 +30,20 @@ test('sets the native V2 flag and wraps in a Container with accent color', async
   assert.ok(container.components.length >= 8);
 });
 
-test('sections are boxes wrapping text displays', async () => {
+test('only header and details are Sections, each with a thumbnail accessory', async () => {
   const payload = await raidV2.buildRaidAlertPayload(fakeRaid());
   const container = payload.components[0];
   const sections = container.components.filter((c) => c.type === 9);
-  assert.ok(sections.length >= 5);
-  sections.forEach((s) => {
-    assert.ok(s.components.length >= 1);
-    assert.ok(s.components.every((c) => c.type === 10)); // Text Displays
-  });
+  const textDisplays = container.components.filter((c) => c.type === 10);
+  // Discord rejects any Section (type 9) that has no accessory, so only the two
+  // thumbnail-bearing blocks (header pfp + DETAILS) may be Sections.
+  assert.strictEqual(sections.length, 2);
+  assert.ok(sections.every((s) => s.accessory && s.accessory.type === 11)); // Thumbnail
+  // IN-GAME HELPERS / DESCRIPTION / LIVE HELPERS have no image -> TextDisplay.
+  const allText = textDisplays.flatMap((c) => c.content).join(String.fromCharCode(10));
+  assert.ok(allText.includes('IN-GAME HELPERS'));
+  assert.ok(allText.includes('DESCRIPTION'));
+  assert.ok(allText.includes('LIVE HELPERS'));
 });
 
 test('native separators sit between every section with divider true', async () => {
@@ -56,9 +61,11 @@ test('all alert sections are represented in text displays', async () => {
   const payload = await raidV2.buildRaidAlertPayload(fakeRaid());
   const container = payload.components[0];
   const contents = container.components
-    .filter((c) => c.type === 9)
-    .flatMap((s) => s.components)
-    .map((c) => c.content)
+    .flatMap((c) => {
+      if (c.type === 9) return (c.components || []).map((x) => x.content || '');
+      if (c.type === 10) return [c.content || ''];
+      return [];
+    })
     .join(String.fromCharCode(10));
   assert.ok(contents.includes('RAID ALERT #7'));
   assert.ok(contents.includes('DETAILS'));
@@ -121,12 +128,31 @@ test('field rows in DETAILS / IN-GAME HELPERS / LIVE HELPERS are quote-barred', 
   const payload = await raidV2.buildRaidAlertPayload(fakeRaid());
   const container = payload.components[0];
   const contents = container.components
-    .filter((c) => c.type === 9)
-    .flatMap((s) => s.components)
-    .map((c) => c.content)
+    .flatMap((c) => {
+      if (c.type === 9) return (c.components || []).map((x) => x.content || '');
+      if (c.type === 10) return [c.content || ''];
+      return [];
+    })
     .join(String.fromCharCode(10));
   assert.ok(contents.includes('> **Game:**'));
   assert.ok(contents.includes('> **Raid ID:**'));
   assert.ok(contents.includes('> **Total Helpers:**'));
   assert.ok(contents.includes('> • <@444555666>'));
+});
+
+test('header with no requester avatar is a TextDisplay (no accessory-less Section)', async () => {
+  // No avatar -> the header must fall back to a type-10 TextDisplay instead of a
+  // Section (type 9) without an accessory, which Discord rejects.
+  const payload = await raidV2.buildRaidAlertPayload(
+    fakeRaid({ robloxUserId: null, requesterId: null, robloxAvatarUrl: null })
+  );
+  const container = payload.components[0];
+  const sections = container.components.filter((c) => c.type === 9);
+  assert.ok(sections.every((s) => s.accessory && s.accessory.type === 11),
+    'every Section must carry a thumbnail accessory');
+  const textContents = container.components
+    .filter((c) => c.type === 10)
+    .flatMap((c) => c.content)
+    .join('\n');
+  assert.ok(textContents.includes('RAID ALERT #7'));
 });
