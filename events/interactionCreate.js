@@ -164,14 +164,28 @@ function createRaidButtons(raid, member = null) {
         );
     }
 
-    // Interactive join for verified helpers — registers + tracks session time.
+    // [ Help ] — green public button. Anyone can click; the bot replies with an
+    // EPHEMERAL message containing the raid id and the server (deep) link so the
+    // user can join the raid server themselves.
     components.push(
         new ButtonBuilder()
-            .setCustomId(`raid_accept_${raid.raidId}`)
-            .setLabel('Join Raid')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(raid.status !== "OPEN")
+            .setCustomId(`raid_help_${raid.raidId}`)
+            .setLabel('Help')
+            .setStyle(ButtonStyle.Success)
     );
+
+    // [ Edit ] — grey, restricted to requester/staff (same gate as Close). Opens a
+    // modal to edit hostile name/clan/count, then edits the existing alert IN
+    // PLACE (no new embed/message is sent).
+    if (canCloseRaid(member, raid)) {
+        components.push(
+            new ButtonBuilder()
+                .setCustomId(`raid_edit_${raid.raidId}`)
+                .setLabel('Edit')
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(raid.status === "CLOSED")
+        );
+    }
 
     // Close — restricted to the requester / staff via canCloseRaid.
     if (canCloseRaid(member, raid)) {
@@ -962,7 +976,65 @@ module.exports = {
                 }
             }
         }
-        // ===== RAID OPERATIONS: accept / leave / close / outcome / mvp =====
+        // ===== RAID OPERATIONS: help / edit / accept / leave / close / outcome / mvp =====
+        // [ Help ] — green public button: replies with an EPHEMERAL message that
+        // contains the raid id and the server (Roblox deep) link.
+        if (typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_help_')) {
+            const raidId = Number(interaction.customId.split('_')[2]);
+            if (Number.isNaN(raidId)) return;
+            const raid = raidStateManager.getRaidById(raidId, interaction.guild?.id);
+            if (!raid) {
+                await interaction.reply({ content: 'Raid not found.', flags: 64 }).catch(() => null);
+                return;
+            }
+            const serverLink = buildRobloxJoinLink(raid) || (raid.serverLink && /^https?:\/\//i.test(raid.serverLink) ? raid.serverLink : null);
+            await interaction.reply({
+                content: `📋 **Raid #${raid.raidId}** | ${serverLink ? '🔗 Server link: ' + serverLink : '🔗 Server link: not available (no place id recorded).'}`,
+                flags: 64
+            }).catch(() => null);
+            return;
+        }
+
+        // [ Edit ] — grey staff/requester button: opens a modal to edit hostile
+        // name / clan / count, then edits the existing alert message in place.
+        if (typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_edit_')) {
+            const raidId = Number(interaction.customId.split('_')[2]);
+            if (Number.isNaN(raidId)) return;
+            const raid = raidStateManager.getRaidById(raidId, interaction.guild?.id);
+            if (!raid) {
+                await interaction.reply({ content: 'Raid not found.', flags: 64 }).catch(() => null);
+                return;
+            }
+            const editModal = new ModalBuilder()
+                .setCustomId(`raid_editmodal_${raidId}`)
+                .setTitle('Edit Hostile Intel');
+            const countInput = new TextInputBuilder()
+                .setCustomId('editEnemyCount')
+                .setLabel('Hostile Count')
+                .setStyle(TextInputStyle.Short)
+                .setValue(String(raid.enemyCount != null ? raid.enemyCount : ''))
+                .setRequired(false);
+            const namesInput = new TextInputBuilder()
+                .setCustomId('editEnemyNames')
+                .setLabel('Hostile Names (comma separated)')
+                .setStyle(raid.enemyNames ? TextInputStyle.Paragraph : TextInputStyle.Short)
+                .setValue(String(raid.enemyNames != null ? raid.enemyNames : ''))
+                .setRequired(false);
+            const clanInput = new TextInputBuilder()
+                .setCustomId('editEnemyClan')
+                .setLabel('Hostile Grouping (clan)')
+                .setStyle(TextInputStyle.Short)
+                .setValue(String(raid.enemyClanNames != null ? raid.enemyClanNames : ''))
+                .setRequired(false);
+            editModal.addComponents(
+                new ActionRowBuilder().addComponents(countInput),
+                new ActionRowBuilder().addComponents(namesInput),
+                new ActionRowBuilder().addComponents(clanInput)
+            );
+            await interaction.showModal(editModal).catch(() => null);
+            return;
+        }
+
         if (typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_accept_')) {
             const raidId = Number(interaction.customId.split('_')[2]);
             if (Number.isNaN(raidId)) {
@@ -1108,6 +1180,45 @@ module.exports = {
                 flags: 64
             }).catch(() => null);
             await finalizeRaidOutcome(interaction, raid, actualOutcome);
+            return;
+        }
+
+        if (interaction.isModalSubmit() && typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_editmodal_')) {
+            const raidId = Number(interaction.customId.split('_')[2]); // raid_editmodal_<raidId>
+            if (Number.isNaN(raidId)) return;
+            const guildId = interaction.guild?.id;
+            const raids = raidStateManager.loadRaids(guildId);
+            const raid = raids.raids.find(item => item.raidId === raidId);
+            if (!raid) {
+                await interaction.reply({ content: 'Raid not found.', flags: 64 }).catch(() => null);
+                return;
+            }
+            const enemyCount = interaction.fields.getTextInputValue('editEnemyCount');
+            const enemyNames = interaction.fields.getTextInputValue('editEnemyNames');
+            const enemyClan = interaction.fields.getTextInputValue('editEnemyClan');
+            if (enemyCount.trim() !== '') raid.enemyCount = Number(enemyCount);
+            raid.enemyNames = enemyNames.trim();
+            raid.enemyClanNames = enemyClan.trim();
+            raidStateManager.saveRaids(guildId, raids);
+
+            // Re-render the EXISTING alert message IN PLACE (no new embed/message).
+            if (raid.channelId && raid.messageId) {
+                const channel = await interaction.client.channels.fetch(raid.channelId).catch(() => null);
+                if (channel) {
+                    const message = await channel.messages.fetch(raid.messageId).catch(() => null);
+                    if (message) {
+                        const row = createRaidButtons(raid, interaction.member);
+                        if (raid.alertFormat === 'v2') {
+                            const payload = await raidV2.buildRaidAlertPayload(raid, row);
+                            await message.edit({ components: payload.components }).catch(() => null);
+                        } else {
+                            const embeds = raidStateManager.formatRaidMessage(raid, guildId);
+                            await message.edit({ embeds: embeds, components: [row] }).catch(() => null);
+                        }
+                    }
+                }
+            }
+            await interaction.reply({ content: '✅ Hostile intel updated in the alert.', flags: 64 }).catch(() => null);
             return;
         }
 

@@ -71,8 +71,12 @@ module.exports = {
                 .setLabel('JOIN SERVER')
                 .setURL(joinUrl),
             new ButtonBuilder()
-                .setCustomId('raid_accept_999')
-                .setLabel('Join Raid')
+                .setCustomId('raid_help_999')
+                .setLabel('Help')
+                .setStyle(ButtonStyle.Success),
+            new ButtonBuilder()
+                .setCustomId('raid_edit_999')
+                .setLabel('Edit')
                 .setStyle(ButtonStyle.Secondary),
             new ButtonBuilder()
                 .setCustomId('close_raid_999')
