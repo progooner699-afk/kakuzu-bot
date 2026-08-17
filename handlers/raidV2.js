@@ -205,7 +205,7 @@ function markAlertV2(raidId, guildId) {
 module.exports = {
     RAID_ALERT_V2_FLAGS: RAID_ALERT_V2_FLAGS,
     ALERT_ACCENT_COLOR: ALERT_ACCENT_COLOR,
-    TSB_GAME_THUMBNAIL_URL: TSB_GAME_THUMBNAIL_URL,
+    GAME_THUMBNAILS: GAME_THUMBNAILS,
     buildRaidAlertPayload: buildRaidAlertPayload,
     markAlertV2: markAlertV2
 };
