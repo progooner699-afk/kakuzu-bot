@@ -101,7 +101,7 @@ module.exports = {
         }
 
         let v2Posted = false;
-        const v2Payload = raidV2.buildRaidAlertPayload(fakeRaid, row);
+        const v2Payload = await raidV2.buildRaidAlertPayload(fakeRaid, row);
         try {
             await targetChannel.send(v2Payload);
             v2Posted = true;

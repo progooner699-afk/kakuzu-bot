@@ -51,7 +51,8 @@ module.exports = {
             const alertMessage = await alertChannel.messages.fetch(updatedRaid.messageId).catch(() => null);
             if (alertMessage) {
                 if (updatedRaid.alertFormat === 'v2') {
-                    await alertMessage.edit({ components: raidV2.buildRaidAlertPayload(updatedRaid).components }).catch(() => null);
+                    const closedPayload = await raidV2.buildRaidAlertPayload(updatedRaid);
+                    await alertMessage.edit({ components: closedPayload.components }).catch(() => null);
                 } else {
                     const closedEmbeds = raidStateManager.formatRaidMessage(updatedRaid, interaction.guild.id);
                     await alertMessage.edit({ embeds: closedEmbeds, components: [] }).catch(() => null);

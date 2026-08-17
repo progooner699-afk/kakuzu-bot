@@ -1,4 +1,4 @@
-﻿const {
+const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
@@ -506,7 +506,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
                 const updatedAlertEmbeds = raidStateManager.formatRaidMessage(raid, interaction.guild.id);
                 const cleanClosedRow = createRaidButtons(raid, interaction.member);
                 if (raid.alertFormat === 'v2') {
-                    const payload = raidV2.buildRaidAlertPayload(raid, cleanClosedRow);
+                    const payload = await raidV2.buildRaidAlertPayload(raid, cleanClosedRow);
                     await baseAlertMsg.edit({ components: payload.components }).catch(() => null);
                 } else {
                     await baseAlertMsg.edit({ embeds: updatedAlertEmbeds, components: [cleanClosedRow] }).catch(() => null);
@@ -936,7 +936,7 @@ module.exports = {
             await interaction.reply({ embeds: [completionEmbed], flags: 64 }).catch(() => null);
 
             try {
-                const v2Payload = raidV2.buildRaidAlertPayload(raid, raidButtonRow);
+                const v2Payload = await raidV2.buildRaidAlertPayload(raid, raidButtonRow);
                 if (regionRoleInfo.mention) {
                     await targetChannel.send({ content: regionRoleInfo.mention, allowedMentions: regionRoleInfo.allowedMentions }).catch(() => null);
                 }
@@ -1007,7 +1007,8 @@ module.exports = {
                 const message = await channel.messages.fetch(updated.messageId).catch(() => null);
                 if (message) {
                     if (updated.alertFormat === 'v2') {
-                        await message.edit({ components: raidV2.buildRaidAlertPayload(updated, row).components }).catch(() => null);
+                        const updatedPayload = await raidV2.buildRaidAlertPayload(updated, row);
+                        await message.edit({ components: updatedPayload.components }).catch(() => null);
                     } else {
                         await message.edit({ embeds: embeds, components: [row] }).catch(() => null);
                     }
@@ -1148,7 +1149,8 @@ module.exports = {
                 const message = await channel.messages.fetch(updated.messageId).catch(() => null);
                 if (message) {
                     if (updated.alertFormat === 'v2') {
-                        await message.edit({ components: raidV2.buildRaidAlertPayload(updated, row).components }).catch(() => null);
+                        const updatedPayload = await raidV2.buildRaidAlertPayload(updated, row);
+                        await message.edit({ components: updatedPayload.components }).catch(() => null);
                     } else {
                         await message.edit({ embeds: embeds, components: [row] }).catch(() => null);
                     }
