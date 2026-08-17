@@ -101,10 +101,11 @@ Refactored the linking → request → join → close loop per the spec:
      (👤 Details / 🎯 Target / 🌐 Region / 👥 Helper Status / 💬 Description),
      code-blocked target & description, `Live Helpers (n/max)` with per-helper
      PFP lines, streak + region/ping line.
-   * Sections are separated by a thin `─` divider line — a module-level
-     `EMBED_DIVIDER` const (`'\u2500'.repeat(44)`) inside `formatRaidMessage`,
-     inserted after the RAID ALERT banner, after DETAILS, after IN-GAME
-     HELPERS, and under the `## LIVE HELPERS` heading.
+   * The embed fallback (`formatRaidMessage`) does **not** render text divider
+     lines anymore — the thin `─` `EMBED_DIVIDER` rows were removed. Dividers now
+     come exclusively from the native V2 `Separator` (`type: 14`) in
+     `handlers/raidV2.js`; the embed shows DETAILS / IN-GAME HELPERS /
+     DESCRIPTION / LIVE HELPERS as plain field rows.
    * V2 alert lifecycle: a successful V2 post sets `alertFormat: 'v2'` on the
      raid record (`raidV2.markAlertV2`); all later edits (accept / leave /
      close / outcome) branch on that flag and **edit `components` only** (no

@@ -1,4 +1,4 @@
-﻿const fs = require('fs');
+const fs = require('fs');
 const path = require('path');
 const { EmbedBuilder } = require('discord.js');
 const leaderboardDb = require('./leaderboardDb');
@@ -386,11 +386,6 @@ function updateRaidMessageReference(raidId, channelId, messageId, guildId) {
     saveRaids(guildId, raids);
 }
 
-// Thin horizontal divider line rendered between embed sections (a run of
-// U+2500 BOX DRAWINGS LIGHT HORIZONTAL characters). Kept as a unicode escape
-// so the raw file encoding can never be mangled by an editor.
-const EMBED_DIVIDER = '\u2500'.repeat(44);
-
 function formatRaidMessage(raid, guildId = null) {
     const helperCount = (raid.helpers && raid.helpers.length) || 0;
     const statusText = raid.status === 'OPEN' ? 'OPEN' : raid.status === 'FULL' ? 'FULL' : 'CLOSED';
@@ -414,7 +409,7 @@ function formatRaidMessage(raid, guildId = null) {
 
     const embed = new EmbedBuilder()
         .setTitle('RAID ALERT')
-        .setDescription('\u{1F6A8} **RAID ALERT**\n\n' + EMBED_DIVIDER)
+        .setDescription('\u{1F6A8} **RAID ALERT**')
         .addFields([
             {
                 name: '\u{1F4CB} DETAILS :',
@@ -427,19 +422,9 @@ function formatRaidMessage(raid, guildId = null) {
                 inline: false
             },
             {
-                name: '\u200B',
-                value: EMBED_DIVIDER,
-                inline: false
-            },
-            {
                 name: '\u{1F4CB} IN-GAME HELPERS :',
                 value: '> **Helpers:** `' + helperNamesList + '`\n' +
                     '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
-                inline: false
-            },
-            {
-                name: '\u200B',
-                value: EMBED_DIVIDER,
                 inline: false
             },
             {
@@ -447,11 +432,6 @@ function formatRaidMessage(raid, guildId = null) {
                 value: '```' + '\n' + reasonText + '\n' + '```',
                 inline: false
             },
-            {
-                name: String.fromCharCode(0x200B),
-                value: EMBED_DIVIDER,
-                inline: false
-            }
         ])
         .setFooter({ text: 'Raid #' + raid.raidId + ' \u2022 ' + new Date(createdMs).toLocaleDateString() })
         .setTimestamp();
@@ -471,7 +451,6 @@ function formatRaidMessage(raid, guildId = null) {
         }).join('\n');
 
         const helpersDesc = '## LIVE HELPERS\n\n' +
-            EMBED_DIVIDER + '\n\n' +
             '`' + helperCount + ' / ' + (raid.helperLimit || 0) + '`\n\n' +
             liveHelpersList;
 
