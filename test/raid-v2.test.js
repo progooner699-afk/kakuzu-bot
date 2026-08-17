@@ -75,6 +75,34 @@ test('button row is attached inside the container', async () => {
   assert.strictEqual(rows[0].components.length, 1);
 });
 
+test('every section/title is followed by a native separator, including before buttons', async () => {
+  const row = { toJSON: () => ({ type: 1, components: [{ type: 2, label: 'X' }] }) };
+  const payload = await raidV2.buildRaidAlertPayload(fakeRaid(), row);
+  const components = payload.components[0].components;
+
+  // Each section (type 9) must be immediately followed by a Separator (type 14).
+  for (let i = 0; i < components.length - 1; i++) {
+    if (components[i].type === 9) {
+      assert.strictEqual(components[i + 1].type, 14);
+    }
+  }
+
+  // The buttons row must be preceded by a separator (never a bare section).
+  const btnIdx = components.findIndex((c) => c.type === 1);
+  assert.ok(btnIdx > 0, 'buttons row should not be the first component');
+  assert.strictEqual(components[btnIdx - 1].type, 14);
+});
+
+test('alert with no helpers still has a separator after every section', async () => {
+  const payload = await raidV2.buildRaidAlertPayload(fakeRaid({ helpers: [] }));
+  const components = payload.components[0].components;
+  for (let i = 0; i < components.length - 1; i++) {
+    if (components[i].type === 9) {
+      assert.strictEqual(components[i + 1].type, 14);
+    }
+  }
+});
+
 test('requester pfp thumbnail on the header section, game thumbnail on DETAILS', async () => {
   const payload = await raidV2.buildRaidAlertPayload(fakeRaid());
   const container = payload.components[0];

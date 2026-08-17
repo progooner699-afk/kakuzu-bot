@@ -100,6 +100,7 @@ async function buildRaidAlertPayload(raid, buttons) {
     const separator = function () { return new SeparatorBuilder().setDivider(true).setSpacing(1).toJSON(); }; // type 14
 
     const containerContents = [];
+    const sections = [];
 
     // --- Section 1: header (title + status) — carries the requester pfp ---
     const headerSection = new SectionBuilder()
@@ -112,19 +113,18 @@ async function buildRaidAlertPayload(raid, buttons) {
         );
     if (requesterAvatarUrl) {
         headerSection.setThumbnailAccessory(new ThumbnailBuilder().setURL(requesterAvatarUrl));
-        containerContents.push(headerSection.toJSON());
+        sections.push(headerSection.toJSON());
     } else {
         // No live avatar available — emit the section as plain JSON so the
         // SectionBuilder accessory-required validation is bypassed.
-        containerContents.push({
+        sections.push({
             type: 9,
             components: headerSection.components.map(function (c) { return c.toJSON(); })
         });
     }
-    containerContents.push(separator());
 
     // --- Section 2: details — carries the static game thumbnail ---
-    containerContents.push(
+    sections.push(
         new SectionBuilder()
             .setThumbnailAccessory(new ThumbnailBuilder().setURL(TSB_GAME_THUMBNAIL_URL))
             .addTextDisplayComponents(new TextDisplayBuilder().setContent(
@@ -138,24 +138,28 @@ async function buildRaidAlertPayload(raid, buttons) {
             ))
             .toJSON()
     );
-    containerContents.push(separator());
 
     // --- Section 3: in-game helpers ---
-    containerContents.push({ type: 9, components: [text('### ⚔️ IN-GAME HELPERS' + NL10 +
+    sections.push({ type: 9, components: [text('### ⚔️ IN-GAME HELPERS' + NL10 +
         '> **Helpers:** `' + helperNamesText + '`' + NL10 +
         '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`')] });
-    containerContents.push(separator());
 
     // --- Section 4: description (plain text, no quote bar) ---
-    containerContents.push({ type: 9, components: [text('### 📝 DESCRIPTION' + NL10 + '```' + NL10 + reasonText + NL10 + '```')] });
-    containerContents.push(separator());
+    sections.push({ type: 9, components: [text('### 📝 DESCRIPTION' + NL10 + '```' + NL10 + reasonText + NL10 + '```')] });
 
     // --- Section 5: live helpers (quote-bar'd @user — ⏱ time rows) ---
     if (helperCount > 0) {
         const liveHelpersList = raid.helpers.map(formatLiveHelperRow).join(NL10);
-        containerContents.push({ type: 9, components: [text('### 👥 LIVE HELPERS (' + helperCount + ' / ' + (raid.helperLimit || 0) + ')' + NL10 + liveHelpersList)] });
-        containerContents.push(separator());
+        sections.push({ type: 9, components: [text('### 👥 LIVE HELPERS (' + helperCount + ' / ' + (raid.helperLimit || 0) + ')' + NL10 + liveHelpersList)] });
     }
+
+    // Every section/title block is followed by a native V2 Separator (type 14).
+    // Because the buttons row is appended after this loop, it too is always
+    // preceded by a separator.
+    sections.forEach(function (s) {
+        containerContents.push(s);
+        containerContents.push(separator());
+    });
 
     // --- Button row attached to the container (JOIN SERVER / Join Raid / Close) ---
     if (buttons) {
