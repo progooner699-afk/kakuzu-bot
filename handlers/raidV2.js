@@ -23,9 +23,12 @@ const NL10 = String.fromCharCode(10);
 // Accent color for the container left color bar (Raid Alert red).
 const ALERT_ACCENT_COLOR = 0xED4245;
 
-// Static game thumbnail for "The Strongest Battlegrounds" (Roblox placeId
-// 1153846701). Fixed image for the game itself — does NOT change per-request.
-const TSB_GAME_THUMBNAIL_URL = 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980';
+// Game-specific thumbnail map — per-raid-game artwork.
+const GAME_THUMBNAILS = {
+	'The Strongest Battlegrounds': 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980',
+	'Jujutsu Kaisen': 'https://t6.rbxcdn.com/3e8a3e4e5e6e7e8e9e0e1e2e3e4e5e6e7e8f0f1',
+	// Add more game thumbnails as needed; fallback below handles the rest.
+};
 
 // Small in-memory avatar cache so we don't hammer the Roblox avatar-headshot
 // API on every accept/leave edit of the same raid alert (10 minute TTL).
@@ -112,8 +115,7 @@ async function buildRaidAlertPayload(raid, buttons) {
         .addTextDisplayComponents(
             new TextDisplayBuilder().setContent('### 🚨 RAID ALERT #' + raid.raidId),
             new TextDisplayBuilder().setContent(
-                '**' + statusEmoji + ' ' + statusText + '** • <t:' + createdTs + ':F>' +
-                (raid.region ? NL10 + '> **Region:** `' + raid.region + '`' : '')
+                '**' + statusEmoji + ' ' + statusText + '** • <t:' + createdTs + ':F>'
             )
         );
     if (requesterAvatarUrl) {
@@ -128,16 +130,26 @@ async function buildRaidAlertPayload(raid, buttons) {
             .filter(Boolean);
         sections.push(text(headerTexts.join(NL10)));
     }
+// Edit 2 — extra separator after header
 
     // --- Section 2: details — carries the static game thumbnail ---
+// Edit 3 — PINGS section pulled from raid.pings if available.
+    const pingsSection = [];
+    if (raid.pings && raid.pings.length) {
+        const pingMentions = raid.pings.map(id => '<@&' + id + '>').join(NL10);
+        pingsSection.push(text('### 🔔 PINGS' + NL10 + '**Pings:**' + NL10 + pingMentions));
+    } else {
+        pingsSection.push(text('### 🔔 PINGS' + NL10 + '*No pings configured*'));
+    }
+    sections.push(...pingsSection);
     sections.push(
         new SectionBuilder()
-            .setThumbnailAccessory(new ThumbnailBuilder().setURL(TSB_GAME_THUMBNAIL_URL))
+            .setThumbnailAccessory(new ThumbnailBuilder().setURL(GAME_THUMBNAILS[raid.targetGame] || GAME_THUMBNAILS['The Strongest Battlegrounds'] || 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980'))
             .addTextDisplayComponents(new TextDisplayBuilder().setContent(
                 '### 📋 DETAILS' + NL10 +
+                '> **Target:** ' + targetDisplay + NL10 +
                 '> **Game:** ' + gameLabel + NL10 +
                 '> **Raid ID:** `' + raid.raidId + '`' + NL10 +
-                '> **Target:** ' + targetDisplay +
                 (raid.region ? NL10 + '> **Region:** `' + raid.region + '`' : '') + NL10 +
                 '> **Status:** `' + statusEmoji + ' ' + statusText + '`' + NL10 +
                 '> **Time Requested:** <t:' + createdTs + ':f>'
