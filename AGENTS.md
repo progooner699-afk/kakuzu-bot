@@ -101,11 +101,14 @@ Refactored the linking → request → join → close loop per the spec:
      (👤 Details / 🎯 Target / 🌐 Region / 👥 Helper Status / 💬 Description),
      code-blocked target & description, `Live Helpers (n/max)` with per-helper
      PFP lines, streak + region/ping line.
-   * The embed fallback (`formatRaidMessage`) does **not** render text divider
-     lines anymore — the thin `─` `EMBED_DIVIDER` rows were removed. Dividers now
-     come exclusively from the native V2 `Separator` (`type: 14`) in
-     `handlers/raidV2.js`; the embed shows DETAILS / IN-GAME HELPERS /
-     DESCRIPTION / LIVE HELPERS as plain field rows.
+   * The embed fallback (`formatRaidMessage`) renders thin `─` `EMBED_DIVIDER`
+     divider rows between the DETAILS / IN-GAME HELPERS / DESCRIPTION sections,
+     plus the requester thumbnail via `setThumbnail`, so the separator line and
+     thumbnail stay visible even when Discord rejects the native V2 payload
+     (Components V2 is a Discord beta that must be granted to the bot; if not,
+     the send fails and `/raidtest` reports "embed fallback"). Native
+     `Separator` (`type: 14`) and `Thumbnail` (`type: 11`) components are still
+     emitted by `handlers/raidV2.js` for when V2 is enabled.
    * V2 alert lifecycle: a successful V2 post sets `alertFormat: 'v2'` on the
      raid record (`raidV2.markAlertV2`); all later edits (accept / leave /
      close / outcome) branch on that flag and **edit `components` only** (no

@@ -405,6 +405,8 @@ function formatRaidMessage(raid, guildId = null) {
 
     const targetDisplay = raid.robloxUsername || '<@' + raid.requesterId + '>';
 
+    const EMBED_DIVIDER = '\u2500'.repeat(42);
+
     const embeds = [];
 
     const embed = new EmbedBuilder()
@@ -421,12 +423,14 @@ function formatRaidMessage(raid, guildId = null) {
                     '> **Time Requested:** <t:' + createdTs + ':f>',
                 inline: false
             },
+            { name: '\u200b', value: EMBED_DIVIDER, inline: false },
             {
                 name: '\u{1F4CB} IN-GAME HELPERS :',
                 value: '> **Helpers:** `' + helperNamesList + '`\n' +
                     '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
                 inline: false
             },
+            { name: '\u200b', value: EMBED_DIVIDER, inline: false },
             {
                 name: '\u{1F4DD} DESCRIPTION',
                 value: '```' + '\n' + reasonText + '\n' + '```',
