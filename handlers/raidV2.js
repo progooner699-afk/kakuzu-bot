@@ -147,6 +147,10 @@ async function buildRaidAlertPayload(raid, buttons) {
     const headerSection = new SectionBuilder()
         .addTextDisplayComponents(
             new TextDisplayBuilder().setContent('### 🚨 RAID ALERT #' + raid.raidId),
+            // Patient message shown straight after the raid alert title.
+            new TextDisplayBuilder().setContent(
+                '🙏 Please remain patient while our helpers make their way to assist you. Someone will be with you shortly!'
+            ),
             new TextDisplayBuilder().setContent(
                 '<t:' + createdTs + ':F>'
             )

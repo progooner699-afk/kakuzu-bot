@@ -4,6 +4,31 @@ const raidStateManager = require('../handlers/raidStateManager');
 /** How often (ms) to poll Roblox presence for active raid helpers. */
 const PRESENCE_POLL_INTERVAL = 15 * 1000; // 15 seconds
 
+// Retry schedule (ms) for guild slash-command registration. Discord's REST
+// client already retries HTTP 429s; these extra retries cover the remaining
+// transient failures (network blips, 5xx) so a single hiccup at startup can't
+// leave a guild with NO working slash commands.
+const REGISTRATION_RETRY_DELAYS_MS = [1000, 3000, 7000];
+
+// Retry delay before the self-heal pass that re-registers commands in any
+// guild that failed during startup.
+const REGISTRATION_SELF_HEAL_DELAY_MS = 30 * 1000;
+
+async function registerGuildCommandsWithRetry(guildId) {
+    let lastError;
+    for (const delay of REGISTRATION_RETRY_DELAYS_MS) {
+        try {
+            await registerGuildCommands(guildId);
+            return;
+        } catch (error) {
+            lastError = error;
+            console.warn(`⚠️ Command registration failed for guild ${guildId}, retrying in ${delay}ms:`, error?.message || error);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+    throw lastError;
+}
+
 module.exports = {
     name: 'clientReady',
     once: true,
@@ -20,7 +45,7 @@ module.exports = {
         }
 
         console.log(`🔄 Registering slash commands in ${guilds.length} existing guild(s)...`);
-        const results = await Promise.allSettled(guilds.map(g => registerGuildCommands(g.id)));
+        const results = await Promise.allSettled(guilds.map(g => registerGuildCommandsWithRetry(g.id)));
         let ok = 0;
         results.forEach((r, i) => {
             if (r.status === 'rejected') {
@@ -30,6 +55,18 @@ module.exports = {
             }
         });
         console.log(`✅ Commands registered in ${ok}/${guilds.length} guild(s).`);
+
+        // Self-heal: re-register commands in any guild that failed above after a
+        // short delay, so transient failures don't leave the bot command-less.
+        const failedGuilds = guilds.filter((g, i) => results[i].status === 'rejected');
+        if (failedGuilds.length > 0) {
+            console.log(`🔁 Scheduling command registration self-heal for ${failedGuilds.length} guild(s)...`);
+            setTimeout(async () => {
+                const healResults = await Promise.allSettled(failedGuilds.map(g => registerGuildCommandsWithRetry(g.id)));
+                const fixed = healResults.filter(r => r.status === 'fulfilled').length;
+                console.log(`✅ Command registration self-heal complete: ${fixed}/${failedGuilds.length} guild(s) recovered.`);
+            }, REGISTRATION_SELF_HEAL_DELAY_MS);
+        }
 
         // Background helper time-tracking engine (Option B: Roblox Presence API polling).
         // Polls every 15s for helpers in active raids. If no ROBLOX_API_KEY is set,

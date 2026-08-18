@@ -21,7 +21,19 @@ const client = new Client({
 client.commands = new Collection();
 client.raidStateManager = raidStateManager;
 
+// Process-level safety nets: a single unhandled promise rejection would by
+// default CRASH the whole process (making EVERY command stop working). Log it
+// and keep the bot alive so a stray error in a collector/poller can't take the
+// bot offline.
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('⚠️ Unhandled promise rejection (keeping bot alive):', reason instanceof Error ? reason.stack || reason.message : reason);
+});
+process.on('uncaughtException', (error) => {
+    console.error('⚠️ Uncaught exception (keeping bot alive):', error && error.stack ? error.stack : error);
+});
+
 commandHandler.loadCommands(client);
+console.log(`📦 Loaded ${client.commands.size} slash command(s).`);
 
 const eventsPath = path.join(__dirname, 'events');
 const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith('.js'));
