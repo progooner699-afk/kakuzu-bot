@@ -23,15 +23,29 @@ const NL10 = String.fromCharCode(10);
 // Accent color for the container left color bar (Raid Alert red).
 const ALERT_ACCENT_COLOR = 0xED4245;
 
-// Game-specific thumbnail map — per-raid-game artwork.
+// Game-specific thumbnail map — verified real 512x512 game-icon URLs pulled
+// from the Roblox Thumbnails API. The keys are the short game codes stored on
+// each raid's `targetGame` field (they EXACTLY match the codes in GAME_CONFIG
+// and the values produced by robloxApi.detectGameAndRegion).
+// NOTE: a raid built from live presence also carries the ACTUAL game icon in
+// `raid.gameThumbnailUrl` (the 512x512 icon for the very game the requester was
+// playing). resolveGameThumbnailUrl() prefers that over this static map, so the
+// alert shows the real per-game artwork in production.
 const GAME_THUMBNAILS = {
-    'tsb': 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980',
-    'jjk': 'https://t6.rbxcdn.com/3e8a3e4e5e6e7e8e9e0e1e2e3e4e5e6e7e8f0f1',
-    'rivals': 'https://t6.rbxcdn.com/180DAY-rivals-placeholder',
-    'bedwars': 'https://t6.rbxcdn.com/180DAY-bedwars-placeholder',
-    'bloxfuits': 'https://t6.rbxcdn.com/180DAY-bloxfuits-placeholder',
-	// Add more game thumbnails as needed; fallback below handles the rest.
+    // The Strongest Battlegrounds (universe 3808081382 / place 10449761463)
+    'tsb': 'https://tr.rbxcdn.com/180DAY-68c92fc62a8753793f7963e146b5197f/512/512/Image/Png/noFilter',
+    // BedWars by Easy.gg (universe 2619619496 / place 6872265039)
+    'bedwars': 'https://tr.rbxcdn.com/180DAY-cf502dc0a890181fc4cb6cf7ce332d20/512/512/Image/Png/noFilter',
+    // Blox Fruits by Gamer Robot Inc (universe 994732206 / place 2753915549)
+    'bloxfuits': 'https://tr.rbxcdn.com/180DAY-a64f70da20fc1e80ee76fe5d49c1be0a/512/512/Image/Png/noFilter'
+    // RIVALS / JJK intentionally have no hardcoded image here: real raids supply
+    // their live `raid.gameThumbnailUrl`, so adding a fabricated placeholder URL
+    // would only make the alert show a broken/static image instead of the real
+    // game. Add a verified real URL here if you want a static fallback too.
 };
+
+// Guaranteed fallback so the DETAILS Section always has a valid accessory image.
+const GAME_THUMBNAIL_FALLBACK = GAME_THUMBNAILS['tsb'];
 
 // Small in-memory avatar cache so we don't hammer the Roblox avatar-headshot
 // API on every accept/leave edit of the same raid alert (10 minute TTL).
@@ -74,6 +88,20 @@ async function resolveRequesterAvatarUrl(raid) {
     }
     avatarCache.set(key, { url, at: now });
     return url;
+}
+
+/**
+ * Resolves the DETAILS-section thumbnail.
+ *  1. raid.gameThumbnailUrl — the LIVE 512x512 game icon Roblox captured when the
+ *     raid was requested (the ACTUAL game the requester was in), so a TSB raid
+ *     shows a TSB thumbnail, a JJK raid a JJK one, etc.
+ *  2. GAME_THUMBNAILS[raid.targetGame] — static per-game fallback (used by
+ *     /raidtest and when live detection didn't capture an icon).
+ *  3. GAME_THUMBNAIL_FALLBACK — guaranteed default so the accessory never breaks.
+ */
+function resolveGameThumbnailUrl(raid) {
+    if (raid.gameThumbnailUrl) return raid.gameThumbnailUrl;
+    return GAME_THUMBNAILS[raid.targetGame] || GAME_THUMBNAIL_FALLBACK;
 }
 
 async function buildRaidAlertPayload(raid, buttons) {
@@ -135,11 +163,13 @@ async function buildRaidAlertPayload(raid, buttons) {
             .filter(Boolean);
         sections.push(text(headerTexts.join(NL10)));
     }
-// Edit 2 — extra separator after header
-    console.log('[thumbnail lookup]', raid.targetGame, '->', GAME_THUMBNAILS[raid.targetGame] || 'NO MATCH, using fallback');
+// --- Section 2: DETAILS (game thumbnail + field list) ---
+    const detailsThumbnailUrl = resolveGameThumbnailUrl(raid);
+    console.log('[thumbnail lookup]', raid.targetGame, '->', GAME_THUMBNAILS[raid.targetGame] || 'NO MATCH, using fallback',
+        '| live icon:', raid.gameThumbnailUrl || 'none', '| resolved:', detailsThumbnailUrl);
     sections.push(
         new SectionBuilder()
-            .setThumbnailAccessory(new ThumbnailBuilder().setURL(GAME_THUMBNAILS[raid.targetGame] || GAME_THUMBNAILS['tsb'] || 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980'))
+            .setThumbnailAccessory(new ThumbnailBuilder().setURL(detailsThumbnailUrl))
             .addTextDisplayComponents(new TextDisplayBuilder().setContent(
                 '### 📋 DETAILS' + NL10 + NL10 +
                 '> **Raid Target:** ' + targetDisplay + NL10 +
