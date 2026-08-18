@@ -26,12 +26,10 @@ const ALERT_ACCENT_COLOR = 0xED4245;
 // Game-specific thumbnail map — per-raid-game artwork.
 const GAME_THUMBNAILS = {
     'tsb': 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980',
-    'The Strongest Battlegrounds': 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980',
     'jjk': 'https://t6.rbxcdn.com/3e8a3e4e5e6e7e8e9e0e1e2e3e4e5e6e7e8f0f1',
     'rivals': 'https://t6.rbxcdn.com/180DAY-rivals-placeholder',
     'bedwars': 'https://t6.rbxcdn.com/180DAY-bedwars-placeholder',
     'bloxfuits': 'https://t6.rbxcdn.com/180DAY-bloxfuits-placeholder',
-    'Jujutsu Kaisen': 'https://t6.rbxcdn.com/3e8a3e4e5e6e7e8e9e0e1e2e3e4e5e6e7e8f0f1',
 	// Add more game thumbnails as needed; fallback below handles the rest.
 };
 
@@ -138,10 +136,10 @@ async function buildRaidAlertPayload(raid, buttons) {
         sections.push(text(headerTexts.join(NL10)));
     }
 // Edit 2 — extra separator after header
-    console.log('thumbnail lookup', raid.targetGame, '->', GAME_THUMBNAILS[raid.targetGame] || 'NO MATCH, using fallback');
+    console.log('[thumbnail lookup]', raid.targetGame, '->', GAME_THUMBNAILS[raid.targetGame] || 'NO MATCH, using fallback');
     sections.push(
         new SectionBuilder()
-            .setThumbnailAccessory(new ThumbnailBuilder().setURL(GAME_THUMBNAILS[raid.targetGame] || GAME_THUMBNAILS['The Strongest Battlegrounds'] || 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980'))
+            .setThumbnailAccessory(new ThumbnailBuilder().setURL(GAME_THUMBNAILS[raid.targetGame] || GAME_THUMBNAILS['tsb'] || 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980'))
             .addTextDisplayComponents(new TextDisplayBuilder().setContent(
                 '### 📋 DETAILS' + NL10 + NL10 +
                 '> **Raid Target:** ' + targetDisplay + NL10 +
