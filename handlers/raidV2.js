@@ -103,6 +103,8 @@ async function buildRaidAlertPayload(raid, buttons) {
     // header when there is no requester avatar) are emitted as TextDisplay
     // (type 10) via text() instead - no accessory is required.
     const container = new ContainerBuilder().setAccentColor(ALERT_ACCENT_COLOR).toJSON();
+    // Use large container size — makes the alert ~600px wide instead of ~400px
+    container.size = 'large';
 
     const text = function (content) { return new TextDisplayBuilder().setContent(content).toJSON(); };
     // Native V2 Separator with the divider line explicitly ON (this is what
