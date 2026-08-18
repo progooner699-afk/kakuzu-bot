@@ -27,6 +27,17 @@ const pendingGameThumbnails = new Map();
 
 // Region ping IDs are now configured per-guild via settings.regionPings
 
+function safeGetTextInputValue(fields, customId, fallback) {
+  try {
+    return fields.getTextInputValue(customId);
+  } catch (err) {
+    if (err.code === 'ModalSubmitInteractionFieldNotFound') {
+      return fallback !== undefined ? fallback : null;
+    }
+    throw err;
+  }
+}
+
 // Whitelisted roles updated with Supreme Leader included
 const RAID_CLOSE_ROLES = [
     'Administrator',
@@ -986,7 +997,7 @@ module.exports = {
 
         // [ Edit ] — grey staff/requester button: opens a modal to edit hostile
         // name / clan / count, then edits the existing alert message in place.
-        if (typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_edit_')) {
+        if (interaction.isButton() && typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_edit_')) {
             const raidId = Number(interaction.customId.split('_')[2]);
             if (Number.isNaN(raidId)) return;
             const raid = raidStateManager.getRaidById(raidId, interaction.guild?.id);
@@ -1009,6 +1020,12 @@ module.exports = {
                 .setStyle(TextInputStyle.Short)
                 .setValue(String(raid.enemyClanNames != null ? raid.enemyClanNames : ''))
                 .setRequired(false);
+            const countInput = new TextInputBuilder()
+                .setCustomId('editEnemyCount')
+                .setLabel('Enemy Count')
+                .setStyle(TextInputStyle.Short)
+                .setValue(String(raid.enemyCount || 0))
+                .setRequired(false);
             const descInput = new TextInputBuilder()
                 .setCustomId('editDescription')
                 .setLabel('Description')
@@ -1018,6 +1035,7 @@ module.exports = {
             editModal.addComponents(
                 new ActionRowBuilder().addComponents(targetInput),
                 new ActionRowBuilder().addComponents(clanInput),
+                new ActionRowBuilder().addComponents(countInput),
                 new ActionRowBuilder().addComponents(descInput)
             );
             await interaction.showModal(editModal).catch(() => null);
@@ -1182,10 +1200,10 @@ module.exports = {
                 await interaction.reply({ content: 'Raid not found.', flags: 64 }).catch(() => null);
                 return;
             }
-            const enemyCount = interaction.fields.getTextInputValue('editEnemyCount');
-            const newTarget = interaction.fields.getTextInputValue('editTarget');
-            const newClan = interaction.fields.getTextInputValue('editEnemyClan');
-            const newDesc = interaction.fields.getTextInputValue('editDescription');
+            const enemyCount = safeGetTextInputValue(interaction.fields, 'editEnemyCount', raid.enemyCount);
+            const newTarget = safeGetTextInputValue(interaction.fields, 'editTarget', raid.robloxUsername);
+            const newClan = safeGetTextInputValue(interaction.fields, 'editEnemyClan', raid.enemyClanNames);
+            const newDesc = safeGetTextInputValue(interaction.fields, 'editDescription', raid.reason);
             if (newTarget.trim() !== '') raid.robloxUsername = newTarget;
             raid.enemyClanNames = newClan.trim();
             raid.reason = newDesc.trim();

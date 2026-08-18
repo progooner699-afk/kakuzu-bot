@@ -25,8 +25,10 @@ const ALERT_ACCENT_COLOR = 0xED4245;
 
 // Game-specific thumbnail map — per-raid-game artwork.
 const GAME_THUMBNAILS = {
-	'The Strongest Battlegrounds': 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980',
-	'Jujutsu Kaisen': 'https://t6.rbxcdn.com/3e8a3e4e5e6e7e8e9e0e1e2e3e4e5e6e7e8f0f1',
+    'tsb': 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980',
+    'The Strongest Battlegrounds': 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980',
+    'jjk': 'https://t6.rbxcdn.com/3e8a3e4e5e6e7e8e9e0e1e2e3e4e5e6e7e8f0f1',
+    'Jujutsu Kaisen': 'https://t6.rbxcdn.com/3e8a3e4e5e6e7e8e9e0e1e2e3e4e5e6e7e8f0f1',
 	// Add more game thumbnails as needed; fallback below handles the rest.
 };
 
@@ -110,12 +112,12 @@ async function buildRaidAlertPayload(raid, buttons) {
     const containerContents = [];
     const sections = [];
 
-    // --- Section 1: header (title + status) — carries the requester pfp ---
+    // --- Section 1: header (title) — carries the requester pfp ---
     const headerSection = new SectionBuilder()
         .addTextDisplayComponents(
             new TextDisplayBuilder().setContent('### 🚨 RAID ALERT #' + raid.raidId),
             new TextDisplayBuilder().setContent(
-                '**' + statusEmoji + ' ' + statusText + '** • <t:' + createdTs + ':F>'
+                '<t:' + createdTs + ':F>'
             )
         );
     if (requesterAvatarUrl) {
@@ -132,16 +134,7 @@ async function buildRaidAlertPayload(raid, buttons) {
     }
 // Edit 2 — extra separator after header
 
-    // --- Section 2: details — carries the static game thumbnail ---
-// Edit 3 — PINGS section pulled from raid.pings if available.
-    const pingsSection = [];
-    if (raid.pings && raid.pings.length) {
-        const pingMentions = raid.pings.map(id => '<@&' + id + '>').join(NL10);
-        pingsSection.push(text('### 🔔 PINGS' + NL10 + '**Pings:**' + NL10 + pingMentions));
-    } else {
-        pingsSection.push(text('### 🔔 PINGS' + NL10 + '*No pings configured*'));
-    }
-    sections.push(...pingsSection);
+    // --- Section 2: details — carries the static game thumbnail —
     sections.push(
         new SectionBuilder()
             .setThumbnailAccessory(new ThumbnailBuilder().setURL(GAME_THUMBNAILS[raid.targetGame] || GAME_THUMBNAILS['The Strongest Battlegrounds'] || 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980'))
@@ -150,7 +143,7 @@ async function buildRaidAlertPayload(raid, buttons) {
                 '> **Target:** ' + targetDisplay + NL10 +
                 '> **Game:** ' + gameLabel + NL10 +
                 '> **Raid ID:** `' + raid.raidId + '`' + NL10 +
-                (raid.region ? NL10 + '> **Region:** `' + raid.region + '`' : '') + NL10 +
+                (raid.region ? '> **Region:** `' + raid.region + '`' + NL10 : '') +
                 '> **Status:** `' + statusEmoji + ' ' + statusText + '`' + NL10 +
                 '> **Time Requested:** <t:' + createdTs + ':f>'
             ))
@@ -158,7 +151,7 @@ async function buildRaidAlertPayload(raid, buttons) {
     );
 
     // --- Section 3: in-game helpers ---
-    sections.push(text('### ⚔️ IN-GAME HELPERS' + NL10 +
+    sections.push(text('### ♟️ IN-GAME HELPERS' + NL10 +
         '> **Helpers:** `' + helperNamesText + '`' + NL10 +
         '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`'));
 
@@ -179,7 +172,7 @@ async function buildRaidAlertPayload(raid, buttons) {
         containerContents.push(separator());
     });
 
-    // --- Button row attached to the container (JOIN SERVER / Join Raid / Close) ---
+    // --- Button row attached to the container (Join Raid / Close) ---
     if (buttons) {
         const rows = Array.isArray(buttons) ? buttons : [buttons];
         rows.forEach(function (r) {
@@ -209,4 +202,5 @@ module.exports = {
     buildRaidAlertPayload: buildRaidAlertPayload,
     markAlertV2: markAlertV2
 };
+
 

@@ -64,12 +64,7 @@ module.exports = {
         const embeds = raidStateManager.formatRaidMessage(fakeRaid, interaction.guild.id);
 
         // Simple test buttons
-        const joinUrl = 'https://www.roblox.com/games/start?placeId=' + fakeRaid.placeId;
         const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setStyle(ButtonStyle.Link)
-                .setLabel('JOIN SERVER')
-                .setURL(joinUrl),
             new ButtonBuilder()
                 .setCustomId('raid_help_999')
                 .setLabel('Help')
