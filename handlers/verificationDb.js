@@ -26,7 +26,13 @@ async function ensureDb(guildId) {
         fs.mkdirSync(dataDir, { recursive: true });
     }
 
-    const initSqlJsModule = await initSqlJs();
+    const initSqlJsModule = await initSqlJs({
+        // Resolve sql-wasm.wasm next to the sql.js module wrapper regardless of
+        // the process CWD or how the bot is packaged/deployed. Without an
+        // explicit locateFile, initSqlJs() can fail to find the wasm binary in
+        // some environments, which would make every verification command throw.
+        locateFile: (file) => path.join(path.dirname(require.resolve('sql.js')), file)
+    });
     SQL = initSqlJsModule;
 
     let db;

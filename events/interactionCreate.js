@@ -626,11 +626,16 @@ module.exports = {
             try {
                 await command.execute(interaction);
             } catch (error) {
-                console.error('Command execution error:', error);
+                const errMsg = (error && error.message) ? error.message : String(error);
+                console.error(`Command execution error (/${interaction.commandName || 'unknown'}):`, error);
+                // Show the real error in the ephemeral reply so failures are
+                // visible instead of a generic message (aids diagnosis).
+                const replyText = 'An error occurred while executing that command.' +
+                    (errMsg ? '\n`' + errMsg.slice(0, 500) + '`' : '');
                 if (!interaction.replied && !interaction.deferred) {
-                    await interaction.reply({ content: 'An error occurred while executing that command.', flags: 64 }).catch(() => null);
+                    await interaction.reply({ content: replyText, flags: 64 }).catch(() => null);
                 } else {
-                    await interaction.followUp({ content: 'An error occurred while executing that command.', flags: 64 }).catch(() => null);
+                    await interaction.followUp({ content: replyText, flags: 64 }).catch(() => null);
                 }
             }
             return;
