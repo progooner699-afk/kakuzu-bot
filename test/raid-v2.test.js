@@ -136,7 +136,7 @@ test('field rows in DETAILS / IN-GAME HELPERS / LIVE HELPERS are quote-barred', 
     .join(String.fromCharCode(10));
   assert.ok(contents.includes('> **Game:**'));
   assert.ok(contents.includes('> **Raid ID:**'));
-  assert.ok(contents.includes('> **Total Helpers:**'));
+  assert.ok(contents.includes('> **Total Helpers Joined:**'));
   assert.ok(contents.includes('> • <@444555666>'));
 });
 

@@ -28,6 +28,9 @@ const GAME_THUMBNAILS = {
     'tsb': 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980',
     'The Strongest Battlegrounds': 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980',
     'jjk': 'https://t6.rbxcdn.com/3e8a3e4e5e6e7e8e9e0e1e2e3e4e5e6e7e8f0f1',
+    'rivals': 'https://t6.rbxcdn.com/180DAY-rivals-placeholder',
+    'bedwars': 'https://t6.rbxcdn.com/180DAY-bedwars-placeholder',
+    'bloxfuits': 'https://t6.rbxcdn.com/180DAY-bloxfuits-placeholder',
     'Jujutsu Kaisen': 'https://t6.rbxcdn.com/3e8a3e4e5e6e7e8e9e0e1e2e3e4e5e6e7e8f0f1',
 	// Add more game thumbnails as needed; fallback below handles the rest.
 };
@@ -135,14 +138,13 @@ async function buildRaidAlertPayload(raid, buttons) {
         sections.push(text(headerTexts.join(NL10)));
     }
 // Edit 2 — extra separator after header
-
-    // --- Section 2: details — carries the static game thumbnail —
+    console.log('thumbnail lookup', raid.targetGame, '->', GAME_THUMBNAILS[raid.targetGame] || 'NO MATCH, using fallback');
     sections.push(
         new SectionBuilder()
             .setThumbnailAccessory(new ThumbnailBuilder().setURL(GAME_THUMBNAILS[raid.targetGame] || GAME_THUMBNAILS['The Strongest Battlegrounds'] || 'https://t6.rbxcdn.com/180DAY-007dc222a830b5992e1a04073454e980'))
             .addTextDisplayComponents(new TextDisplayBuilder().setContent(
-                '### 📋 DETAILS' + NL10 +
-                '> **Target:** ' + targetDisplay + NL10 +
+                '### 📋 DETAILS' + NL10 + NL10 +
+                '> **Raid Target:** ' + targetDisplay + NL10 +
                 '> **Game:** ' + gameLabel + NL10 +
                 '> **Raid ID:** `' + raid.raidId + '`' + NL10 +
                 (raid.region ? '> **Region:** `' + raid.region + '`' + NL10 : '') +
@@ -153,17 +155,17 @@ async function buildRaidAlertPayload(raid, buttons) {
     );
 
     // --- Section 3: in-game helpers ---
-    sections.push(text('### ♟️ IN-GAME HELPERS' + NL10 +
-        '> **Helpers:** `' + helperNamesText + '`' + NL10 +
-        '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`'));
+    sections.push(text('### ♟️ IN-GAME HELPERS' + NL10 + NL10 +
+        '> **Helpers Needed:** `' + helperNamesText + '`' + NL10 +
+        '> **Total Helpers Joined:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`'));
 
     // --- Section 4: description (plain text, no quote bar) ---
-    sections.push(text('### 📝 DESCRIPTION' + NL10 + '```' + NL10 + reasonText + NL10 + '```'));
+    sections.push(text('### 📝 DESCRIPTION' + NL10 + NL10 + '```' + NL10 + reasonText + NL10 + NL10 + '```'));
 
     // --- Section 5: live helpers (quote-bar'd @user — ⏱ time rows) ---
     if (helperCount > 0) {
         const liveHelpersList = raid.helpers.map(formatLiveHelperRow).join(NL10);
-        sections.push(text('### 👥 LIVE HELPERS (' + helperCount + ' / ' + (raid.helperLimit || 0) + ')' + NL10 + liveHelpersList));
+        sections.push(text('### 👥 LIVE HELPERS (' + helperCount + ' / ' + (raid.helperLimit || 0) + ')' + NL10 + NL10 + liveHelpersList));
     }
 
     // Every section/title block is followed by a native V2 Separator (type 14).
