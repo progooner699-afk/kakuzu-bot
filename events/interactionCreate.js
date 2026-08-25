@@ -16,6 +16,7 @@ const raidV2 = require("../handlers/raidV2");
 const robloxApi = require("../handlers/robloxApi");
 const verificationDb = require("../handlers/verificationDb");
 const { formatRobloxProfileValue } = require("../handlers/verificationHelpers");
+const sharedPingDb = require("../handlers/sharedPingDb");
 const pendingRaidApplications = new Map();
 const pendingRegionSelections = new Map();
 const pendingGameSelections = new Map();
@@ -24,6 +25,7 @@ const pendingServerLinks = new Map();
 const pendingPlaceIds = new Map();
 const pendingServerIds = new Map();
 const pendingGameThumbnails = new Map();
+const pendingCountryCodes = new Map();
 
 // Region ping IDs are now configured per-guild via settings.regionPings
 
@@ -47,10 +49,12 @@ const RAID_CLOSE_ROLES = [
     '?? ? SUPREME LEADER'
 ];
 
-// Roles that can accept/deny verifications are NO LONGER hardcoded by name.
-// They are configured per-guild via /verificationadminrole and stored as role
-// IDs in the persistent per-guild settings.json so they survive restarts and
-// are never affected by role name changes.
+// Roles that can close raids / moderate are NO LONGER hardcoded by name.
+// They are stored as role IDs in the persistent per-guild settings.json so they
+// survive restarts and are never affected by role name changes. (The
+// /verificationadminrole command that used to set these has been removed; the
+// setting is still honored by canCloseRaid / canModerateVerification for
+// backwards compatibility with existing server configs.)
 
 function getVerificationAdminRoleIds(guildId) {
     try {
@@ -159,6 +163,98 @@ function getRegionRoleInfo(guildId, region) {
     } catch (err) {
         return { roleIds: [], mention: null, roleId: null, allowedMentions: undefined };
     }
+}
+
+/**
+ * A role id is usable when it is a non-empty string that differs from the
+ * "empty role" sentinels (0 / @everyone).
+ */
+function isUsableRoleId(roleId) {
+    return typeof roleId === 'string' && roleId.length > 0 && roleId !== '0' && roleId !== '@everyone';
+}
+
+/**
+ * Validates that a role still exists in the current guild. Cache-first so the
+ * hot raid-post path stays synchronous; a network fetch happens only on a
+ * cache miss (rare).
+ */
+async function roleExistsInGuild(client, guildId, roleId) {
+    if (!isUsableRoleId(roleId)) return false;
+    const guild = client && guildId ? client.guilds.cache.get(guildId) : undefined;
+    if (!guild) return false;
+    if (guild.roles.cache.has(roleId)) return true;
+    try {
+        const role = await guild.roles.fetch(roleId).catch(() => null);
+        return Boolean(role);
+    } catch (err) {
+        return false;
+    }
+}
+
+/**
+ * Resolves the single role to ping when a raid alert is posted.
+ *
+ * Order (dashboard-owned shared PostgreSQL first):
+ *   1. getGuildPingSettings(guildId) -> { countryPings, regionPings }.
+ *   2. Candidates in priority order: exact countryCode (e.g. SG) FIRST, then
+ *      broad region (e.g. ASIA). The first candidate whose role actually
+ *      exists in the guild wins - never both.
+ *   3. If the configured country role was deleted, the broad-region candidate
+ *      is tried as the fallback.
+ *   4. If Postgres is unconfigured / down / empty, or no Postgres role exists,
+ *      fall back to the legacy settings.json `regionPings` (what /setregionping
+ *      still writes) so existing servers keep working during the transition.
+ *
+ * Never throws. Always returns { roleId, mention, allowedMentions, source }.
+ */
+async function getRaidPingInfo(client, guildId, { countryCode, region }) {
+    const normalizedRegion = normalizeRegion(region);
+    let resolvedPing = null;
+
+    try {
+        const cfg = await sharedPingDb.getGuildPingSettings(guildId);
+        const countryPings = cfg.countryPings || {};
+        const regionPings = cfg.regionPings || {};
+
+        const candidates = [];
+        if (countryCode) {
+            const cc = String(countryCode).trim().toUpperCase();
+            let roleId = countryPings[cc];
+            if (Array.isArray(roleId)) roleId = roleId.length ? roleId[0] : null;
+            if (isUsableRoleId(roleId)) candidates.push({ roleId, kind: 'country' });
+        }
+        if (normalizedRegion) {
+            let roleId = regionPings[normalizedRegion];
+            if (Array.isArray(roleId)) roleId = roleId.length ? roleId[0] : null;
+            if (isUsableRoleId(roleId)) candidates.push({ roleId, kind: 'region' });
+        }
+
+        for (const candidate of candidates) {
+            if (await roleExistsInGuild(client, guildId, candidate.roleId)) {
+                resolvedPing = {
+                    roleId: candidate.roleId,
+                    mention: `<@&${candidate.roleId}>`,
+                    allowedMentions: { roles: [candidate.roleId] },
+                    source: candidate.kind
+                };
+                break; // ping only the highest-priority valid role
+            }
+        }
+    } catch (err) {
+        console.warn('[raid ping] shared Postgres lookup failed - falling back to legacy regionPings:', (err && err.message) || err);
+    }
+
+    if (resolvedPing) return resolvedPing;
+
+    // Legacy fallback: settings.json regionPings (kept until /setregionping
+    // is removed in a later stage).
+    const legacy = getRegionRoleInfo(guildId, region);
+    return {
+        roleId: legacy.roleId || null,
+        mention: legacy.mention,
+        allowedMentions: legacy.allowedMentions,
+        source: 'legacy'
+    };
 }
 
 function createRaidButtons(raid, member = null) {
@@ -501,7 +597,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
         if (settings.resultChannel) {
             const targetResultChannel = await interaction.client.channels.fetch(settings.resultChannel).catch(() => null);
             if (targetResultChannel && targetResultChannel.isTextBased()) {
-                const regionRoleInfo = getRegionRoleInfo(interaction.guild.id, raid.region);
+                const regionRoleInfo = await getRaidPingInfo(interaction.client, interaction.guild.id, { countryCode: null, region: raid.region });
                 await targetResultChannel.send({
                     content: regionRoleInfo.mention || undefined,
                     embeds: [buildReportCardEmbed(attachments)],
@@ -643,10 +739,12 @@ module.exports = {
 
         // Handle request_raid button - auto-detect game/region/server
         if (interaction.customId === "request_raid") {
+            await interaction.deferReply({ flags: 64 }).catch(() => null);
+
             const verificationData = await verificationDb.getVerificationData(interaction.user.id, interaction.guild.id);
             const isVerified = Boolean(verificationData?.is_verified && verificationData?.roblox_user_id);
             if (!isVerified) {
-                return interaction.reply({
+                return interaction.editReply({
                     content: buildUnverifiedMessage(interaction.guild.id),
                     flags: 64
                 }).catch(() => null);
@@ -656,7 +754,7 @@ module.exports = {
             const detection = await robloxApi.detectGameAndRegion(robloxUserId);
 
             if (!detection.success) {
-                return interaction.reply({
+                return interaction.editReply({
                     content: "Auto-Detection Failed: " + detection.error + ". Make sure you are in a Roblox game.",
                     flags: 64
                 }).catch(() => null);
@@ -668,7 +766,24 @@ module.exports = {
             pendingPlaceIds.set(interaction.user.id, detection.placeId || '');
             pendingServerIds.set(interaction.user.id, detection.serverId || '');
             pendingGameThumbnails.set(interaction.user.id, detection.gameIconUrl || '');
+            pendingCountryCodes.set(interaction.user.id, detection.countryCode || '');
 
+            const openFormButton = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId("open_raid_application")
+                    .setLabel("⚔️ Open Raid Application Form")
+                    .setStyle(ButtonStyle.Primary)
+            );
+
+            return interaction.editReply({
+                content: "✅ Game & server detected! Click the button below to open the raid application form.",
+                components: [openFormButton],
+                flags: 64
+            }).catch(() => null);
+        }
+
+        // Handle open_raid_application button - shows the modal (fast, no async work)
+        if (interaction.customId === "open_raid_application") {
             const modal = new ModalBuilder()
                 .setCustomId("raid_application_step1")
                 .setTitle("Raid Request Application");
@@ -868,6 +983,7 @@ module.exports = {
             const placeId = pendingPlaceIds.get(userId) || '';
             const serverId = pendingServerIds.get(userId) || '';
             const gameThumbnailUrl = pendingGameThumbnails.get(userId) || '';
+            const countryCode = pendingCountryCodes.get(userId) || '';
             
             if (!game || !region) {
                 pendingGameSelections.delete(userId);
@@ -895,6 +1011,7 @@ module.exports = {
             pendingPlaceIds.delete(userId);
             pendingServerIds.delete(userId);
             pendingGameThumbnails.delete(userId);
+            pendingCountryCodes.delete(userId);
 
             const verificationData = await verificationDb.getVerificationData(userId, interaction.guild.id);
             const robloxUsername = verificationData?.roblox_username || 'Unknown';
@@ -928,7 +1045,7 @@ module.exports = {
             const settings = raidStateManager.loadSettings(guildId);
             const embeds = raidStateManager.formatRaidMessage(raid, guildId);
             const raidButtonRow = createRaidButtons(raid, interaction.member);
-            const regionRoleInfo = getRegionRoleInfo(guildId, raid.region);
+            const regionRoleInfo = await getRaidPingInfo(interaction.client, guildId, { countryCode, region });
 
             if (!settings.raidChannel) {
                 return interaction.reply({ content: 'Raid channel is not configured. Please run `/setchannels` and set the `raid_channel` first (Raid Alert channel).', flags: 64 }).catch(() => null);

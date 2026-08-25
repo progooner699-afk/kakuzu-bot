@@ -21,9 +21,47 @@
   `GAME_CONFIG`, `formatRaidMessage`, `formatTimeSpent`,
   `pollHelperPresences` (Roblox Presence API helper-time tracking).
 * **HTTP dashboard:** Express + CORS on `process.env.PORT || 5000`
-  (`index.js`) — `/` health, `/api/stats`, `/api/action/restart`.
-* **Config/Secrets:** `config.json` (clientId), `.env` (`DISCORD_TOKEN`).
+  (`index.js`) — `/` health, `/api/stats`, `/api/action/restart`, and the
+  protected `GET /api/guilds/:guildId/roles` (bearer `BOT_API_TOKEN`). The roles
+  route reads `guild.roles.cache` (no per-request Discord fetch), serves a 45s
+  in-memory response cache, and is rate-limited per IP (`RATE_LIMIT_MAX = 300/min`).
+* **Config/Secrets:** `config.json` (clientId), `.env` (`DISCORD_TOKEN`,
+  optional `DATABASE_URL` for the shared Postgres ping config below).
   `.env` is git-ignored; `config.json` is committed.
+
+## 🐘 SHARED POSTGRES — RAID PING CONFIGURATION (dashboard <-> bot)
+
+> Only the **country/region raid ping** settings are shared with the separately
+> deployed dashboard via one hosted PostgreSQL database. **Nothing else** was
+> migrated: `raids.json`, `settings.json`, `verification.sqlite` and
+> `leaderboard.sqlite` remain the bot's local source of truth.
+
+* **Helper:** `handlers/sharedPingDb.js` — `pg` Pool built from `DATABASE_URL`
+  (env var; never hard-coded, never logged). One async read:
+  `getGuildPingSettings(guildId)` → `{ countryPings, regionPings }`; always
+  resolves, never throws, returns empty maps when the DB is absent/down.
+* **Table:** `guild_ping_settings (guild_id TEXT PK, country_pings JSONB,
+  region_pings JSONB, updated_at TIMESTAMPTZ)` — created idempotently with
+  `CREATE TABLE IF NOT EXISTS` on first use; the bot never DROPs/resets it.
+* **SSL:** honors `?sslmode=` on `DATABASE_URL` or a `PGSSL` env override
+  (`require|no-verify|prefer|allow` → `rejectUnauthorized:false`;
+  `verify-full` → `rejectUnauthorized:true`).
+* **Raid ping resolution** (`getRaidPingInfo` in `events/interactionCreate.js`):
+  Postgres `countryPings[COUNTRY_CODE]` first, then
+  `regionPings[BROAD_REGION]` — only ONE role pinged (the first candidate whose
+  role actually exists in the guild); deleted country role → broad-region
+  fallback. If Postgres is unconfigured/down/empty → legacy
+  `settings.regionPings` (from `/setregionping`) runs so existing servers keep
+  working. `allowedMentions.roles` restricts pings to exactly the chosen role.
+* **Detector:** `robloxApi.detectGameAndRegion` now also returns `countryCode`
+  (ISO-3166 alpha-2, e.g. `SG`) alongside the broad `region` (e.g. `ASIA`);
+  `regionMap.geolocateIp` returns `{ label, countryCode, ... }` and
+  `resolveRoValraRegion` returns `{ region, countryCode }` best-effort.
+* **Transition:** `/setregionping` is intentionally UNTOUCHED for now (it still
+  writes `settings.json`). A later stage removes it once the
+  dashboard→Postgres→bot path is verified.
+* **Running:** if `DATABASE_URL` is unset or empty, `sharedPingDb` returns empty
+  maps and the legacy ping path runs — the bot needs zero Postgres changes.
 
 ## 🔁 IMPORTANT RECOVERY NOTE (as of latest commit)
 
@@ -138,16 +176,34 @@ Refactored the linking → request → join → close loop per the spec:
 | Path | Purpose |
 | ---- | ------- |
 | `index.js` | Bot bootstrap, intents, command loading, Express dashboard, `client.login`. |
-| `events/ready.js` | On-ready guild command registration + helper-presence polling loop. |
-| `events/interactionCreate.js` | **Main interaction hub** (buttons, modals, selects). Contains verification decision helpers, link flow, raid application step 1, and the RAID OPERATIONS section (`raid_accept_`, `raid_leave_`, `raid_close_`, `raid_outcome_`, `raid_mvp_select_`). |
+| `events/ready.js` | On-ready guild command registration + helper-presence polling loop + sql.js verification DB pre-initialization. |
+| `events/interactionCreate.js` | **Main interaction hub** (buttons, modals, selects). Contains verification decision helpers, link flow, raid application step 1, `open_raid_application` modal launcher, and the RAID OPERATIONS section (`raid_accept_`, `raid_leave_`, `raid_close_`, `raid_outcome_`, `raid_mvp_select_`). |
 | `handlers/raidStateManager.js` | Raid CRUD + persistence + presence polling. |
 | `handlers/raidV2.js` | Native Components V2 raid alert builder (`buildRaidAlertPayload`, `markAlertV2`). |
 | `handlers/robloxApi.js` | Roblox API/Presence calls, username validation, deep-links. |
 | `handlers/verificationDb.js` | sql.js persistence for verification records. |
 | `handlers/verificationHelpers.js` | `formatRobloxProfileValue` and friends. |
+| `handlers/sharedPingDb.js` | Read-only shared PostgreSQL helper for dashboard-owned country/region ping settings (`getGuildPingSettings`). |
 | `handlers/commandHandler.js` | Loads commands from `commands/` into `client.commands`. |
 | `commands/deploy-commands.js` | `registerGuildCommands(guildId)` — used by `ready.js`; also a standalone CLI (`npm run deploy-commands`). |
-| `commands/*.js` | Slash commands (link-roblox, requestraid, verify-help, close-raid, channel config, setregionping, verificationadminrole, botinfo, announcement, forceshutallraids, etc.). |
+| `commands/*.js` | Slash commands (link-roblox, requestraid, close-raid, channelconfig, setchannels, unsetchannels, setregionping, setlockedpingrole, botinfo, announcement, forceshutallraids, raidtest, etc.). |
+
+## 🗑️ REMOVED COMMANDS (this session)
+
+The following slash commands were removed (files deleted from `commands/`):
+
+1. `/verification` (`commands/verification.js`) — verification portal embed
+2. `/setverificationlogs` (`commands/setverificationlogs.js`) — set verification logs channel
+3. `/setverificationresults` (`commands/setverificationresults.js`) — set verification results channel
+4. `/verificationadminrole` (`commands/verificationadminrole.js`) — manage verification admin roles
+5. `/verificationconfig` (`commands/verificationconfig.js`) — show verification configuration
+6. `/verificationstatus` (`commands/verificationstatus.js`) — check user verification status
+
+> **`/link-roblox` was NOT removed.** The verification *infrastructure* (handlers/
+> `verificationDb.js`, `verificationHelpers.js`, the unverified-user guard, and the
+> `verificationAdminRoles` setting in `interactionCreate.js`) is retained because
+> `/link-roblox` uses it for direct-link auto-verification. `unsetchannels.js`
+> help text was updated to remove references to the deleted set-commands.
 
 ## ✅ RECENT KEY DECISIONS (commit `c0685c3`)
 
@@ -156,6 +212,16 @@ Refactored the linking → request → join → close loop per the spec:
 * Auto-verify on raid **accept** (helper modal writes a verification row).
 * Fixed region detection; hide public Roblox links; button styling updates
   (grey secondary for Join / Close Raid).
+* Fixed `/requestraid` interaction timeout: the `request_raid` button handler now
+  calls `interaction.deferReply({ flags: 64 })` before the slow DB + Roblox API
+  calls (sql.js init + `detectGameAndRegion`), then uses `editReply()` for errors
+  and a follow-up `open_raid_application` button to launch the modal (Discord.js v14
+  does not allow `showModal()` after deferring). sql.js verification DBs are
+  pre-initialized in `ready.js` to keep on-demand queries fast.
+* Fixed `gamejoin.roblox.com` "Unable to join Game 311" rejection: added
+  `User-Agent` and `Referer` headers to the gamejoin API request in
+  `handlers/robloxAuth.js`; Roblox's anti-automation checks now accept the request
+  and return a valid `joinScript` with `MachineAddress`.
 
 ## 🧪 RUN & VERIFY
 

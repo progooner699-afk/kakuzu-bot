@@ -80,5 +80,21 @@ module.exports = {
                 console.warn('Presence polling loop error:', error?.message || error);
             }
         }, PRESENCE_POLL_INTERVAL);
+
+        // Pre-initialize verification databases (sql.js wasm) so on-demand DB
+        // queries during interaction handling do not hit the 3-second Discord
+        // interaction timeout on first access.
+        setTimeout(async () => {
+            try {
+                const verificationDb = require('../handlers/verificationDb');
+                const guilds = [...client.guilds.cache.values()];
+                await Promise.allSettled(
+                    guilds.map(g => verificationDb.getVerificationData('__preload__', g.id).catch(() => null))
+                );
+                console.log('✅ Verification databases pre-initialized.');
+            } catch (err) {
+                console.warn('Verification DB pre-init failed:', err?.message || err);
+            }
+        }, 2000);
     },
 };

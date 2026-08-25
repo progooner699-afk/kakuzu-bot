@@ -147,6 +147,7 @@ async function getUserPresence(userId) {
 
         const placeId = presence.placeId;
         const gameId = presence.gameId;
+        console.log('DEBUG placeId:', placeId, 'serverId:', gameId);
         
         if (!placeId) {
             return { success: false, error: 'No game place ID found' };
@@ -210,6 +211,7 @@ async function detectGameAndRegion(userId) {
     const gameName = presence.gameName.toLowerCase();
     let detectedGame = 'unknown';
     let detectedRegion = 'NA';
+    let detectedCountryCode = null;
 
     if (gameName.includes('strongest battlegrounds') || gameName.includes('tsb')) {
         detectedGame = 'tsb';
@@ -226,23 +228,49 @@ async function detectGameAndRegion(userId) {
         detectedGame = 'fishtrap';
     }
 
-    // Try to detect the actual server region (e.g. Mumbai, Singapore) via the
-    // Roblox servers API using the user's current server id.
-    if (presence.serverId && presence.universeId) {
+    // Resolve the hosting server's IP / data-center via the gamejoin API
+    if (presence.serverId && presence.placeId) {
         try {
-            const serversResponse = await fetch(
-                `https://games.roblox.com/v1/games/${presence.universeId}/servers/Public?limit=100`
-            );
-            if (serversResponse.ok) {
-                const serversData = await serversResponse.json();
-                const servers = serversData.data || [];
-                const currentServer = servers.find(s => s && String(s.id) === String(presence.serverId));
-                if (currentServer && currentServer.region) {
-                    detectedRegion = String(currentServer.region).toUpperCase();
+            const { getServerIp } = require('./robloxAuth');
+            const ipResult = await getServerIp(presence.placeId, presence.serverId);
+            if (ipResult && ipResult.machineAddress) {
+                const { resolveRoValraRegion, resolveRegionFromIp, resolveRegionFromDataCenter, geolocateIp } = require('./regionMap');
+                let resolved = null;
+                let source = null;
+                const rovalra = await resolveRoValraRegion(ipResult.machineAddress);
+                if (rovalra && rovalra.region) {
+                    resolved = rovalra.region;
+                    detectedCountryCode = rovalra.countryCode || null;
+                    source = 'RoValra';
                 }
+                if (!resolved) {
+                    resolved = resolveRegionFromIp(ipResult.publicAddress);
+                    if (resolved) { source = 'manual-ip'; }
+                }
+                if (!resolved) {
+                    resolved = resolveRegionFromDataCenter(ipResult.dataCenterId);
+                    if (resolved) { source = 'datacenter'; }
+                }
+                if (!resolved && ipResult.publicAddress) {
+                    const geo = await geolocateIp(ipResult.publicAddress);
+                    if (geo) { resolved = geo.label; detectedCountryCode = geo.countryCode || null; source = 'ip-api'; }
+                }
+                // Optional enrichment: even when the region came from a
+                // non-geolocation source (manual table / datacenter / RoValra
+                // without an ISO code), resolve the hosting server's ISO
+                // country code so the dashboard's country ping can fire.
+                // Never blocks a raid if this best-effort lookup fails.
+                if (!detectedCountryCode && ipResult.publicAddress) {
+                    try {
+                        const geo2 = await geolocateIp(ipResult.publicAddress);
+                        if (geo2 && geo2.countryCode) detectedCountryCode = geo2.countryCode;
+                    } catch (err) { /* optional - ignore */ }
+                }
+                detectedRegion = resolved || (ipResult.dataCenterId ? `DC-${ipResult.dataCenterId}` : 'Unknown');
+                console.log('Resolved region:', detectedRegion, 'country:', detectedCountryCode || '-', '(source:', source || 'unknown', ')');
             }
         } catch (err) {
-            // fall back to the default region detection
+            console.error('gamejoin region lookup failed:', err);
         }
     }
 
@@ -280,6 +308,7 @@ async function detectGameAndRegion(userId) {
         success: true,
         game: detectedGame,
         region: detectedRegion,
+        countryCode: detectedCountryCode || null,
         serverLink,
         gameName: presence.gameName,
         gameIconUrl,

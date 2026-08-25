@@ -65,7 +65,7 @@ module.exports = {
             content: '✅ **Channel configuration cleared.**\n\n' +
                      'Cleared:\n' +
                      cleared.map(channel => `• ${channel}`).join('\n') +
-                     '\n\nUse `/setchannels`, `/setverificationlogs`, and `/setverificationresults` to reconfigure them.',
+                     '\n\nUse `/setchannels` to reconfigure them.',
             flags: 64
         });
     }
