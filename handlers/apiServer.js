@@ -23,19 +23,22 @@
  *   - The roles endpoint is deliberately NOT exposed to arbitrary browser
  *     origins: it uses bearer auth only. The dashboard FRONTEND must call its
  *     own backend, which calls this endpoint server-to-server.
- *   - A small in-memory rate limit protects the roles endpoint, and a short
- *     TTL response cache means repeated identical loads never hit Discord.
+ *   - A small in-memory rate limit protects ONLY the Discord-facing parts of the
+ *     roles endpoint (cache misses), and a short TTL response cache + per-guild
+ *     single-flight deduplication means repeated and concurrent dashboard loads
+ *     never hit Discord and are never rate-limited.
  */
 
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 
-// Simple rolling-window rate limit for the protected endpoint (per client IP).
-// This is an AUTHENTICATED server-to-server route (BOT_API_TOKEN) whose requests
-// come from the dashboard backend's small set of shared egress IPs. The window
-// is generous enough for normal dashboard use (multiple selectors/refreshes per
-// load) yet still cuts off runaway/abusive loops.
+// Rolling-window rate limit for the protected roles endpoint (per client IP).
+// It guards ONLY requests that miss the in-memory response cache - i.e. the ones
+// that could reach out to the Discord REST API. Normal dashboard loads are served
+// straight from the response cache and are never counted here, so shared dashboard
+// egress IPs cannot exhaust the budget on ordinary refreshes. Abuse is still
+// capped because a flood of cache misses cannot exceed this per-IP ceiling.
 const RATE_LIMIT_MAX = 300;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const rateLimitBuckets = new Map();
@@ -44,7 +47,18 @@ const rateLimitBuckets = new Map();
 // repeated identical dashboard loads are served without re-reading discord.js or
 // risking a Discord REST call. Roles rarely change; 45s keeps them fresh enough.
 const ROLE_CACHE_TTL_MS = 45 * 1000;
-const roleResponseCache = new Map(); // guildId -> { roles, expiresAt }
+const roleResponseCache = new Map(); // guildId -> { roles, expiresAt } | { notFound, expiresAt }
+
+// Unknown guilds are remembered briefly so a looping/rapid dashboard cannot
+// re-hit Discord's REST API for the same non-member guild inside this window.
+const GUILD_NOT_FOUND_TTL_MS = 10 * 1000;
+
+// Single-flight map: concurrent cache-miss requests for the SAME guild share ONE
+// guild/Discord read, ONE rate-limit token and ONE serialized result. This stops
+// bursty dashboard traffic (StrictMode double-fetch, parallel Netlify warm
+// instances, user double-clicks) from ever reaching Discord more than once at a
+// time or exhausting the per-IP budget on duplicate work.
+const roleFetchInflight = new Map(); // guildId -> Promise<{roles}|{statusCode,error}>
 
 // Temporary, safe breadcrumb to detect dashboard request spam. Counts only a
 // small hit-count + the route path - never auth headers/tokens, never bodies.
@@ -93,16 +107,19 @@ function authenticateApiToken(req, res, next) {
 }
 
 /**
- * Minimal per-IP rolling-window limiter. Rejects with 429 when exceeded.
+ * Rolling-window check for a client IP. Returns true when the request is within
+ * budget, false when it should be rejected with 429. Used by the roles route for
+ * requests that miss the response cache (the only ones that can touch the Discord
+ * REST API), so normal cached dashboard loads are never limited.
  */
-function rateLimit(req, res, next) {
-    const ip = req.ip || 'unknown';
+function consumeRateLimit(ip) {
     const now = Date.now();
     const bucket = rateLimitBuckets.get(ip) || [];
     const recent = bucket.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
 
     if (recent.length >= RATE_LIMIT_MAX) {
-        return res.status(429).json({ error: 'RATE_LIMITED' });
+        rateLimitBuckets.set(ip, recent);
+        return false;
     }
 
     recent.push(now);
@@ -117,6 +134,17 @@ function rateLimit(req, res, next) {
         }
     }
 
+    return true;
+}
+
+/**
+ * Express middleware form of the limiter (kept for API compatibility and any
+ * future protected routes). Rejects with 429 when the IP is over budget.
+ */
+function rateLimit(req, res, next) {
+    if (!consumeRateLimit(req.ip || 'unknown')) {
+        return res.status(429).json({ error: 'RATE_LIMITED' });
+    }
     next();
 }
 
@@ -151,6 +179,125 @@ function serializeRole(role) {
 }
 
 /**
+ * Resolves a guild's selectable roles for the dashboard. Called ONLY on a
+ * response-cache miss and single-flighted (see getRolesOutcome), so at most one
+ * of these runs per guild at any instant.
+ *
+ * Discord usage policy:
+ *  - Guild: served from client.guilds.cache. A targeted guilds.fetch() is only a
+ *    cold-start fallback and never repeats (single flight + notFound negative
+ *    cache prevent re-hitting Discord for the same guild).
+ *  - Roles: served from guild.roles.cache. guild.roles.fetch() is called ONLY
+ *    when the role cache is genuinely unavailable (missing OR empty), exactly
+ *    once, and never retried in a loop. discord.js's own REST queue absorbs
+ *    Discord 429s internally, so no manual retry is needed or performed.
+ *
+ * @param {object} client discord.js Client
+ * @param {string} guildId validated snowflake
+ * @returns {Promise<{roles: object[]}|{statusCode: number, error: string}>}
+ */
+async function resolveGuildRoles(client, guildId) {
+    let guild = client && client.guilds ? client.guilds.cache.get(guildId) : undefined;
+    if (!guild && client && client.guilds && typeof client.guilds.fetch === 'function') {
+        try {
+            guild = await client.guilds.fetch(guildId).catch(() => null);
+        } catch (err) {
+            guild = null; // never surface internals - just not found
+        }
+    }
+    if (!guild) {
+        // Brief negative cache so repeated requests for the same unknown guild
+        // never re-hit Discord's REST API inside this window.
+        roleResponseCache.set(guildId, {
+            notFound: true,
+            expiresAt: Date.now() + GUILD_NOT_FOUND_TTL_MS
+        });
+        return { statusCode: 404, error: 'GUILD_NOT_FOUND' };
+    }
+
+    // Prefer discord.js cached role data. Fetch from the Discord REST API only
+    // when the role cache is genuinely unavailable (missing or empty) - never on
+    // every dashboard request, and at most once per cache miss.
+    if (!guild.roles || !guild.roles.cache || guild.roles.cache.size === 0) {
+        try {
+            await guild.roles.fetch().catch(() => null);
+        } catch (err) { /* keep whatever cache exists */ }
+    }
+
+    const allRoles = guild.roles && guild.roles.cache
+        ? [...guild.roles.cache.values()]
+        : [];
+    if (allRoles.length === 0) {
+        // A real Discord guild always has @everyone (id == guildId) at minimum,
+        // so an empty result means the single role read failed/short-circuited.
+        // Do NOT cache this outcome - the dashboard's Retry should re-attempt.
+        return { statusCode: 503, error: 'ROLES_UNAVAILABLE' };
+    }
+
+    const selectableRoles = allRoles
+        // The @everyone role shares the guild ID and can never be a raid-ping
+        // target - exclude it entirely.
+        .filter((role) => role.id !== guildId)
+        // Managed/integration roles (owned by bots / connections) cannot
+        // reasonably be assigned as raid pings - exclude them.
+        .filter((role) => !Boolean(role.managed))
+        // Highest position first (Discord hierarchy order).
+        .sort((a, b) => (b.position || 0) - (a.position || 0))
+        .map((role) => serializeRole(role));
+
+    // Cache the normalized response for the TTL so repeated identical loads never
+    // re-read Discord. The result is considered immutable for its TTL.
+    roleResponseCache.set(guildId, {
+        roles: selectableRoles,
+        expiresAt: Date.now() + ROLE_CACHE_TTL_MS
+    });
+
+    // Opportunistic cleanup so the cache never grows unbounded.
+    if (roleResponseCache.size > 1000) {
+        for (const [key, entry] of roleResponseCache) {
+            if (entry.expiresAt <= Date.now()) roleResponseCache.delete(key);
+        }
+    }
+
+    return { roles: selectableRoles };
+}
+
+/**
+ * Cache-miss entry point with per-guild single-flight deduplication. The FIRST
+ * concurrent miss for a guild becomes the leader: it consumes one rate-limit
+ * token, performs at most one Discord read, and populates the response cache.
+ * Any request that arrives while that work is in flight simply shares the
+ * leader's promise - no extra rate-limit token, no extra Discord call. The
+ * per-IP limiter therefore only ever gates genuine Discord work: a normal
+ * authenticated dashboard load returns 200 on the FIRST request and every
+ * subsequent reload (cache hit), and is never 429'd.
+ *
+ * @param {object} client discord.js Client
+ * @param {string} guildId validated snowflake
+ * @param {string} ip client IP for rate limiting
+ * @returns {Promise<{roles: object[]}|{statusCode: number, error: string}>}
+ */
+function getRolesOutcome(client, guildId, ip) {
+    const inFlight = roleFetchInflight.get(guildId);
+    if (inFlight) return inFlight;
+
+    const pending = (async () => {
+        // Only cache misses can reach the Discord REST API, so only they consume
+        // the per-IP budget. Single flight guarantees ONE token per concurrent
+        // miss group, never one token per duplicate request.
+        if (!consumeRateLimit(ip)) {
+            return { statusCode: 429, error: 'RATE_LIMITED' };
+        }
+        return resolveGuildRoles(client, guildId);
+    })().finally(() => {
+        roleFetchInflight.delete(guildId);
+    });
+
+    roleFetchInflight.set(guildId, pending);
+    return pending;
+}
+
+/**
  * Builds the bot's SINGLE HTTP API application. `client` is the discord.js
  * Client instance. index.js is the only place that calls app.listen().
  * @param {import('discord.js').Client} client
@@ -166,13 +313,19 @@ function createApiServer(client) {
     // Health check
     app.get('/', (req, res) => res.send('Kakuzu is Online!'));
 
-    // Bot statistics endpoint (consumed by the React dashboard)
+    // Bot statistics endpoint (consumed by the React dashboard). Only aggregate
+    // totals are exposed - never guild names/IDs, member IDs, usernames or secrets.
     app.get('/api/stats', (req, res) => {
+        const guilds = client && client.guilds ? [...client.guilds.cache.values()] : [];
+        const users = guilds.reduce(
+            (sum, g) => sum + (Number.isInteger(g.memberCount) ? g.memberCount : 0),
+            0
+        );
         res.json({
-            servers: client.guilds.cache.size,
-            users: client.users.cache.size,
-            ping: client.ws.ping,
-            status: client.isReady() ? 'Online' : 'Offline'
+            servers: guilds.length,
+            users,
+            ping: client && client.ws ? client.ws.ping : undefined,
+            status: client && client.isReady ? (client.isReady() ? 'Online' : 'Offline') : 'Offline'
         });
     });
 
@@ -193,11 +346,15 @@ function createApiServer(client) {
     // Protected: selectable guild roles for the dashboard ping setup.
     // Server-to-server ONLY. The dashboard FRONTEND must go through its own
     // backend (Netlify function) which authenticates with BOT_API_TOKEN.
+    //
+    // 429 policy: the per-IP rate limit counts ONLY cache misses (the only
+    // requests that can touch the Discord REST API). Cache hits are served
+    // straight from memory and are never limited, so a normal authenticated
+    // dashboard load returns 200 on the FIRST request and on every reload.
     // -------------------------------------------------------------------
     app.get(
         '/api/guilds/:guildId/roles',
         authenticateApiToken,
-        rateLimit,
         async (req, res) => {
             const { guildId } = req.params;
 
@@ -208,66 +365,27 @@ function createApiServer(client) {
                 return res.status(400).json({ error: 'INVALID_GUILD_ID' });
             }
 
-            // Fast path: a still-fresh normalized response is cached, so serve it
-            // immediately without touching discord.js or the Discord REST API.
+            // Fast path: a still-fresh normalized response (or a briefly cached
+            // unknown guild) is served immediately without touching discord.js
+            // or the Discord REST API. Cache hits are cheap in-memory reads and
+            // never consume the rate-limit budget, so normal dashboard reloads
+            // can never be 429'd.
             const cachedResponse = roleResponseCache.get(guildId);
             if (cachedResponse && cachedResponse.expiresAt > Date.now()) {
+                if (cachedResponse.notFound) {
+                    return res.status(404).json({ error: 'GUILD_NOT_FOUND' });
+                }
                 return res.json({ guild_id: guildId, roles: cachedResponse.roles });
             }
 
-            // Only guilds the bot actually belongs to may be queried. Cache
-            // first; a targeted fetch is used only when the guild is not in
-            // cache (fetch rejects for unknown guilds -> GUILD_NOT_FOUND).
-            let guild = client && client.guilds ? client.guilds.cache.get(guildId) : undefined;
-            if (!guild && client && client.guilds && typeof client.guilds.fetch === 'function') {
-                try {
-                    guild = await client.guilds.fetch(guildId).catch(() => null);
-                } catch (err) {
-                    guild = null; // never surface internals - just not found
-                }
+            // Cache miss: single-flighted (one token + at most one Discord read
+            // per concurrent miss group for the same guild) and only then
+            // rate-limited, so normal authenticated loads never 429.
+            const outcome = await getRolesOutcome(client, guildId, req.ip || 'unknown');
+            if (outcome.statusCode) {
+                return res.status(outcome.statusCode).json({ error: outcome.error });
             }
-            if (!guild) {
-                return res.status(404).json({ error: 'GUILD_NOT_FOUND' });
-            }
-
-            // Prefer discord.js cached role data for a guild the bot is connected
-            // to. Only fetch from the Discord REST API when the role cache is
-            // genuinely missing/partial (rare) - never on every dashboard request.
-            if (!guild.roles || !guild.roles.cache) {
-                try {
-                    await guild.roles.fetch().catch(() => null);
-                } catch (err) { /* keep whatever cache exists */ }
-            }
-            const roles = (guild.roles && guild.roles.cache)
-                ? [...guild.roles.cache.values()]
-                : [];
-
-            const selectableRoles = roles
-                // The @everyone role shares the guild ID and can never be a
-                // raid-ping target - exclude it entirely.
-                .filter((role) => role.id !== guildId)
-                // Managed/integration roles (owned by bots / connections)
-                // cannot reasonably be assigned as raid pings - exclude them.
-                .filter((role) => !Boolean(role.managed))
-                // Highest position first (Discord hierarchy order).
-                .sort((a, b) => (b.position || 0) - (a.position || 0))
-                .map((role) => serializeRole(role));
-
-            // Cache the normalized response for the TTL so repeated identical loads
-            // never re-read Discord. Result is considered immutable for its TTL.
-            roleResponseCache.set(guildId, {
-                roles: selectableRoles,
-                expiresAt: Date.now() + ROLE_CACHE_TTL_MS
-            });
-
-            // Opportunistic cleanup so the cache never grows unbounded.
-            if (roleResponseCache.size > 1000) {
-                for (const [key, entry] of roleResponseCache) {
-                    if (entry.expiresAt <= Date.now()) roleResponseCache.delete(key);
-                }
-            }
-
-            return res.json({ guild_id: guildId, roles: selectableRoles });
+            return res.json({ guild_id: guildId, roles: outcome.roles });
         }
     );
 
@@ -279,6 +397,7 @@ module.exports = {
     verifyApiToken,
     authenticateApiToken,
     rateLimit,
+    consumeRateLimit,
     isValidSnowflake,
     serializeRole
 };

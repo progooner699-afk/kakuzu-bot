@@ -2,7 +2,7 @@ const test = require('node:test');
 const { before, after } = require('node:test');
 const assert = require('assert');
 
-const { createApiServer, verifyApiToken, isValidSnowflake } = require('../handlers/apiServer');
+const { createApiServer, verifyApiToken, isValidSnowflake, consumeRateLimit } = require('../handlers/apiServer');
 
 // Server-to-server shared secret between the dashboard BACKEND and the bot.
 // Empty in .env; tests set it explicitly here (never a real token).
@@ -17,6 +17,7 @@ function makeRole(id, name, overrides = {}) {
 function makeClient() {
   const guildA = {
     id: GUILD_A,
+    memberCount: 100,
     roles: {
       cache: new Map([
         // @everyone shares the guild ID - must never be returned.
@@ -32,7 +33,13 @@ function makeClient() {
       ])
     }
   };
-  const cache = new Map([[GUILD_A, guildA]]);
+  // Second guild: proves /api/stats totals members across ALL guilds.
+  const guildB = {
+    id: '222222222222222220',
+    memberCount: 23,
+    roles: { cache: new Map() }
+  };
+  const cache = new Map([[GUILD_A, guildA], ['222222222222222220', guildB]]);
   return {
     guilds: {
       cache,
@@ -202,9 +209,46 @@ test('existing /api/stats and / still work', async () => {
   const stats = await fetch(`${baseUrl}/api/stats`);
   assert.strictEqual(stats.status, 200);
   const body = await stats.json();
-  assert.strictEqual(body.servers, 1);
+  // guildA (100) + guildB (23) = 123 total members across 2 guilds.
+  assert.strictEqual(body.servers, 2);
+  assert.strictEqual(body.users, 123);
   assert.strictEqual(body.ping, 42);
   assert.strictEqual(body.status, 'Online');
+});
+test('/api/stats returns numeric servers and numeric total users', async () => {
+  const stats = await fetch(`${baseUrl}/api/stats`);
+  assert.strictEqual(stats.status, 200);
+  const body = await stats.json();
+  assert.strictEqual(typeof body.servers, 'number');
+  assert.strictEqual(typeof body.users, 'number');
+  // users is the summed guild memberCount (total members), not the cached
+  // user-object count (which is 1 in this mock client).
+  assert.notStrictEqual(body.users, 1);
+  assert.strictEqual(body.users, 123);
+});
+
+test('consumeRateLimit caps abuse per IP but allows a fresh IP', () => {
+  // Exhaust the rolling window for one IP; the budget is 300/min.
+  let blocked = 0;
+  for (let i = 0; i < 350; i++) {
+    if (!consumeRateLimit('10.0.0.abuse')) blocked += 1;
+  }
+  // 300 allowed, the remaining 50 rejected by the limiter.
+  assert.ok(blocked >= 50, `expected ~50 blocked, got ${blocked}`);
+
+  // A different (fresh) IP is not affected by the exhausted bucket.
+  assert.strictEqual(consumeRateLimit('10.0.0.other'), true);
+});
+
+test('roles endpoint never 429s on cached dashboard reloads', async () => {
+  // Warm the cache (first request is a cache miss but returns 200).
+  let res = await requestRoles(BOT_API_TOKEN, GUILD_A);
+  assert.strictEqual(res.status, 200);
+  // Fire a burst of cache hits - all must be 200, never 429.
+  for (let i = 0; i < 40; i++) {
+    res = await requestRoles(BOT_API_TOKEN, GUILD_A);
+    assert.strictEqual(res.status, 200, `reload #${i + 1} should be 200`);
+  }
 });
 
 test('verifyApiToken and isValidSnowflake helpers behave safely', () => {
