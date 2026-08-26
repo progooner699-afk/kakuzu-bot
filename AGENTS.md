@@ -24,7 +24,11 @@
   (`index.js`) — `/` health, `/api/stats`, `/api/action/restart`, and the
   protected `GET /api/guilds/:guildId/roles` (bearer `BOT_API_TOKEN`). The roles
   route reads `guild.roles.cache` (no per-request Discord fetch), serves a 45s
-  in-memory response cache, and is rate-limited per IP (`RATE_LIMIT_MAX = 300/min`).
+  in-memory response cache, and is **never 429'd for authenticated callers**:
+  bearer auth gates access, and cache-miss dedupe (per-guild single-flight +
+  unknown-guild negative cache) caps Discord reads at one per guild per TTL.
+  The old 300/min per-IP limiter caused shared-egress-IP dashboard users to get
+  intermittent 429s and is no longer applied to this route.
 * **Config/Secrets:** `config.json` (clientId), `.env` (`DISCORD_TOKEN`,
   optional `DATABASE_URL` for the shared Postgres ping config below).
   `.env` is git-ignored; `config.json` is committed.

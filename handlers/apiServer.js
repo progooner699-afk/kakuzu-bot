@@ -23,22 +23,31 @@
  *   - The roles endpoint is deliberately NOT exposed to arbitrary browser
  *     origins: it uses bearer auth only. The dashboard FRONTEND must call its
  *     own backend, which calls this endpoint server-to-server.
- *   - A small in-memory rate limit protects ONLY the Discord-facing parts of the
- *     roles endpoint (cache misses), and a short TTL response cache + per-guild
- *     single-flight deduplication means repeated and concurrent dashboard loads
- *     never hit Discord and are never rate-limited.
+ *   - Authenticated role requests are never 429'd: a short TTL response cache +
+ *     per-guild single-flight deduplication means repeated and concurrent
+ *     dashboard loads never hit Discord more than once per guild per TTL.
  */
 
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 
-// Rolling-window rate limit for the protected roles endpoint (per client IP).
-// It guards ONLY requests that miss the in-memory response cache - i.e. the ones
-// that could reach out to the Discord REST API. Normal dashboard loads are served
-// straight from the response cache and are never counted here, so shared dashboard
-// egress IPs cannot exhaust the budget on ordinary refreshes. Abuse is still
-// capped because a flood of cache misses cannot exceed this per-IP ceiling.
+// Rolling-window rate limit helper (per client IP), 300/min.
+//
+// 429 ROOT CAUSE FIX: this limiter USED to gate every response-cache miss on
+// /api/guilds/:guildId/roles. That produced the observed "first request -> 429,
+// Retry works": the dashboard calls this endpoint server-to-server through its
+// backend, so ALL end users share ONE egress IP and therefore ONE bucket. Under
+// normal multi-user/multi-guild dashboard usage that shared 300/min budget
+// exhausts and legitimate requests are rejected with 429 until tokens roll off
+// the window. Every request on this route must already present BOT_API_TOKEN
+// (constant-time checked in authenticateApiToken), so bearer auth - not an IP
+// counter - is the real access control. Authenticated server-to-server role
+// requests are therefore NO LONGER rate limited; Discord itself stays protected
+// by the 45s response cache + per-guild single-flight + unknown-guild negative
+// cache, which guarantee at most one bot-side Discord read per guild per TTL.
+// The limiter helpers are kept exported for compatibility and possible future
+// use on genuinely public endpoints; nothing public is weakened either way.
 const RATE_LIMIT_MAX = 300;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const rateLimitBuckets = new Map();
@@ -108,9 +117,11 @@ function authenticateApiToken(req, res, next) {
 
 /**
  * Rolling-window check for a client IP. Returns true when the request is within
- * budget, false when it should be rejected with 429. Used by the roles route for
- * requests that miss the response cache (the only ones that can touch the Discord
- * REST API), so normal cached dashboard loads are never limited.
+ * budget, false when it should be rejected with 429.
+ *
+ * NOTE: this is no longer wired into the roles endpoint - see the comment above
+ * RATE_LIMIT_MAX. It is kept as a reusable helper for any future PUBLIC route
+ * where per-IP limiting makes sense without bearer authentication.
  */
 function consumeRateLimit(ip) {
     const now = Date.now();
@@ -264,32 +275,24 @@ async function resolveGuildRoles(client, guildId) {
 
 /**
  * Cache-miss entry point with per-guild single-flight deduplication. The FIRST
- * concurrent miss for a guild becomes the leader: it consumes one rate-limit
- * token, performs at most one Discord read, and populates the response cache.
- * Any request that arrives while that work is in flight simply shares the
- * leader's promise - no extra rate-limit token, no extra Discord call. The
- * per-IP limiter therefore only ever gates genuine Discord work: a normal
- * authenticated dashboard load returns 200 on the FIRST request and every
- * subsequent reload (cache hit), and is never 429'd.
+ * concurrent miss for a guild becomes the leader: it performs at most one
+ * Discord read and populates the response cache. Any request that arrives while
+ * that work is in flight simply shares the leader's promise - no extra Discord
+ * call and no duplicated work. Requests are NOT rate limited: every caller has
+ * already authenticated with BOT_API_TOKEN, and the response cache +
+ * single-flight + negative caching guarantee Discord is read at most once per
+ * guild per TTL, so a normal authenticated dashboard load returns 200 on the
+ * FIRST request and on every subsequent reload - never a 429.
  *
  * @param {object} client discord.js Client
  * @param {string} guildId validated snowflake
- * @param {string} ip client IP for rate limiting
  * @returns {Promise<{roles: object[]}|{statusCode: number, error: string}>}
  */
-function getRolesOutcome(client, guildId, ip) {
+function getRolesOutcome(client, guildId) {
     const inFlight = roleFetchInflight.get(guildId);
     if (inFlight) return inFlight;
 
-    const pending = (async () => {
-        // Only cache misses can reach the Discord REST API, so only they consume
-        // the per-IP budget. Single flight guarantees ONE token per concurrent
-        // miss group, never one token per duplicate request.
-        if (!consumeRateLimit(ip)) {
-            return { statusCode: 429, error: 'RATE_LIMITED' };
-        }
-        return resolveGuildRoles(client, guildId);
-    })().finally(() => {
+    const pending = resolveGuildRoles(client, guildId).finally(() => {
         roleFetchInflight.delete(guildId);
     });
 
@@ -347,10 +350,11 @@ function createApiServer(client) {
     // Server-to-server ONLY. The dashboard FRONTEND must go through its own
     // backend (Netlify function) which authenticates with BOT_API_TOKEN.
     //
-    // 429 policy: the per-IP rate limit counts ONLY cache misses (the only
-    // requests that can touch the Discord REST API). Cache hits are served
-    // straight from memory and are never limited, so a normal authenticated
-    // dashboard load returns 200 on the FIRST request and on every reload.
+    // 429 policy: requests are NEVER rejected with 429 here. Bearer-token auth
+    // gates access; a 45s response cache, per-guild single-flight dedupe and an
+    // unknown-guild negative cache cap bot-side Discord reads at one per guild
+    // per TTL, so repeated/concurrent dashboard reloads cannot spam Discord and
+    // a normal authenticated dashboard load returns 200 on the FIRST request.
     // -------------------------------------------------------------------
     app.get(
         '/api/guilds/:guildId/roles',
@@ -378,10 +382,11 @@ function createApiServer(client) {
                 return res.json({ guild_id: guildId, roles: cachedResponse.roles });
             }
 
-            // Cache miss: single-flighted (one token + at most one Discord read
-            // per concurrent miss group for the same guild) and only then
-            // rate-limited, so normal authenticated loads never 429.
-            const outcome = await getRolesOutcome(client, guildId, req.ip || 'unknown');
+            // Cache miss: single-flighted (at most one Discord read per
+            // concurrent miss group for the same guild) and NOT rate limited -
+            // bearer auth already gates access, so normal authenticated loads
+            // can never be 429'd by this API.
+            const outcome = await getRolesOutcome(client, guildId);
             if (outcome.statusCode) {
                 return res.status(outcome.statusCode).json({ error: outcome.error });
             }
