@@ -123,13 +123,17 @@ async function getCsrfToken() {
 }
 
 /**
- * Resolves a Roblox placeId + serverId into the hosting server's IP and data
+ * Resolves a Roblox placeId + serverId into the game instance's IP and data
  * center via the gamejoin API. Returns { machineAddress, publicAddress,
- * dataCenterId } when Roblox hands back a joinScript, otherwise logs the raw
- * body and returns null. `publicAddress` is extracted from
+ * dataCenterId } when Roblox hands back a joinScript, otherwise returns null
+ * (see logGameJoinAttempt for the safe diagnostics emitted on every attempt).
+ * `publicAddress` is extracted from
  * `UdmuxEndpoints[0].Address` (the public-facing IP) or null if unavailable.
- * A safe cookie-authentication diagnostic runs once before the join (throttled
- * to one probe per COOKIE_DIAG_TTL_MS) and logs only non-sensitive flags.
+ * Diagnostics are safe: each attempt logs only whitelisted flags (httpStatus,
+ * joinScript presence, response status/statusMessage, queuePosition, Roblox
+ * error code/subcode/message, csrfPresent bool, replacementCookieReceived).
+ * Machine addresses, public addresses/IPs, cookies, CSRF tokens, Authorization
+ * headers and secrets are NEVER logged.
  * @param {string|number} placeId
  * @param {string} serverId - the server instance's jobId / gameInstanceGuid
  * @returns {Promise<{machineAddress: string, publicAddress: string|null, dataCenterId: string}|null>}
@@ -138,8 +142,9 @@ async function getServerIp(placeId, serverId) {
   // Safe authenticated-cookie diagnostic BEFORE any gamejoin attempt.
   await checkRobloxCookieAuth('pre-gamejoin');
 
-  async function attemptJoin() {
+  async function attemptJoin(attempt) {
     const csrfToken = await getCsrfToken();
+    const csrfPresent = Boolean(csrfToken); // token value is NEVER logged
     const res = await fetch('https://gamejoin.roblox.com/v1/join-game-instance', {
       method: 'POST',
       headers: {
@@ -162,20 +167,31 @@ async function getServerIp(placeId, serverId) {
     const replacement = extractReplacementSecurityCookie(res);
     let response;
     try { response = await res.json(); } catch (_) { response = {}; }
+
+    // No behavioral change: rotation still requires a real joinScript.
     if (response && response.joinScript) {
       adoptReplacementCookieIfAuthenticated(replacement, true);
     }
+
+    // Safe whitelisted per-attempt diagnostic (no raw body / secrets / IPs).
+    logGameJoinAttempt({
+      attempt,
+      httpStatus: res.status,
+      csrfPresent,
+      replacementReceived: replacement.received,
+      response
+    });
+
     return response || {};
   }
 
-  let response = await attemptJoin();
-  let attempts = 0;
+  let response = await attemptJoin(1);
+  let retries = 0;
 
-  while (!response.joinScript && response.status === 22 && attempts < 8) {
-    console.log(`Queued (position ${response.queuePosition}), retrying... attempt ${attempts + 1}`);
+  while (!response.joinScript && response.status === 22 && retries < 8) {
     await new Promise(r => setTimeout(r, 1500));
-    response = await attemptJoin();
-    attempts++;
+    response = await attemptJoin(retries + 2);
+    retries++;
   }
 
   if (response && response.joinScript) {
@@ -189,8 +205,67 @@ async function getServerIp(placeId, serverId) {
     };
   }
 
-  console.log('getServerIp final response (no joinScript):', response);
+  // No raw dump: a failure body can still carry machine / IP-derived names.
+  // The whitelisted fields were already logged per attempt above.
+  console.log(`[gamejoin] gave up after ${retries + 1} attempt(s) without a joinScript.`);
   return null;
+}
+
+/**
+ * Logs a single join-game-instance attempt using ONLY whitelisted fields.
+ * Never logs the raw response body, machineAddress, public addresses/IPs,
+ * cookies, CSRF tokens, bearer/Authorization headers or secrets.
+ * @param {{attempt:number, httpStatus:number|null, csrfPresent:boolean,
+ *          replacementReceived:boolean, response:object}} log
+ */
+function logGameJoinAttempt({ attempt, httpStatus, csrfPresent, replacementReceived, response }) {
+  const joinScript = !!(response && response.joinScript);
+  const fields = [
+    `attempt=${attempt}`,
+    `httpStatus=${httpStatus}`,
+    `joinScript=${joinScript ? 'true' : 'false'}`,
+    `csrfPresent=${csrfPresent ? 'true' : 'false'}`,
+    `replacementCookieReceived=${replacementReceived ? 'true' : 'false'}`
+  ];
+
+  if (response) {
+    // Whitelisted response fields only (never the raw body).
+    const rs = response.status;
+    if (rs !== undefined && rs !== null && (typeof rs === 'number' || /^\d+$/.test(String(rs)))) {
+      fields.push(`responseStatus=${rs}`);
+    }
+    if (typeof response.statusMessage === 'string' && response.statusMessage) {
+      fields.push(`statusMessage=${JSON.stringify(response.statusMessage)}`);
+    }
+    if (response.queuePosition !== undefined && response.queuePosition !== null) {
+      fields.push(`queuePosition=${response.queuePosition}`);
+    }
+
+    // Roblox error surfaces vary by shape:
+    //   { errors: [{ code, subcode?, message }] },
+    //   { error: { code, subcode?, message } },
+    //   { errorCode / errorSubcode / errorMessage }.
+    let ec, esc, em;
+    if (Array.isArray(response.errors) && response.errors.length > 0 && response.errors[0]) {
+      const first = response.errors[0];
+      if (ec === undefined && first.code !== undefined) ec = first.code;
+      if (esc === undefined && first.subcode !== undefined) esc = first.subcode;
+      if (em === undefined && first.message !== undefined) em = first.message;
+    }
+    if (ec === undefined && response.errorCode !== undefined) ec = response.errorCode;
+    if (esc === undefined && response.errorSubcode !== undefined) esc = response.errorSubcode;
+    if (em === undefined && typeof response.errorMessage === 'string') em = response.errorMessage;
+    if (response.error && typeof response.error === 'object') {
+      if (ec === undefined && response.error.code !== undefined) ec = response.error.code;
+      if (esc === undefined && response.error.subcode !== undefined) esc = response.error.subcode;
+      if (em === undefined && response.error.message !== undefined) em = response.error.message;
+    }
+    if (ec !== undefined) fields.push(`errorCode=${ec}`);
+    if (esc !== undefined) fields.push(`errorSubcode=${esc}`);
+    if (em !== undefined) fields.push(`errorMessage=${JSON.stringify(em)}`);
+  }
+
+  console.log(`[gamejoin] ${fields.join(' ')}`);
 }
 
 // Live binding: callers reading `BOT_COOKIE` after an in-memory rotation still
