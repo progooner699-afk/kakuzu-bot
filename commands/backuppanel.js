@@ -7,10 +7,14 @@ const {
     TextDisplayBuilder,
     SeparatorBuilder,
     SeparatorSpacingSize,
+    MediaGalleryBuilder,
+    MediaGalleryItemBuilder,
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle
 } = require('discord.js');
+
+const path = require('path');
 
 // Message flag required to enable native Components V2 (Separator etc).
 // NOTE: with this flag Discord DISABLES content + embeds, so the whole panel is
@@ -57,9 +61,12 @@ const EMOJI_BEFORE_YOU_START = '<:beforeyoustart:1542514313384956016>'; // uploa
 // custom uploaded <:name:id> emoji if you want a branded one here.
 const EMOJI_FEATURES = '📋'; // list emoji for the features title
 
-// Full-width banner GIF posted as its OWN message right before the panel, so it
-// shows large across the top instead of as a small side thumbnail.
-const PANEL_THUMBNAIL_URL = 'https://cdn.discordapp.com/attachments/1534458060721098846/1542460307273850890/tenor_12.gif?ex=6a91464a&is=6a8ff4ca&hm=6f68ff164cce3f8f96330101bdcd7d70f5c868000bbd628d10d65fb5a7433b16&';
+// Wide banner GIF shown at the very top INSIDE the V2 panel. The old hosted
+// Discord CDN link expired (404), so the actual GIF is bundled in the repo at
+// assets/backup-banner.gif, attached to the panel message itself, and rendered
+// by a full-width MediaGallery component (type 12) as the first component.
+const PANEL_BANNER_FILE = path.join(__dirname, '..', 'assets', 'backup-banner.gif');
+const PANEL_BANNER_NAME = 'backup-banner.gif';
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('backuppanel')
@@ -84,6 +91,14 @@ module.exports = {
         container.size = 'large';
 
         const contents = [];
+
+        // Banner GIF as the first component of the panel — full-width image
+        // (MediaGallery, type 12), NO separator around it, riding the same
+        // single V2 message as the rest of the panel.
+        contents.push(new MediaGalleryBuilder().addItems(
+            new MediaGalleryItemBuilder()
+                .setURL('attachment://' + PANEL_BANNER_NAME)
+        ).toJSON());
 
         // About this panel
         contents.push(text(
@@ -150,17 +165,13 @@ module.exports = {
 
         container.components = contents;
 
-        // Send the banner GIF first as its own message (full-width image, not a
-        // small side thumbnail), then the panel as a separate Components V2
-        // message. The V2 flag (1 << 15) disables embeds/content on the panel, so
-        // the GIF can't live "inside" it - it just gets its own message up top.
+        // ONE message: the banner GIF is attached to this same message and
+        // rendered inside the panel by the MediaGallery component above
+        // (attachment:// URLs resolve only against files sent with the message).
         await interaction.reply({
-            files: [{ attachment: PANEL_THUMBNAIL_URL, name: 'backup-banner.gif' }]
-        });
-
-        await interaction.followUp({
             flags: BACKUP_PANEL_V2_FLAGS,
-            components: [container]
+            components: [container],
+            files: [{ attachment: PANEL_BANNER_FILE, name: PANEL_BANNER_NAME }]
         });
     }
 };
