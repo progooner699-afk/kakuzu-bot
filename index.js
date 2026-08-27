@@ -6,6 +6,7 @@ const { Client, Collection, GatewayIntentBits } = require('discord.js');
 const config = require('./config.json');
 const commandHandler = require('./handlers/commandHandler');
 const raidStateManager = require('./handlers/raidStateManager');
+const { checkRobloxCookieAuth } = require('./handlers/robloxAuth');
 
 // FIXED: Added GuildMessages, MessageContent and GuildMembers for verification DMs
 const client = new Client({ 
@@ -58,6 +59,17 @@ const app = apiServer.createApiServer(client);
 const port = process.env.PORT || 5000;
 
 app.listen(port, () => console.log(`API server running on port ${port}`));
+
+// Safe .ROBLOSECURITY authenticated-cookie diagnostic run ONCE at startup so it
+// shows up in normal Render service logs (free Render has no shell to run the
+// standalone diagnose-cookie.js script). Logs ONLY non-sensitive flags
+// (cookieConfigured/cookieLength/authCheck/httpStatus/replacementCookieReceived);
+// never prints, hashes, or reveals the cookie value. `force=true` guarantees it
+// runs at boot regardless of the pre-gamejoin throttle TTL. Fire-and-forget so a
+// slow/failed Roblox probe can never delay or crash startup.
+checkRobloxCookieAuth('startup', true).catch(err => {
+    console.error('[robloxAuth] startup cookie diagnostic failed (bot kept alive):', err && err.stack ? err.stack : err);
+});
 
 // Discord bot login
 client.login(process.env.DISCORD_TOKEN);

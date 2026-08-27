@@ -185,6 +185,7 @@ Refactored the linking → request → join → close loop per the spec:
 | `handlers/raidStateManager.js` | Raid CRUD + persistence + presence polling. |
 | `handlers/raidV2.js` | Native Components V2 raid alert builder (`buildRaidAlertPayload`, `markAlertV2`). |
 | `handlers/robloxApi.js` | Roblox API/Presence calls, username validation, deep-links. |
+| `handlers/robloxAuth.js` | `.ROBLOSECURITY` handling: safe cookie-auth diagnostic that runs once at startup (`index.js`, `force`) and before each gamejoin (`getServerIp`); logs ONLY `cookieConfigured/cookieLength/authCheck/httpStatus/replacementCookieReceived` — never the value. In-memory rotation adoption on authenticated requests. |
 | `handlers/verificationDb.js` | sql.js persistence for verification records. |
 | `handlers/verificationHelpers.js` | `formatRobloxProfileValue` and friends. |
 | `handlers/sharedPingDb.js` | Read-only shared PostgreSQL helper for dashboard-owned country/region ping settings (`getGuildPingSettings`). |
