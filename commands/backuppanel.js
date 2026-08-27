@@ -26,11 +26,11 @@ const ALERT_EMOJI = '<:alert:0>'; // TODO: replace `0` with the uploaded emoji's
  */
 // "What is this" source image:
 //   https://cdn.discordapp.com/attachments/1534458060721098846/1542466304609493022/ewhatcj.PNG
-const EMOJI_WHAT_IS_THIS = '<:placeholder:0>'; // TODO: replace with uploaded emoji code
+const EMOJI_WHAT_IS_THIS = '<:whatisthis:1542514625218609213>'; // uploaded emoji code
 
 // "Rules" source image:
 //   https://cdn.discordapp.com/attachments/1534458060721098846/1542506358040592464/peporeadrules56.PNG
-const EMOJI_RULES = '<:placeholder:0>'; // TODO: replace with uploaded emoji code
+const EMOJI_RULES = '<:rules:1542514498018087064>'; // uploaded emoji code
 
 // "What happens when you request" source image:
 //   https://cdn.discordapp.com/attachments/1534458060721098846/1542507690780270592/talkingtoawall80.GIF
@@ -38,7 +38,7 @@ const EMOJI_WHAT_HAPPENS = '<:placeholder:0>'; // TODO: replace with uploaded em
 
 // "Before you start" source image:
 //   https://cdn.discordapp.com/attachments/1534458060721098846/1542508228175204382/stop.PNG
-const EMOJI_BEFORE_YOU_START = '<:placeholder:0>'; // TODO: replace with uploaded emoji code
+const EMOJI_BEFORE_YOU_START = '<:beforeyoustart:1542514313384956016>'; // uploaded emoji code
 
 const PANEL_COLOR = '#8B0000';
 
