@@ -4,11 +4,9 @@ const {
     SlashCommandBuilder,
     PermissionFlagsBits,
     ContainerBuilder,
-    SectionBuilder,
     TextDisplayBuilder,
     SeparatorBuilder,
     SeparatorSpacingSize,
-    ThumbnailBuilder,
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle
@@ -59,7 +57,8 @@ const EMOJI_BEFORE_YOU_START = '<:beforeyoustart:1542514313384956016>'; // uploa
 // custom uploaded <:name:id> emoji if you want a branded one here.
 const EMOJI_FEATURES = '📋'; // list emoji for the features title
 
-// Top-of-panel thumbnail GIF shown at the very top/upper side of the embed.
+// Full-width banner GIF posted as its OWN message right before the panel, so it
+// shows large across the top instead of as a small side thumbnail.
 const PANEL_THUMBNAIL_URL = 'https://cdn.discordapp.com/attachments/1534458060721098846/1542460307273850890/tenor_12.gif?ex=6a91464a&is=6a8ff4ca&hm=6f68ff164cce3f8f96330101bdcd7d70f5c868000bbd628d10d65fb5a7433b16&';
 module.exports = {
     data: new SlashCommandBuilder()
@@ -86,20 +85,11 @@ module.exports = {
 
         const contents = [];
 
-        // Thumbnail at the upper side of the panel. A Thumbnail (type 11) can't
-        // live directly inside a Container's component list - it's an accessory
-        // and must be attached to a SectionBuilder via setThumbnailAccessory
-        // (same pattern as handlers/raidV2.js). The ABOUT THIS PANEL heading+
-        // paragraph below ride in the same Section so the GIF renders beside them.
-        contents.push(
-            new SectionBuilder()
-                .setThumbnailAccessory(new ThumbnailBuilder().setURL(PANEL_THUMBNAIL_URL))
-                .addTextDisplayComponents(new TextDisplayBuilder().setContent(
-                    '# ' + EMOJI_WHAT_IS_THIS + ' ABOUT THIS PANEL' + NL + NL +
-                    '> Need assistance? Use this panel to call for backup when you’re outnumbered, being teamed on, or facing a clan raid in a battleground game. Send a request and let your clan know where help is needed.'
-                ))
-                .toJSON()
-        );
+        // About this panel
+        contents.push(text(
+            '# ' + EMOJI_WHAT_IS_THIS + ' ABOUT THIS PANEL' + NL + NL +
+            '> Need assistance? Use this panel to call for backup when you’re outnumbered, being teamed on, or facing a clan raid in a battleground game. Send a request and let your clan know where help is needed.'
+        ));
         contents.push(separator());
 
         // Features & Support
@@ -160,7 +150,15 @@ module.exports = {
 
         container.components = contents;
 
+        // Send the banner GIF first as its own message (full-width image, not a
+        // small side thumbnail), then the panel as a separate Components V2
+        // message. The V2 flag (1 << 15) disables embeds/content on the panel, so
+        // the GIF can't live "inside" it - it just gets its own message up top.
         await interaction.reply({
+            files: [{ attachment: PANEL_THUMBNAIL_URL, name: 'backup-banner.gif' }]
+        });
+
+        await interaction.followUp({
             flags: BACKUP_PANEL_V2_FLAGS,
             components: [container]
         });
