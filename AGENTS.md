@@ -51,12 +51,16 @@
   (`require|no-verify|prefer|allow` → `rejectUnauthorized:false`;
   `verify-full` → `rejectUnauthorized:true`).
 * **Raid ping resolution** (`getRaidPingInfo` in `events/interactionCreate.js`):
-  Postgres `countryPings[COUNTRY_CODE]` first, then
-  `regionPings[BROAD_REGION]` — only ONE role pinged (the first candidate whose
-  role actually exists in the guild); deleted country role → broad-region
-  fallback. If Postgres is unconfigured/down/empty → legacy
-  `settings.regionPings` (from `/setregionping`) runs so existing servers keep
-  working. `allowedMentions.roles` restricts pings to exactly the chosen role.
+  Country code takes precedence and is used ALONE — never both. If a
+  `countryCode` was detected, only `countryPings[COUNTRY_CODE]` is considered;
+  if that role is missing/deleted/invalid the alert posts with **no** location
+  ping (no broad-region fallback). If no `countryCode` was detected, only
+  `regionPings[BROAD_REGION]` is considered. If Postgres is unconfigured/down/
+  empty the legacy `settings.regionPings` (from `/setregionping`) fallback runs,
+  but only on the no-country region path. `allowedMentions.roles` restricts
+  pings to exactly the chosen role. The alert embed shows the human-readable
+  `Country` name (from `raidStateManager.countryCodeToName`, e.g. `IN` → `India`)
+  directly under `Region`, or `Unknown` when undetected.
 * **Detector:** `robloxApi.detectGameAndRegion` now also returns `countryCode`
   (ISO-3166 alpha-2, e.g. `SG`) alongside the broad `region` (e.g. `ASIA`);
   `regionMap.geolocateIp` returns `{ label, countryCode, ... }` and

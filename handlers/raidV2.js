@@ -167,6 +167,10 @@ async function buildRaidAlertPayload(raid, buttons) {
             .filter(Boolean);
         sections.push(text(headerTexts.join(NL10)));
     }
+    // --- ENEMY NAMES (code box; no thumbnail -> TextDisplay) ---
+    sections.push(text('### 🎯 ENEMY NAMES' + NL10 + NL10 +
+        '```' + NL10 + 'Enemy Clan: ' + (raid.enemyClanNames || 'Unknown') + NL10 + 'Enemies: ' + (raid.enemyNames || 'None') + NL10 + NL10 + '```'));
+
 // --- Section 2: DETAILS (game thumbnail + field list) ---
     const detailsThumbnailUrl = resolveGameThumbnailUrl(raid);
     console.log('[thumbnail lookup]', raid.targetGame, '->', GAME_THUMBNAILS[raid.targetGame] || 'NO MATCH, using fallback',
@@ -176,10 +180,10 @@ async function buildRaidAlertPayload(raid, buttons) {
             .setThumbnailAccessory(new ThumbnailBuilder().setURL(detailsThumbnailUrl))
             .addTextDisplayComponents(new TextDisplayBuilder().setContent(
                 '### 📋 DETAILS' + NL10 + NL10 +
-                '> **Raid Target:** ' + targetDisplay + NL10 +
                 '> **Game:** ' + gameLabel + NL10 +
                 '> **Raid ID:** `' + raid.raidId + '`' + NL10 +
                 (raid.region ? '> **Region:** `' + raid.region + '`' + NL10 : '') +
+                '> **Country:** `' + rsm.countryCodeToName(raid.countryCode) + '`' + NL10 +
                 '> **Status:** `' + statusEmoji + ' ' + statusText + '`' + NL10 +
                 '> **Time Requested:** <t:' + createdTs + ':f>'
             ))

@@ -194,21 +194,27 @@ async function roleExistsInGuild(client, guildId, roleId) {
 /**
  * Resolves the single role to ping when a raid alert is posted.
  *
- * Order (dashboard-owned shared PostgreSQL first):
- *   1. getGuildPingSettings(guildId) -> { countryPings, regionPings }.
- *   2. Candidates in priority order: exact countryCode (e.g. SG) FIRST, then
- *      broad region (e.g. ASIA). The first candidate whose role actually
- *      exists in the guild wins - never both.
- *   3. If the configured country role was deleted, the broad-region candidate
- *      is tried as the fallback.
- *   4. If Postgres is unconfigured / down / empty, or no Postgres role exists,
- *      fall back to the legacy settings.json `regionPings` (what /setregionping
- *      still writes) so existing servers keep working during the transition.
+ * Ping selection (country code takes precedence, never both):
+ *   1. If a `countryCode` was successfully detected -> ping ONLY that country's
+ *      configured role. If that role is missing/deleted/invalid -> NO location
+ *      ping at all (never fall back to the broad region role).
+ *   2. If NO `countryCode` was detected -> ping ONLY the broad region role
+ *      (e.g. ASIA / EU / NA / SA). If it is missing -> NO location ping.
+ *
+ * Config source: dashboard-owned shared PostgreSQL first
+ *   (`getGuildPingSettings(guildId)` -> `countryPings` / `regionPings`); when it
+ *   is empty/down the LEGACY settings.json `regionPings` fallback runs - but
+ *   ONLY in the no-country-detected (region) path, so a detected country with a
+ *   missing role still pings nothing.
  *
  * Never throws. Always returns { roleId, mention, allowedMentions, source }.
  */
 async function getRaidPingInfo(client, guildId, { countryCode, region }) {
     const normalizedRegion = normalizeRegion(region);
+    // A truthy country code means we are in "country-only" mode: a missing
+    // country role must yield NO ping rather than bubbling down to a region.
+    const cc = String(countryCode || '').trim().toUpperCase();
+    const useCountryOnly = Boolean(cc);
     let resolvedPing = null;
 
     try {
@@ -216,29 +222,28 @@ async function getRaidPingInfo(client, guildId, { countryCode, region }) {
         const countryPings = cfg.countryPings || {};
         const regionPings = cfg.regionPings || {};
 
-        const candidates = [];
-        if (countryCode) {
-            const cc = String(countryCode).trim().toUpperCase();
-            let roleId = countryPings[cc];
-            if (Array.isArray(roleId)) roleId = roleId.length ? roleId[0] : null;
-            if (isUsableRoleId(roleId)) candidates.push({ roleId, kind: 'country' });
-        }
-        if (normalizedRegion) {
-            let roleId = regionPings[normalizedRegion];
-            if (Array.isArray(roleId)) roleId = roleId.length ? roleId[0] : null;
-            if (isUsableRoleId(roleId)) candidates.push({ roleId, kind: 'region' });
+        let roleId = null;
+        let source = null;
+        if (useCountryOnly) {
+            // Country detected -> only the country role is ever considered. We do
+            // NOT step down to a broad region role when it is missing/invalid.
+            let candidate = countryPings[cc];
+            if (Array.isArray(candidate)) candidate = candidate.length ? candidate[0] : null;
+            if (isUsableRoleId(candidate)) { roleId = candidate; source = 'country'; }
+        } else if (normalizedRegion) {
+            // No country detected -> only the broad region role is considered.
+            let candidate = regionPings[normalizedRegion];
+            if (Array.isArray(candidate)) candidate = candidate.length ? candidate[0] : null;
+            if (isUsableRoleId(candidate)) { roleId = candidate; source = 'region'; }
         }
 
-        for (const candidate of candidates) {
-            if (await roleExistsInGuild(client, guildId, candidate.roleId)) {
-                resolvedPing = {
-                    roleId: candidate.roleId,
-                    mention: `<@&${candidate.roleId}>`,
-                    allowedMentions: { roles: [candidate.roleId] },
-                    source: candidate.kind
-                };
-                break; // ping only the highest-priority valid role
-            }
+        if (roleId && await roleExistsInGuild(client, guildId, roleId)) {
+            resolvedPing = {
+                roleId,
+                mention: `<@&${roleId}>`,
+                allowedMentions: { roles: [roleId] },
+                source
+            };
         }
     } catch (err) {
         console.warn('[raid ping] shared Postgres lookup failed - falling back to legacy regionPings:', (err && err.message) || err);
@@ -246,8 +251,14 @@ async function getRaidPingInfo(client, guildId, { countryCode, region }) {
 
     if (resolvedPing) return resolvedPing;
 
-    // Legacy fallback: settings.json regionPings (kept until /setregionping
-    // is removed in a later stage).
+    // With a detected country, a missing country role means NO location ping.
+    // Do not fall back to a broad-region ping (legacy or otherwise).
+    if (useCountryOnly) {
+        return { roleId: null, mention: null, allowedMentions: undefined, source: 'none' };
+    }
+
+    // Legacy fallback: settings.json regionPings (region-only path - kept until
+    // /setregionping is removed in a later stage).
     const legacy = getRegionRoleInfo(guildId, region);
     return {
         roleId: legacy.roleId || null,
@@ -1032,6 +1043,7 @@ module.exports = {
                 serverId,
                 gameThumbnailUrl,
                 region,
+                countryCode,
                 enemyCount: enemyNames.length,
                 enemyClanNames: enemyClanName,
                 enemyNames: enemyNames.join(', '),

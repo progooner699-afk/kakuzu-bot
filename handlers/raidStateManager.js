@@ -61,6 +61,35 @@ const GAME_CONFIG = {
     'jjk': '👁️ JJK'
 };
 
+// ISO-3166 alpha-2 -> human-readable country name used to render the "Country"
+// field on raid alert embeds (V2 payload AND the plain embed fallback).
+// Lookup stays on the standardized uppercase alpha-2 code internally.
+const COUNTRY_NAMES = {
+    US: 'United States', CA: 'Canada', MX: 'Mexico', BR: 'Brazil', AR: 'Argentina',
+    CL: 'Chile', CO: 'Colombia', PE: 'Peru', VE: 'Venezuela', UY: 'Uruguay',
+    GB: 'United Kingdom', DE: 'Germany', FR: 'France', IT: 'Italy', ES: 'Spain',
+    PT: 'Portugal', NL: 'Netherlands', BE: 'Belgium', CH: 'Switzerland', AT: 'Austria',
+    SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PL: 'Poland',
+    CZ: 'Czechia', HU: 'Hungary', RO: 'Romania', GR: 'Greece', IE: 'Ireland',
+    RU: 'Russia', UA: 'Ukraine', TR: 'Turkey', IN: 'India', CN: 'China',
+    JP: 'Japan', KR: 'South Korea', SG: 'Singapore', MY: 'Malaysia', ID: 'Indonesia',
+    TH: 'Thailand', VN: 'Vietnam', PH: 'Philippines', PK: 'Pakistan', BD: 'Bangladesh',
+    AE: 'United Arab Emirates', SA: 'Saudi Arabia', IL: 'Israel', QA: 'Qatar', KW: 'Kuwait',
+    AU: 'Australia', NZ: 'New Zealand', ZA: 'South Africa', NG: 'Nigeria', KE: 'Kenya',
+    EG: 'Egypt', MA: 'Morocco', GH: 'Ghana'
+};
+
+/**
+ * Converts an ISO-3166 alpha-2 country code (e.g. 'IN') into a human-readable
+ * country name (e.g. 'India'). Returns 'Unknown' when the code is missing or not
+ * in the lookup table.
+ */
+function countryCodeToName(countryCode) {
+    const cc = String(countryCode || '').trim().toUpperCase();
+    if (!cc) return 'Unknown';
+    return COUNTRY_NAMES[cc] || cc;
+}
+
 /**
  * Formats a number of seconds into a human-readable duration string.
  * e.g. 860 → "14m 20s"
@@ -251,6 +280,7 @@ function createRaid(options) {
         serverId: normalizeText(options.serverId),
         gameThumbnailUrl: normalizeText(options.gameThumbnailUrl),
         region: normalizeText(options.region),
+        countryCode: normalizeText(options.countryCode),
         enemyCount: Number(options.enemyCount) || 0,
         teamers: normalizeText(options.teamers),
         teamersCount,
@@ -393,6 +423,7 @@ function formatRaidMessage(raid, guildId = null) {
     const createdMs = Number(raid.createdAt) || Date.now();
     const createdTs = Math.floor(createdMs / 1000);
     const reasonText = raid.reason ? raid.reason : 'No details provided';
+    const countryName = countryCodeToName(raid.countryCode);
 
     const statusEmoji = statusText === 'OPEN' ? '\u{1F7E2}' : statusText === 'FULL' ? '\u{1F7E0}' : '\u{1F534}';
 
@@ -414,11 +445,16 @@ function formatRaidMessage(raid, guildId = null) {
         .setDescription('\u{1F6A8} **RAID ALERT**\n\n> \u{1F64F} Please remain patient while our helpers make their way to assist you. Someone will be with you shortly!')
         .addFields([
             {
+            name: '🎯 ENEMY NAMES',
+            value: '```' + '\n' + 'Enemy Clan: ' + (raid.enemyClanNames || 'Unknown') + '\n' + 'Enemies: ' + (raid.enemyNames || 'None') + '\n' + '```',
+            inline: false
+            },
+            {
                 name: '\u{1F4CB} DETAILS :',
                 value: '> **Game:** ' + gameLabel + '\n' +
                     '> **Raid ID:** `' + raid.raidId + '`\n' +
-                    '> **Target:** ' + targetDisplay + '\n' +
                     '> **Region:** `' + (raid.region || 'Unknown') + '`\n' +
+                    '> **Country:** `' + countryName + '`\n' +
                     '> **Status:** `' + statusEmoji + ' ' + statusText + '`\n' +
                     '> **Time Requested:** <t:' + createdTs + ':f>',
                 inline: false
@@ -750,6 +786,7 @@ module.exports = {
     buildLeaderboardEmbeds,
     formatTimeSpent,
     GAME_CONFIG,
+    countryCodeToName,
     setRaidMvp,
     pollHelperPresences
 };
