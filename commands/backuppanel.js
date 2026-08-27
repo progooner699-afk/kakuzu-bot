@@ -4,9 +4,11 @@ const {
     SlashCommandBuilder,
     PermissionFlagsBits,
     ContainerBuilder,
+    SectionBuilder,
     TextDisplayBuilder,
     SeparatorBuilder,
     SeparatorSpacingSize,
+    ThumbnailBuilder,
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle
@@ -52,6 +54,13 @@ const EMOJI_WHAT_HAPPENS = '<:whathappens:1542517668878221342>'; // uploaded emo
 // "Before you start" source image:
 //   https://cdn.discordapp.com/attachments/1534458060721098846/1542508228175204382/stop.PNG
 const EMOJI_BEFORE_YOU_START = '<:beforeyoustart:1542514313384956016>'; // uploaded emoji code
+
+// "Features & Support" title emoji — NEW title, list style. Swap the 📋 for a
+// custom uploaded <:name:id> emoji if you want a branded one here.
+const EMOJI_FEATURES = '📋'; // list emoji for the features title
+
+// Top-of-panel thumbnail GIF shown at the very top/upper side of the embed.
+const PANEL_THUMBNAIL_URL = 'https://cdn.discordapp.com/attachments/1534458060721098846/1542460307273850890/tenor_12.gif?ex=6a91464a&is=6a8ff4ca&hm=6f68ff164cce3f8f96330101bdcd7d70f5c868000bbd628d10d65fb5a7433b16&';
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('backuppanel')
@@ -77,37 +86,59 @@ module.exports = {
 
         const contents = [];
 
-        // Welcome (no heading — opening paragraph).
+        // Thumbnail at the upper side of the panel. A Thumbnail (type 11) can't
+        // live directly inside a Container's component list - it's an accessory
+        // and must be attached to a SectionBuilder via setThumbnailAccessory
+        // (same pattern as handlers/raidV2.js). The ABOUT THIS PANEL heading+
+        // paragraph below ride in the same Section so the GIF renders beside them.
+        contents.push(
+            new SectionBuilder()
+                .setThumbnailAccessory(new ThumbnailBuilder().setURL(PANEL_THUMBNAIL_URL))
+                .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+                    '# ' + EMOJI_WHAT_IS_THIS + ' ABOUT THIS PANEL' + NL + NL +
+                    '> Need assistance? Use this panel to call for backup when you’re outnumbered, being teamed on, or facing a clan raid in a battleground game. Send a request and let your clan know where help is needed.'
+                ))
+                .toJSON()
+        );
+        contents.push(separator());
+
+        // Features & Support
         contents.push(text(
-            '> Welcome to the backup panel. This is where the server calls for help, mobilizes against raiders, or organizes a strike of its own. Built to keep response fast and coordination clean.'
+            '# ' + EMOJI_FEATURES + ' FEATURES & SUPPORT' + NL + NL +
+            '> • **Automatic server links** — No copying or pasting. The bot generates a join link for your current server.' + NL +
+            '> • **Automatic player details** — Your linked Roblox account provides your username and profile information.' + NL +
+            '> • **Automatic backup alerts** — The bot pings clan members to notify them that you need support.' + NL +
+            '>' + NL +
+            '> Discover more features on our website or dashboard.' + NL +
+            '> **Website / Dashboard:** [insert link]' + NL +
+            '> **Support Server:** [insert Discord invite]'
         ));
         contents.push(separator());
 
-        // What is this
+        // Request Rules
         contents.push(text(
-            '# ' + EMOJI_WHAT_IS_THIS + ' What is this' + NL + NL +
-            '> This panel exists for three situations: you\'re currently getting teamed on and need numbers fast, an enemy clan has started raiding your server or territory, or your own clan wants to organize and launch a raid on someone else. One button, and the call goes out.'
+            '# ' + EMOJI_RULES + ' REQUEST RULES' + NL + NL +
+            '> • Only request backup when you actually need assistance. False requests and spam are not allowed.' + NL +
+            '> • Use your own main Roblox account when requesting backup.' + NL +
+            '> • Help other members before requesting support yourself. This system depends on everyone contributing—give help to receive help.'
         ));
         contents.push(separator());
 
-        // Rules
+        // How requests work
         contents.push(text(
-            '# ' + EMOJI_RULES + ' Rules' + NL + NL +
-            '> No spamming requests — one active call at a time per user. No false raid calls or crying wolf to pull people away from what they\'re doing. Repeated misuse results in a warning, then a ban from using this system entirely.'
+            '# ' + EMOJI_WHAT_HAPPENS + ' HOW REQUESTS WORK' + NL + NL +
+            '> When you press **Raid Request**, the bot automatically prepares your server region, server join link, Roblox username, display name, and profile picture.' + NL +
+            '>' + NL +
+            '> These details appear in your backup alert so members can identify who needs assistance and which server to join.'
         ));
         contents.push(separator());
 
-        // What happens when you request
+        // Before calling for backup
         contents.push(text(
-            '# ' + EMOJI_WHAT_HAPPENS + ' What happens when you request' + NL + NL +
-            '> The moment you press request, the bot instantly generates the live Roblox server link. If your Roblox account is already linked, your username is auto-filled into the call so responders know exactly who\'s asking and where to land.'
-        ));
-        contents.push(separator());
-
-        // Before you start
-        contents.push(text(
-            '# ' + EMOJI_BEFORE_YOU_START + ' Before you start' + NL + NL +
-            '> You need to link your Roblox account once before this system will work for you. It\'s a one-time setup — after that, every future call auto-fills your info with zero extra steps.'
+            '# ' + EMOJI_BEFORE_YOU_START + ' BEFORE CALLING FOR BACKUP' + NL + NL +
+            '> First, connect your Roblox account using the **Link** button below. This is a **one-time setup**.' + NL +
+            '>' + NL +
+            '> Once linked, you can request backup without entering your username or pasting server links. You’ll only be asked for the **enemy’s name** and the **enemy clan’s name**—the bot handles the remaining details.'
         ));
         contents.push(separator());
 
