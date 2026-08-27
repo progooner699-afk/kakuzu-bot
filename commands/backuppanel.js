@@ -11,10 +11,14 @@ const {
     MediaGalleryItemBuilder,
     ActionRowBuilder,
     ButtonBuilder,
-    ButtonStyle
+    ButtonStyle,
+    ChannelSelectMenuBuilder,
+    ChannelType,
+    EmbedBuilder
 } = require('discord.js');
 
 const path = require('path');
+const fs = require('fs');
 
 // Message flag required to enable native Components V2 (Separator etc).
 // NOTE: with this flag Discord DISABLES content + embeds, so the whole panel is
@@ -67,16 +71,39 @@ const EMOJI_FEATURES = '📋'; // list emoji for the features title
 // by a full-width MediaGallery component (type 12) as the first component.
 const PANEL_BANNER_FILE = path.join(__dirname, '..', 'assets', 'backup-banner.gif');
 const PANEL_BANNER_NAME = 'backup-banner.gif';
-module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('backuppanel')
-        .setDescription('Post the raid/backup request info panel with action buttons.')
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
-    async execute(interaction) {
-        // Native v2 message building blocks.
-        const text = function (content) {
-            return new TextDisplayBuilder().setContent(content).toJSON(); // type 10
-        };
+
+// The panel is NOT posted by the bot account itself. /backuppanel asks (via an
+// ephemeral channel-select) which channel to post in, then the panel is sent
+// through a webhook named BACKUP_PANEL_WEBHOOK_NAME so it appears under a
+// "dummy profile" instead of the bot.
+const BACKUP_PANEL_WEBHOOK_NAME = 'backuppanel';
+
+// Avatar image for that dummy profile (the red BACKUPPANNEL logo). Drop the
+// image at assets/backuppanel-avatar.png and it is applied to the webhook
+// automatically (on create, or on the first post if the webhook has no avatar
+// yet). If the file is absent the webhook just uses Discord's default avatar.
+const BACKUP_PANEL_AVATAR_FILE = path.join(__dirname, '..', 'assets', 'backuppanel-avatar.png');
+
+// Reads the dummy-profile avatar from disk, or returns null when it is missing.
+function getAvatarBuffer() {
+    try {
+        if (fs.existsSync(BACKUP_PANEL_AVATAR_FILE)) {
+            return fs.readFileSync(BACKUP_PANEL_AVATAR_FILE);
+        }
+    } catch (err) {
+        console.error('Failed to read backup panel avatar:', err.message);
+    }
+    return null;
+}
+
+// Builds the full Components V2 payload for the backup panel (container +
+// banner attachment). Shared by the /backuppanel command flow and the
+// post_backuppanel channel-select handler in events/interactionCreate.js.
+function buildBackupPanelPayload() {
+    // Native v2 message building blocks.
+    const text = function (content) {
+        return new TextDisplayBuilder().setContent(content).toJSON(); // type 10
+    };
         const separator = function () {
             return new SeparatorBuilder() // type 14
                 .setDivider(true)
@@ -168,10 +195,50 @@ module.exports = {
         // ONE message: the banner GIF is attached to this same message and
         // rendered inside the panel by the MediaGallery component above
         // (attachment:// URLs resolve only against files sent with the message).
-        await interaction.reply({
+        return {
             flags: BACKUP_PANEL_V2_FLAGS,
             components: [container],
             files: [{ attachment: PANEL_BANNER_FILE, name: PANEL_BANNER_NAME }]
+        };
+}
+
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setName('backuppanel')
+        .setDescription('Post the raid/backup request info panel with action buttons.')
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    buildBackupPanelPayload,
+    BACKUP_PANEL_WEBHOOK_NAME,
+    BACKUP_PANEL_V2_FLAGS,
+    getBackupPanelAvatarBuffer: getAvatarBuffer,
+    async execute(interaction) {
+        if (!interaction.memberPermissions || !interaction.memberPermissions.has(PermissionFlagsBits.ManageGuild)) {
+            return interaction.reply({
+                content: 'You need the **Manage Server** permission to post the backup panel.',
+                flags: 64
+            });
+        }
+
+        // Ephemeral channel picker — the panel is NOT posted by the bot
+        // account; after the channel is chosen the panel goes out through a
+        // webhook named BACKUP_PANEL_WEBHOOK_NAME (dummy "backuppanel" profile).
+        const channelSelect = new ChannelSelectMenuBuilder()
+            .setCustomId('post_backuppanel')
+            .setPlaceholder('Select the channel to post the backup panel in')
+            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement);
+
+        const embed = new EmbedBuilder()
+            .setTitle('📡 Backup Panel — Choose a Channel')
+            .setDescription(
+                'Pick the channel where the backup panel should be posted.' + NL + NL +
+                'The panel will be sent through a **' + BACKUP_PANEL_WEBHOOK_NAME + '** webhook profile (not the bot account) in the channel you choose.'
+            )
+            .setColor(PANEL_ACCENT_COLOR);
+
+        await interaction.reply({
+            embeds: [embed],
+            components: [new ActionRowBuilder().addComponents(channelSelect)],
+            flags: 64
         });
     }
 };

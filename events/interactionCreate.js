@@ -887,6 +887,75 @@ module.exports = {
                 }
             });
         }
+        // Handle backup panel channel selection — post the panel through a
+        // webhook named "backuppanel" (dummy profile with the branded avatar)
+        // instead of the bot account itself.
+        if (interaction.customId === "post_backuppanel") {
+            const selectedChannel = interaction.channels.first();
+
+            if (!selectedChannel) {
+                return interaction.reply({
+                    content: "Please select a valid channel.",
+                    flags: 64
+                }).catch(() => null);
+            }
+
+            if (!interaction.memberPermissions || !interaction.memberPermissions.has(PermissionsBitField.Flags.ManageGuild)) {
+                return interaction.reply({
+                    content: "You need the **Manage Server** permission to post the backup panel.",
+                    flags: 64
+                }).catch(() => null);
+            }
+
+            await interaction.reply({
+                content: `Posting the backup panel in <#${selectedChannel.id}>…`,
+                flags: 64
+            }).catch(() => null);
+
+            try {
+                const backupPanel = require("../commands/backuppanel");
+                const targetChannel = await interaction.client.channels.fetch(selectedChannel.id);
+                if (!targetChannel || !targetChannel.isTextBased()) {
+                    throw new Error("The selected channel is not a text channel.");
+                }
+
+                // Find or create the dummy-profile webhook in the target channel.
+                const avatarBuffer = backupPanel.getBackupPanelAvatarBuffer();
+                const webhooks = await targetChannel.fetchWebhooks();
+                let webhook = webhooks.find(w => w.name === backupPanel.BACKUP_PANEL_WEBHOOK_NAME);
+                if (!webhook) {
+                    webhook = await targetChannel.createWebhook({
+                        name: backupPanel.BACKUP_PANEL_WEBHOOK_NAME,
+                        avatar: avatarBuffer || undefined,
+                        reason: `Backup panel dummy profile (created by ${interaction.user.tag})`
+                    });
+                } else if (!webhook.avatarURL() && avatarBuffer) {
+                    // Existing webhook still has Discord's default avatar —
+                    // apply the branded avatar once.
+                    await webhook.edit({ avatar: avatarBuffer }).catch(() => null);
+                }
+
+                const payload = backupPanel.buildBackupPanelPayload();
+                await webhook.send({
+                    ...payload,
+                    username: backupPanel.BACKUP_PANEL_WEBHOOK_NAME
+                });
+
+                await interaction.editReply({
+                    content: `✅ Backup panel posted in <#${selectedChannel.id}> via the **${backupPanel.BACKUP_PANEL_WEBHOOK_NAME}** profile.`
+                }).catch(() => null);
+            } catch (err) {
+                console.error("Failed to post backup panel:", err);
+                const errText = '❌ Failed to post the backup panel: `' +
+                    String((err && err.message) || err).slice(0, 300) + '`';
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.editReply({ content: errText }).catch(() => null);
+                } else {
+                    await interaction.reply({ content: errText, flags: 64 }).catch(() => null);
+                }
+            }
+            return;
+        }
 
         // Handle link roblox button click - open modal
         if (interaction.customId === "link_roblox") {
