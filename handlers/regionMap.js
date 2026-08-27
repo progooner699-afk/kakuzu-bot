@@ -1,93 +1,17 @@
 /**
- * regionMap.js — Manual Roblox IP / data-center region mapping with an
- * ip-api.com geolocation fallback.
+ * regionMap.js — Roblox server region detection using ONLY live geo services:
+ *   • resolveRoValraRegion(machineAddress) — RoValra (3rd party)
+ *   • geolocateIp(publicAddress)          — ip-api.com
+ * If BOTH fail to resolve a region, the caller reports 'Unknown'.
+ *
+ * No manual IP / data-center tables are used — every region comes from a
+ * live third-party geolocation lookup, so results always reflect the server's
+ * actual geographic location.
  *
  * The region codes returned here match the bot's normalized region set used
  * throughout the codebase (see normalizeRegionInput / normalizeRegion):
  *   NA, SA, EU, ASIA, AUST, OCEANIA, MIDDLE_EAST, AFRICA
- *
- * Order of precedence in detectGameAndRegion:
- *   1. resolveRoValraRegion(ipResult.machineAddress)    — RoValra (3rd party)
- *   2. resolveRegionFromIp(ipResult.publicAddress)     — manual IP table
- *   3. resolveRegionFromDataCenter(ipResult.dataCenterId) — manual DC table
- *   4. geolocateIp(ipResult.publicAddress)             — live ip-api.com
- *   5. "DC-<id>" / "Unknown"                           — last resort
- *
- * NOTE: Only data actually confirmed through live testing / community-sourced
- * Roblox hosting ranges (128.116.x.x) are included. Unverified prefixes are
- * deliberately omitted so they fall through to geolocateIp.
  */
-
-// ---- DataCenterId → region code -----------------------------------------
-// Roblox joinScript.DataCenterId values confirmed through live testing.
-// 26120 was verified 3× from an Asia-based account → ASIA.
-// Add new IDs here only after they've been confirmed through real observation.
-const DATA_CENTER_REGIONS = {
-  26120: 'ASIA'
-};
-
-// Community-sourced Roblox public server IP prefixes → region code.
-// These are the real 128.116.x.x hosting ranges observed from the bot.
-const REGION_RANGES = [
-  { prefix: '128.116.115.', region: 'NA' },
-  { prefix: '128.116.116.', region: 'NA' },
-  { prefix: '128.116.1.', region: 'NA' },
-  { prefix: '128.116.63.', region: 'NA' },
-  { prefix: '128.116.95.', region: 'NA' },
-  { prefix: '128.116.101.', region: 'NA' },
-  { prefix: '128.116.48.', region: 'NA' },
-  { prefix: '128.116.22.', region: 'NA' },
-  { prefix: '128.116.99.', region: 'NA' },
-  { prefix: '128.116.45.', region: 'NA' },
-  { prefix: '128.116.127.', region: 'NA' },
-  { prefix: '128.116.102.', region: 'NA' },
-  { prefix: '128.116.53.', region: 'NA' },
-  { prefix: '128.116.32.', region: 'NA' },
-  { prefix: '128.116.33.', region: 'EU' },
-  { prefix: '128.116.119.', region: 'EU' },
-  { prefix: '128.116.21.', region: 'EU' },
-  { prefix: '128.116.4.', region: 'EU' },
-  { prefix: '128.116.122.', region: 'EU' },
-  { prefix: '128.116.5.', region: 'EU' },
-  { prefix: '128.116.44.', region: 'EU' },
-  { prefix: '128.116.123.', region: 'EU' },
-  { prefix: '128.116.31.', region: 'EU' },
-  { prefix: '128.116.124.', region: 'EU' },
-  { prefix: '128.116.104.', region: 'ASIA' },
-  { prefix: '128.116.55.', region: 'ASIA' },
-  { prefix: '128.116.120.', region: 'ASIA' },
-  { prefix: '128.116.50.', region: 'ASIA' },
-  { prefix: '128.116.97.', region: 'ASIA' },
-  { prefix: '128.116.51.', region: 'AUST' }
-];
-
-/**
- * Resolves a public Roblox server IP address to a normalized region code using
- * the community-sourced prefix table above. Returns null if the IP is private
- * or not in the table so the caller can fall through to geolocation.
- * @param {string|number} ip - the public-facing IP (UdmuxEndpoints[0].Address)
- * @returns {string|null} normalized region code, or null if unresolved
- */
-function resolveRegionFromIp(ip) {
-  if (!ip || ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('127.')) return null;
-  const match = REGION_RANGES.find(r => ip.startsWith(r.prefix));
-  return match ? match.region : null;
-}
-
-/**
- * Resolves a Roblox dataCenterId to a normalized region code using the manual
- * table above. Returns null if the ID isn't in the table so the caller falls
- * through to geolocation.
- * @param {string|number} dataCenterId - Roblox joinScript.DataCenterId
- * @returns {string|null} normalized region code, or null if unknown
- */
-function resolveRegionFromDataCenter(dataCenterId) {
-  if (dataCenterId === undefined || dataCenterId === null || dataCenterId === '') return null;
-  const key = String(dataCenterId).trim();
-  if (!key) return null;
-  return DATA_CENTER_REGIONS[key] || null;
-}
-
 /**
  * Asynchronous fallback that queries ip-api.com for the geographic location
  * of a public IP. Returns a `{ label, countryCode, ... }` object on success,
@@ -259,4 +183,4 @@ async function resolveRoValraRegion(machineAddress) {
   }
 }
 
-module.exports = { resolveRegionFromIp, resolveRegionFromDataCenter, geolocateIp, resolveRoValraRegion };
+module.exports = { geolocateIp, resolveRoValraRegion };

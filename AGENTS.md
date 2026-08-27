@@ -64,7 +64,10 @@
 * **Detector:** `robloxApi.detectGameAndRegion` now also returns `countryCode`
   (ISO-3166 alpha-2, e.g. `SG`) alongside the broad `region` (e.g. `ASIA`);
   `regionMap.geolocateIp` returns `{ label, countryCode, ... }` and
-  `resolveRoValraRegion` returns `{ region, countryCode }` best-effort.
+  `resolveRoValraRegion` returns `{ region, countryCode }` best-effort. Region
+  resolution uses **only** these two live services (RoValra first, then
+  ip-api.com); if both fail the region is `Unknown` — no manual IP / data-center
+  tables are consulted.
 * **Transition:** `/setregionping` is intentionally UNTOUCHED for now (it still
   writes `settings.json`). A later stage removes it once the
   dashboard→Postgres→bot path is verified.

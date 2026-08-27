@@ -234,7 +234,7 @@ async function detectGameAndRegion(userId) {
             const { getServerIp } = require('./robloxAuth');
             const ipResult = await getServerIp(presence.placeId, presence.serverId);
             if (ipResult && ipResult.machineAddress) {
-                const { resolveRoValraRegion, resolveRegionFromIp, resolveRegionFromDataCenter, geolocateIp } = require('./regionMap');
+                const { resolveRoValraRegion, geolocateIp } = require('./regionMap');
                 let resolved = null;
                 let source = null;
                 const rovalra = await resolveRoValraRegion(ipResult.machineAddress);
@@ -243,21 +243,13 @@ async function detectGameAndRegion(userId) {
                     detectedCountryCode = rovalra.countryCode || null;
                     source = 'RoValra';
                 }
-                if (!resolved) {
-                    resolved = resolveRegionFromIp(ipResult.publicAddress);
-                    if (resolved) { source = 'manual-ip'; }
-                }
-                if (!resolved) {
-                    resolved = resolveRegionFromDataCenter(ipResult.dataCenterId);
-                    if (resolved) { source = 'datacenter'; }
-                }
+
                 if (!resolved && ipResult.publicAddress) {
                     const geo = await geolocateIp(ipResult.publicAddress);
                     if (geo) { resolved = geo.label; detectedCountryCode = geo.countryCode || null; source = 'ip-api'; }
                 }
-                // Optional enrichment: even when the region came from a
-                // non-geolocation source (manual table / datacenter / RoValra
-                // without an ISO code), resolve the hosting server's ISO
+                // Optional enrichment: even when RoValra resolved the region
+                // without an ISO code, resolve the hosting server's ISO
                 // country code so the dashboard's country ping can fire.
                 // Never blocks a raid if this best-effort lookup fails.
                 if (!detectedCountryCode && ipResult.publicAddress) {
@@ -266,7 +258,7 @@ async function detectGameAndRegion(userId) {
                         if (geo2 && geo2.countryCode) detectedCountryCode = geo2.countryCode;
                     } catch (err) { /* optional - ignore */ }
                 }
-                detectedRegion = resolved || (ipResult.dataCenterId ? `DC-${ipResult.dataCenterId}` : 'Unknown');
+                detectedRegion = resolved || 'Unknown'; // both live services failed
                 console.log('Resolved region:', detectedRegion, 'country:', detectedCountryCode || '-', '(source:', source || 'unknown', ')');
             }
         } catch (err) {
