@@ -1,7 +1,9 @@
 /**
- * regionMap.js — Roblox server region detection using ONLY live geo services:
- *   • resolveRoValraRegion(machineAddress) — RoValra (3rd party)
- *   • geolocateIp(publicAddress)          — ip-api.com
+ * regionMap.js — Roblox server region detection using ONLY live geo services,
+ * tried in this exact order:
+ *   1. resolveRoValraDatacenterRegion(dataCenterId) — RoValra's public Roblox
+ *      datacenter list (exact country per datacenter, no IP guessing)
+ *   2. geolocateIp(publicAddress || machineAddress) — ip-api.com fallback
  * If BOTH fail to resolve a region, the caller reports 'Unknown'.
  *
  * No manual IP / data-center tables are used — every region comes from a
@@ -23,8 +25,13 @@
  */
 async function geolocateIp(ip) {
   if (!ip) return null;
+  // Hard timeout so a hanging lookup can never stall the raid request.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GEO_API_TIMEOUT_MS);
   try {
-    const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,countryCode,regionName,city`);
+    const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,countryCode,regionName,city`, {
+      signal: controller.signal
+    });
     const data = await res.json();
     if (data.status === 'success') {
       return {
@@ -39,6 +46,8 @@ async function geolocateIp(ip) {
   } catch (err) {
     console.error('geolocateIp failed:', err);
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -131,51 +140,84 @@ function normalizeCountryToRegion(country) {
   return COUNTRY_TO_REGION[value] || null;
 }
 
-// ---- RoValra geolocation (server region from machineAddress) ----------------
-// NOTE: apis.rovalra.com is a THIRD-PARTY / developer-controlled service, not
-// an official Roblox API. The gamejoin.roblox.com endpoint it depends on is an
-// existing authenticated Roblox endpoint; using it with a .ROBLOSECURITY cookie
-// may have policy / Terms-of-Service considerations. This function only makes a
-// single, short, passive geolocation lookup keyed off the game server's
-// machineAddress. It never stores, logs, or displays the raw IP.
-const ROVALRA_ENDPOINT = 'https://apis.rovalra.com/v1/geolocation';
-const ROVALRA_TIMEOUT_MS = 3000;
+// ---- ISO-3166 alpha-2 country CODE → normalized region --------------------
+// RoValra's datacenter list returns short ISO codes ('IN', 'US', ...) while the
+// name map above uses full country names — this covers both.
+const COUNTRY_CODE_TO_REGION = {
+  // Asia
+  SG: 'ASIA', JP: 'ASIA', IN: 'ASIA', CN: 'ASIA', KR: 'ASIA', TW: 'ASIA',
+  HK: 'ASIA', TH: 'ASIA', MY: 'ASIA', ID: 'ASIA', PH: 'ASIA', VN: 'ASIA',
+  PK: 'ASIA', BD: 'ASIA', LK: 'ASIA',
+  // North America
+  US: 'NA', CA: 'NA', MX: 'NA',
+  // Europe
+  GB: 'EU', UK: 'EU', DE: 'EU', FR: 'EU', NL: 'EU', IT: 'EU', ES: 'EU',
+  PL: 'EU', SE: 'EU', FI: 'EU', DK: 'EU', NO: 'EU', IE: 'EU', BE: 'EU',
+  PT: 'EU', CH: 'EU', AT: 'EU', CZ: 'EU', RO: 'EU', GR: 'EU',
+  // South America
+  BR: 'SA', AR: 'SA', CL: 'SA', PE: 'SA', CO: 'SA', VE: 'SA',
+  // Australia / Oceania
+  AU: 'AUST', NZ: 'OCEANIA',
+  // Middle East
+  SA: 'MIDDLE_EAST', AE: 'MIDDLE_EAST', QA: 'MIDDLE_EAST', KW: 'MIDDLE_EAST',
+  IL: 'MIDDLE_EAST', TR: 'MIDDLE_EAST',
+  // Africa
+  ZA: 'AFRICA', NG: 'AFRICA', KE: 'AFRICA', EG: 'AFRICA', MA: 'AFRICA'
+};
 
 /**
- * Resolves a Roblox game server machineAddress to a NORMALIZED region code via
- * the third-party RoValra service. Returns null on any failure (non-200,
- * timeout, malformed JSON, unmapped country) so callers fall through.
- * Only the machineAddress is sent; raw IPs are never logged or stored.
- * @param {string} machineAddress - Roblox game server connection IP
- * @returns {Promise<{region: string|null, countryCode: string|null}|null>}
- *   resolved region object, or null
+ * Translates an ISO-3166 alpha-2 country code (e.g. 'IN') into a
+ * bot-normalized region code. Returns null when the code is unknown.
+ * @param {string} code - ISO-3166 alpha-2 country code
+ * @returns {string|null} normalized region code, or null if unmapped
  */
-async function resolveRoValraRegion(machineAddress) {
-  if (!machineAddress) return null;
-  const host = String(machineAddress).trim();
-  if (!host) return null;
+function normalizeCountryCodeToRegion(code) {
+  if (!code) return null;
+  return COUNTRY_CODE_TO_REGION[String(code).trim().toUpperCase()] || null;
+}
 
-  // One-shot request with a hard timeout — never retried.
+// ---- RoValra geolocation (Roblox datacenter list) --------------------------
+// NOTE: apis.rovalra.com is a THIRD-PARTY / developer-controlled service, not
+// an official Roblox API. RoValra (the open-source Roblox extension) exposes a
+// PUBLIC datacenter list that maps every Roblox dataCenterId to its physical
+// location ({ city, region, country (ISO-2), country_name, latLong }). The
+// bot's gamejoin API already returns the server's dataCenterId, so RoValra
+// resolves the server's country EXACTLY — no IP guessing involved.
+// The old invented `GET /v1/geolocation?ip=` endpoint returned 404 for every
+// IP and never worked.
+const ROVALRA_DC_LIST_ENDPOINT = 'https://apis.rovalra.com/v1/datacenters/list';
+const ROVALRA_TIMEOUT_MS = 8000;
+const ROVALRA_CACHE_TTL_MS = 60 * 60 * 1000; // datacenter list is stable — 1h cache
+const GEO_API_TIMEOUT_MS = 4000;
+
+// In-memory cache of dataCenterId -> location { city, region, country, country_name }.
+let rovalraDcCache = { map: null, at: 0 };
+
+async function fetchRoValraDatacenterMap() {
+  if (rovalraDcCache.map && Date.now() - rovalraDcCache.at < ROVALRA_CACHE_TTL_MS) {
+    return rovalraDcCache.map;
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ROVALRA_TIMEOUT_MS);
   try {
-    const res = await fetch(`${ROVALRA_ENDPOINT}?ip=${encodeURIComponent(host)}`, {
-      signal: controller.signal
-    });
+    const res = await fetch(ROVALRA_DC_LIST_ENDPOINT, { signal: controller.signal });
     if (!res.ok) return null;
-    let data;
+    let list;
     try {
-      data = await res.json();
+      list = await res.json();
     } catch {
       return null; // malformed JSON
     }
-    // RoValra may return the country at the top level or nested (name + ISO code).
-    const country = data?.country || data?.data?.country || null;
-    const countryCode = data?.countryCode || data?.data?.countryCode
-      || data?.country_code || data?.data?.country_code || null;
-    const region = normalizeCountryToRegion(country);
-    if (!region) return null;
-    return { region, countryCode: countryCode || null };
+    if (!Array.isArray(list)) return null;
+    const map = new Map();
+    for (const entry of list) {
+      if (!entry || !Array.isArray(entry.dataCenterIds) || !entry.location) continue;
+      for (const id of entry.dataCenterIds) {
+        map.set(Number(id), entry.location);
+      }
+    }
+    rovalraDcCache = { map, at: Date.now() };
+    return map;
   } catch {
     return null; // network error / timeout — never crash the raid request
   } finally {
@@ -183,4 +225,41 @@ async function resolveRoValraRegion(machineAddress) {
   }
 }
 
-module.exports = { geolocateIp, resolveRoValraRegion };
+/**
+ * Resolves a Roblox game server's dataCenterId to a NORMALIZED region code +
+ * ISO country code via the RoValra datacenter list. Returns null on any
+ * failure (non-200, timeout, unknown datacenter) so the caller falls through
+ * to ip-api.com. No raw IPs are ever sent to RoValra — only the datacenter ID.
+ * @param {string|number} dataCenterId - DataCenterId from the gamejoin joinScript
+ * @returns {Promise<{region: string|null, countryCode: string|null, countryName: string|null, city: string|null, label: string|null}|null>}
+ */
+async function resolveRoValraDatacenterRegion(dataCenterId) {
+  if (dataCenterId == null) return null;
+  const map = await fetchRoValraDatacenterMap();
+  if (!map) return null;
+  const location = map.get(Number(dataCenterId));
+  if (!location) return null;
+
+  const countryCode = location.country || null;
+  const countryName = location.country_name || null;
+  const city = location.city || null;
+  const region = normalizeCountryToRegion(countryName)
+    || normalizeCountryCodeToRegion(countryCode)
+    || null;
+  // Human-readable label for embeds: "Mumbai, India" style.
+  const labelParts = [city, countryName].filter(Boolean);
+  return {
+    region,
+    countryCode,
+    countryName,
+    city,
+    label: labelParts.length ? labelParts.join(', ') : null
+  };
+}
+
+module.exports = {
+  geolocateIp,
+  normalizeCountryToRegion,
+  normalizeCountryCodeToRegion,
+  resolveRoValraDatacenterRegion
+};

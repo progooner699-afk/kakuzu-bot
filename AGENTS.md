@@ -62,12 +62,20 @@
   `Country` name (from `raidStateManager.countryCodeToName`, e.g. `IN` → `India`)
   directly under `Region`, or `Unknown` when undetected.
 * **Detector:** `robloxApi.detectGameAndRegion` now also returns `countryCode`
-  (ISO-3166 alpha-2, e.g. `SG`) alongside the broad `region` (e.g. `ASIA`);
-  `regionMap.geolocateIp` returns `{ label, countryCode, ... }` and
-  `resolveRoValraRegion` returns `{ region, countryCode }` best-effort. Region
-  resolution uses **only** these two live services (RoValra first, then
-  ip-api.com); if both fail the region is `Unknown` — no manual IP / data-center
-  tables are consulted.
+  (ISO-3166 alpha-2, e.g. `SG`) alongside the broad `region` (e.g. `ASIA`),
+  plus `regionLabel` (human-readable "City, Country") and `regionSource`
+  ('RoValra' | 'ip-api'). Region/country resolution is a strict two-step
+  fallback chain in `handlers/regionMap.js`:
+  1. **RoValra FIRST** — `resolveRoValraDatacenterRegion(dataCenterId)` fetches
+     RoValra's public Roblox datacenter list
+     (`https://apis.rovalra.com/v1/datacenters/list`, cached 1h, 8s timeout)
+     and looks up the gamejoin API's `DataCenterId` → exact
+     `{ city, region, country (ISO-2), country_name }`. No IP guessing.
+  2. **ip-api.com FALLBACK** — `geolocateIp(publicAddress || machineAddress)`
+     (4s timeout) only when RoValra has no hit / fails; the country name or
+     ISO code is normalized to the bot's region set.
+  If both fail the region is `Unknown`. The old invented
+  `GET /v1/geolocation?ip=` endpoint returned 404 for every IP and was removed.
 * **Presence AUTO-JOIN (`handlers/autoJoinPresence.js`):** the 15s loop in
   `events/ready.js` also runs `pollAutoJoin(client, guildId)` per guild. It
   reads every LINKED (verified) user via `verificationDb.getAllVerifiedUsers`,

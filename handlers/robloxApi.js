@@ -212,6 +212,8 @@ async function detectGameAndRegion(userId) {
     let detectedGame = 'unknown';
     let detectedRegion = 'NA';
     let detectedCountryCode = null;
+    let regionLabel = null;   // human-readable "City, Country" of the server
+    let regionSource = null;  // 'RoValra' | 'ip-api' | null
 
     if (gameName.includes('strongest battlegrounds') || gameName.includes('tsb')) {
         detectedGame = 'tsb';
@@ -233,33 +235,44 @@ async function detectGameAndRegion(userId) {
         try {
             const { getServerIp } = require('./robloxAuth');
             const ipResult = await getServerIp(presence.placeId, presence.serverId);
-            if (ipResult && ipResult.machineAddress) {
-                const { resolveRoValraRegion, geolocateIp } = require('./regionMap');
-                let resolved = null;
+            if (ipResult && (ipResult.machineAddress || ipResult.dataCenterId)) {
+                const { resolveRoValraDatacenterRegion, geolocateIp, normalizeCountryToRegion, normalizeCountryCodeToRegion } = require('./regionMap');
+                let resolved = null;      // normalized region code (or raw label)
+                let resolvedLabel = null; // human-readable "City, Country"
                 let source = null;
-                const rovalra = await resolveRoValraRegion(ipResult.machineAddress);
-                if (rovalra && rovalra.region) {
-                    resolved = rovalra.region;
-                    detectedCountryCode = rovalra.countryCode || null;
-                    source = 'RoValra';
+
+                // 1) RoValra FIRST — its public datacenter list gives the EXACT
+                //    country for the server's dataCenterId (no IP guessing).
+                try {
+                    const rovalra = await resolveRoValraDatacenterRegion(ipResult.dataCenterId);
+                    if (rovalra && (rovalra.region || rovalra.countryCode)) {
+                        resolved = rovalra.region || null;
+                        detectedCountryCode = rovalra.countryCode || null;
+                        resolvedLabel = rovalra.label || null;
+                        source = 'RoValra';
+                    }
+                } catch (err) { /* fall through to ip-api */ }
+
+                // 2) ip-api.com fallback when RoValra had no hit / failed.
+                if (!resolved && (ipResult.publicAddress || ipResult.machineAddress)) {
+                    try {
+                        const geo = await geolocateIp(ipResult.publicAddress || ipResult.machineAddress);
+                        if (geo) {
+                            resolved = normalizeCountryToRegion(geo.country)
+                                || normalizeCountryCodeToRegion(geo.countryCode)
+                                || geo.label; // last resort: raw "City, Region, Country" label
+                            detectedCountryCode = geo.countryCode || null;
+                            resolvedLabel = geo.label;
+                            source = 'ip-api';
+                        }
+                    } catch (err) { /* both failed -> 'Unknown' below */ }
                 }
 
-                if (!resolved && ipResult.publicAddress) {
-                    const geo = await geolocateIp(ipResult.publicAddress);
-                    if (geo) { resolved = geo.label; detectedCountryCode = geo.countryCode || null; source = 'ip-api'; }
-                }
-                // Optional enrichment: even when RoValra resolved the region
-                // without an ISO code, resolve the hosting server's ISO
-                // country code so the dashboard's country ping can fire.
-                // Never blocks a raid if this best-effort lookup fails.
-                if (!detectedCountryCode && ipResult.publicAddress) {
-                    try {
-                        const geo2 = await geolocateIp(ipResult.publicAddress);
-                        if (geo2 && geo2.countryCode) detectedCountryCode = geo2.countryCode;
-                    } catch (err) { /* optional - ignore */ }
-                }
                 detectedRegion = resolved || 'Unknown'; // both live services failed
-                console.log('Resolved region:', detectedRegion, 'country:', detectedCountryCode || '-', '(source:', source || 'unknown', ')');
+                regionLabel = resolvedLabel;
+                regionSource = source;
+                console.log('Resolved region:', detectedRegion, 'country:', detectedCountryCode || '-',
+                    '(source:', source || 'unknown', resolvedLabel ? '| ' + resolvedLabel : '', ')');
             }
         } catch (err) {
             console.error('gamejoin region lookup failed:', err);
@@ -300,6 +313,8 @@ async function detectGameAndRegion(userId) {
         success: true,
         game: detectedGame,
         region: detectedRegion,
+        regionLabel: regionLabel || null,
+        regionSource: regionSource || null,
         countryCode: detectedCountryCode || null,
         serverLink,
         gameName: presence.gameName,
