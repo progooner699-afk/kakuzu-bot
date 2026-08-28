@@ -199,10 +199,12 @@ async function buildRaidAlertPayload(raid, buttons) {
     sections.push(text('### 📝 DESCRIPTION' + NL10 + NL10 + '```' + NL10 + reasonText + NL10 + NL10 + '```'));
 
     // --- Section 5: live helpers (quote-bar'd @user — ⏱ time rows) ---
-    if (helperCount > 0) {
-        const liveHelpersList = raid.helpers.map(formatLiveHelperRow).join(NL10);
-        sections.push(text('### 👥 LIVE HELPERS (' + helperCount + ' / ' + (raid.helperLimit || 0) + ')' + NL10 + NL10 + liveHelpersList));
-    }
+    // ALWAYS emitted, even at 0 helpers, so the section never vanishes from the
+    // alert — the empty state shows an explicit placeholder row instead.
+    const liveHelpersList = helperCount > 0
+        ? raid.helpers.map(formatLiveHelperRow).join(NL10)
+        : '> • None yet — be the first to join!';
+    sections.push(text('### 👥 LIVE HELPERS (' + helperCount + ' / ' + (raid.helperLimit || 0) + ')' + NL10 + NL10 + liveHelpersList));
 
     // Every section/title block is followed by a native V2 Separator (type 14).
     // Because the buttons row is appended after this loop, it too is always

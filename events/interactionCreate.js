@@ -628,7 +628,10 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
                 const cleanClosedRow = createRaidButtons(raid, interaction.member);
                 if (raid.alertFormat === 'v2') {
                     const payload = await raidV2.buildRaidAlertPayload(raid, cleanClosedRow);
-                    await baseAlertMsg.edit({ components: payload.components }).catch(() => null);
+                    // The IS_COMPONENTS_V2 flag must be kept on every edit of a
+                    // V2 message, otherwise Discord rejects the components payload.
+                    await baseAlertMsg.edit({ flags: raidV2.RAID_ALERT_V2_FLAGS, components: payload.components })
+                        .catch((err) => console.warn('[raid alert] V2 close edit failed:', (err && err.message) || err));
                 } else {
                     await baseAlertMsg.edit({ embeds: updatedAlertEmbeds, components: [cleanClosedRow] }).catch(() => null);
                 }
@@ -1290,7 +1293,9 @@ module.exports = {
                 if (message) {
                     if (updated.alertFormat === 'v2') {
                         const updatedPayload = await raidV2.buildRaidAlertPayload(updated, row);
-                        await message.edit({ components: updatedPayload.components }).catch(() => null);
+                        // Keep the IS_COMPONENTS_V2 flag on edit + log failures.
+                        await message.edit({ flags: raidV2.RAID_ALERT_V2_FLAGS, components: updatedPayload.components })
+                            .catch((err) => console.warn('[raid alert] V2 leave edit failed:', (err && err.message) || err));
                     } else {
                         await message.edit({ embeds: embeds, components: [row] }).catch(() => null);
                     }
@@ -1472,7 +1477,10 @@ module.exports = {
                 if (message) {
                     if (updated.alertFormat === 'v2') {
                         const updatedPayload = await raidV2.buildRaidAlertPayload(updated, row);
-                        await message.edit({ components: updatedPayload.components }).catch(() => null);
+                        // Keep the IS_COMPONENTS_V2 flag on edit + log failures so a
+                        // rejected LIVE HELPERS update is visible in the logs.
+                        await message.edit({ flags: raidV2.RAID_ALERT_V2_FLAGS, components: updatedPayload.components })
+                            .catch((err) => console.warn('[raid alert] V2 accept edit failed:', (err && err.message) || err));
                     } else {
                         await message.edit({ embeds: embeds, components: [row] }).catch(() => null);
                     }

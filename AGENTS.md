@@ -162,6 +162,12 @@ Refactored the linking → request → join → close loop per the spec:
      raid record (`raidV2.markAlertV2`); all later edits (accept / leave /
      close / outcome) branch on that flag and **edit `components` only** (no
      embeds), while historically posted alerts keep using the embed path.
+     Every V2 edit **must pass `flags: raidV2.RAID_ALERT_V2_FLAGS`** (the
+     IS_COMPONENTS_V2 flag must be kept on edit) and logs failures via
+     `console.warn('[raid alert] V2 ... edit failed')` instead of a silent
+     catch. The `👥 LIVE HELPERS` section is **always rendered** (even at
+     0 helpers, showing `> • None yet — be the first to join!`) so the
+     section never disappears from the alert.
    * `[ ↗️ JOIN SERVER ]` — `ButtonStyle.Link` (grey) to an https Roblox join URL
      (`https://www.roblox.com/games/start?placeId=...` — Discord Link buttons
      reject `roblox://` schemes, which would fail the whole alert), built by
