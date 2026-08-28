@@ -276,6 +276,27 @@ async function directLink(userId, robloxData, guildId) {
     return true;
 }
 
+/**
+ * Returns every LINKED (verified) user in the guild's verification DB.
+ * Used by the presence-based auto-join engine (handlers/autoJoinPresence.js)
+ * to know which Roblox accounts to watch. Rows: { userId, roblox_username,
+ * roblox_display_name, roblox_user_id, roblox_avatar_url }.
+ */
+async function getAllVerifiedUsers(guildId) {
+    const db = await getDb(guildId);
+    const stmt = db.prepare(`
+        SELECT userId, roblox_username, roblox_display_name, roblox_user_id, roblox_avatar_url
+        FROM verifications
+        WHERE is_verified = 1 AND roblox_user_id IS NOT NULL
+    `);
+    const rows = [];
+    while (stmt.step()) {
+        rows.push(stmt.getAsObject());
+    }
+    stmt.free();
+    return rows;
+}
+
 module.exports = {
     isUserVerified,
     getVerificationData,
@@ -284,5 +305,6 @@ module.exports = {
     rejectVerification,
     setVerificationLogMessage,
     getPendingVerifications,
-    directLink
+    directLink,
+    getAllVerifiedUsers
 };

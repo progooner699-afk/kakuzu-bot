@@ -544,9 +544,12 @@ async function pollHelperPresences(client, guildId) {
             const info = helperMap.get(String(user.userId));
             if (!info) continue;
             const helper = info.helper;
-            if (user.userPresenceType === 'InGame' && !helper.lastSeenTime) {
+            // Roblox presence API returns INTEGERS: 0 Offline, 1 Online,
+            // 2 InGame, 3 InStudio, 4 Invisible. (The old string 'InGame'
+            // comparison never matched, so time tracking never fired.)
+            if (user.userPresenceType === 2 && !helper.lastSeenTime) {
                 helper.lastSeenTime = Date.now();
-            } else if (user.userPresenceType !== 'InGame' && helper.lastSeenTime) {
+            } else if (user.userPresenceType !== 2 && helper.lastSeenTime) {
                 const elapsed = Math.floor((Date.now() - helper.lastSeenTime) / 1000);
                 helper.timeSpentSeconds = (helper.timeSpentSeconds || 0) + elapsed;
                 helper.lastSeenTime = null;

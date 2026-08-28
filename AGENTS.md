@@ -68,6 +68,24 @@
   resolution uses **only** these two live services (RoValra first, then
   ip-api.com); if both fail the region is `Unknown` — no manual IP / data-center
   tables are consulted.
+* **Presence AUTO-JOIN (`handlers/autoJoinPresence.js`):** the 15s loop in
+  `events/ready.js` also runs `pollAutoJoin(client, guildId)` per guild. It
+  reads every LINKED (verified) user via `verificationDb.getAllVerifiedUsers`,
+  polls the Roblox Presence API (needs `ROBLOX_API_KEY`; no-ops without it),
+  and any linked user whose presence is `InGame` (`userPresenceType === 2`)
+  in the SAME experience (`placeId` match) as an OPEN raid is auto-added via
+  `raidStateManager.addHelper` and the alert message is re-rendered
+  (`updateAlertMessage`) so the LIVE HELPERS section updates with no button
+  click. Users already helping/requesting are excluded. NOTE: presence only
+  exposes `placeId` (not the server job id), so matching is per-experience.
+  `pollHelperPresences` time-tracking was fixed to compare `userPresenceType`
+  against the integer `2` (the old `'InGame'` string comparison never matched).
+* **Join modal hardening:** the `raid_acceptmodal_` handler now defers the
+  interaction BEFORE the Roblox validation + sql.js writes (3s Discord timeout
+  used to silently kill the flow), wraps the flow in try/catch with a visible
+  ephemeral error, and uses `editReply` throughout. `createRaidButtons` is
+  exported from `events/interactionCreate.js` for reuse by the auto-join
+  alert re-render.
 * **Transition:** `/setregionping` is intentionally UNTOUCHED for now (it still
   writes `settings.json`). A later stage removes it once the
   dashboard→Postgres→bot path is verified.

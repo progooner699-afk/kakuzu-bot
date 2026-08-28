@@ -1,5 +1,6 @@
 const { registerGuildCommands } = require('../commands/deploy-commands');
 const raidStateManager = require('../handlers/raidStateManager');
+const autoJoinPresence = require('../handlers/autoJoinPresence');
 
 /** How often (ms) to poll Roblox presence for active raid helpers. */
 const PRESENCE_POLL_INTERVAL = 15 * 1000; // 15 seconds
@@ -75,7 +76,13 @@ module.exports = {
         setInterval(async () => {
             try {
                 const currentGuilds = [...client.guilds.cache.values()];
-                await Promise.allSettled(currentGuilds.map(g => raidStateManager.pollHelperPresences(client, g.id)));
+                await Promise.allSettled(currentGuilds.flatMap(g => [
+                    // Helper time-tracking (presence deltas for existing helpers).
+                    raidStateManager.pollHelperPresences(client, g.id),
+                    // Presence-based AUTO-JOIN: linked users who are InGame in an
+                    // open raid's experience are added to the LIVE HELPERS list.
+                    autoJoinPresence.pollAutoJoin(client, g.id)
+                ]));
             } catch (error) {
                 console.warn('Presence polling loop error:', error?.message || error);
             }

@@ -729,6 +729,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
 
 module.exports = {
     name: "interactionCreate",
+    createRaidButtons,
     async execute(interaction) {
         if (interaction.isChatInputCommand()) {
             const command = interaction.client.commands.get(interaction.commandName);
@@ -1447,9 +1448,16 @@ module.exports = {
                 await interaction.reply({ content: 'This raid operation is no longer active or closed.', flags: 64 }).catch(() => null);
                 return;
             }
+
+            // The Roblox validation + sql.js writes below can exceed Discord's
+            // 3-second interaction window — defer FIRST so nothing silently dies
+            // with "The application did not respond" and no helper ever recorded.
+            await interaction.deferReply({ flags: 64 }).catch(() => null);
+
+            try {
             const robloxValidation = await robloxApi.validateAndGetAvatar(helperUsername);
             if (!robloxValidation.success) {
-                await interaction.reply({ content: `❌ **Roblox Username Validation Failed**\n${robloxValidation.error}`, flags: 64 }).catch(() => null);
+                await interaction.editReply({ content: `❌ **Roblox Username Validation Failed**\n${robloxValidation.error}`, flags: 64 }).catch(() => null);
                 return;
             }
             await verificationDb.directLink(interaction.user.id, {
@@ -1465,7 +1473,7 @@ module.exports = {
                 avatarUrl: robloxValidation.avatarUrl || null
             }, guildId);
             if (!result.success) {
-                await interaction.reply({ content: result.message, flags: 64 }).catch(() => null);
+                await interaction.editReply({ content: result.message, flags: 64 }).catch(() => null);
                 return;
             }
             const updated = result.raid;
@@ -1506,12 +1514,21 @@ module.exports = {
                     new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Join Server').setURL(deepLink)
                 )
                 : null;
-            await interaction.reply({
+            await interaction.editReply({
                 content: `✅ Raid Request Accepted!`,
                 embeds: [helperEmbed],
                 components: joinRow ? [joinRow] : [],
                 flags: 64
             }).catch(() => null);
+            } catch (err) {
+                console.error('[raid accept] join flow failed:', err);
+                const msg = '❌ Join failed: `' + ((err && err.message) || String(err)) + '`';
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.editReply({ content: msg, flags: 64 }).catch(() => null);
+                } else {
+                    await interaction.reply({ content: msg, flags: 64 }).catch(() => null);
+                }
+            }
             return;
         }
     }
