@@ -34,10 +34,10 @@ const NL = String.fromCharCode(10);
 
 /**
  * Builds the "RAID WON" result card (Components V2):
- * header (result / requester / ender / duration / ender's note), MVP section
- * with thumbnail accessory, enemy info, backup report, raid details, raid
- * proof media gallery, and a subtext footer — all separated by native
- * Separator (type 14) components.
+ * header (requester / ender / duration / ender's note), a merged MVP + Helpers
+ * section with thumbnail accessory (Roblox name is itself the profile link),
+ * enemy info, raid details (quote bars throughout), raid proof media gallery,
+ * and a subtext footer — all separated by native Separator (type 14) components.
  */
 function buildResultsPayload() {
     const text = function (content) {
@@ -58,7 +58,6 @@ function buildResultsPayload() {
     // --- Header: result, requester, ender, duration, ender's note ---
     contents.push(text(
         '### 🏆 RAID WON — #421' + NL +
-        '**Result:** 🟢 `WON`' + NL +
         '**Requested By:** **@Requester**' + NL +
         '**Ended By:** **@RaidEnder**' + NL +
         '**Raid Duration:** `24m 18s`' + NL +
@@ -68,50 +67,44 @@ function buildResultsPayload() {
     ));
     contents.push(separator());
 
-    // --- MVP section (fake MVP PFP thumbnail accessory on the right) ---
+    // --- MVP + Helpers (merged into ONE section; helpers as quote bars) ---
+    // The Roblox name itself is the profile link — tapping it redirects to the
+    // player's Roblox profile, so no separate "Profile:" line is needed.
     contents.push(
         new SectionBuilder()
             .setThumbnailAccessory(new ThumbnailBuilder().setURL(FAKE_MVP_THUMBNAIL_GIF))
             .addTextDisplayComponents(new TextDisplayBuilder().setContent(
-                '### 👑 RAID MVP' + NL +
+                '### 👑 RAID MVP — **@MVP**' + NL +
                 NL +
-                '**Roblox:** DisplayName `(@RobloxUsername)`' + NL +
+                '**Roblox:** [DisplayName (@RobloxUsername)](https://www.roblox.com/users/1/profile)' + NL +
                 '**Discord:** **@MVP**' + NL +
-                '**Profile:** [View Roblox Profile](https://www.roblox.com/users/1/profile)'
+                NL +
+                '> **@HelperOne** — `24m 18s`' + NL +
+                '> **@HelperTwo** — `19m 42s`' + NL +
+                '> **@HelperThree** — `12m 05s`' + NL +
+                '> **@HelperFour** — `08m 31s`'
             ))
             .toJSON()
     );
     contents.push(separator());
 
-    // --- Enemy information ---
+    // --- Enemy information (quote bars) ---
     contents.push(text(
         '### ⚔️ ENEMY INFORMATION' + NL +
         NL +
-        '**Enemy Clan:** `Lucent`' + NL +
-        '**Enemies — 3:**' + NL +
-        '`enemy_one` • `enemy_two` • `enemy_three`'
+        '> **Enemy Clan:** `Lucent`' + NL +
+        '> **Enemies — 3:** `enemy_one` • `enemy_two` • `enemy_three`'
     ));
     contents.push(separator());
 
-    // --- Backup report ---
-    contents.push(text(
-        '### 🛡️ BACKUP REPORT — 4 HELPERS' + NL +
-        NL +
-        '**@HelperOne** — `24m 18s`' + NL +
-        '**@HelperTwo** — `19m 42s`' + NL +
-        '**@HelperThree** — `12m 05s`' + NL +
-        '**@HelperFour** — `08m 31s`'
-    ));
-    contents.push(separator());
-
-    // --- Raid details ---
+    // --- Raid details (quote bars) ---
     contents.push(text(
         '### 📍 RAID DETAILS' + NL +
         NL +
-        '**Game:** The Strongest Battlegrounds' + NL +
-        '**Location:** `ASIA • India`' + NL +
-        '**Started:** 30 August 2026 at 16:58' + NL +
-        '**Ended:** 30 August 2026 at 17:22'
+        '> **Game:** The Strongest Battlegrounds' + NL +
+        '> **Location:** `ASIA • India`' + NL +
+        '> **Started:** 30 August 2026 at 16:58' + NL +
+        '> **Ended:** 30 August 2026 at 17:22'
     ));
     contents.push(separator());
 
