@@ -102,9 +102,10 @@ function canModerateVerification(member) {
 }
 
 /**
- * Returns a mention for the guild's configured /link-roblox verification channel,
- * or null if none has been set up yet. It is persisted when an admin selects the
- * channel for the link embed, so guard messages can point users to the exact spot.
+ * Returns a mention for the guild's configured verification channel (the
+ * channel where the backuppanel — with its "Link Roblox account" button — was
+ * posted), or null if none has been set up yet. It is persisted when an admin
+ * posts the backup panel, so guard messages can point users to the exact spot.
  */
 function getVerificationChannelMention(guildId) {
     try {
@@ -752,8 +753,10 @@ module.exports = {
             return;
         }
 
-        // Handle request_raid button - auto-detect game/region/server
-        if (interaction.customId === "request_raid") {
+        // Handle raid request buttons — the backuppanel "Request backup" button
+        // (request_backup), plus the legacy request_raid id so panels posted by
+        // the old /requestraid command keep working. Auto-detect game/region/server.
+        if (interaction.customId === "request_raid" || interaction.customId === "request_backup") {
             await interaction.deferReply({ flags: 64 }).catch(() => null);
 
             const verificationData = await verificationDb.getVerificationData(interaction.user.id, interaction.guild.id);
@@ -841,56 +844,6 @@ module.exports = {
             return interaction.showModal(modal).catch(() => null);
         }
 
-        // Handle channel selection for link embed
-        if (interaction.customId === "select_link_channel") {
-            const selectedChannel = interaction.channels.first();
-            
-            if (!selectedChannel) {
-                return interaction.reply({
-                    content: "Please select a valid channel.",
-                    flags: 64
-                }).catch(() => null);
-            }
-
-            // Create the link embed with button
-            const linkEmbed = new EmbedBuilder()
-                .setTitle('Link Your Roblox Account')
-                .setDescription('Click the button below to link your Discord account with your Roblox username.\n\nYou will be prompted to enter your Roblox username from the button interaction, and your account will be verified for raid access.')
-                .addFields([
-                    { name: 'Instructions', value: '1. Click the "Link Roblox" button\n2. Enter your Roblox username in the popup\n3. Submit the form', inline: false },
-                    { name: 'Benefits', value: '• Request raids\n• Accept raid operations\n• Full access to bot features', inline: false }
-                ])
-                .setColor(0x9B59B6)
-                .setFooter({ text: 'Kakuzu Verification System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
-                .setTimestamp();
-
-            const linkButton = new ButtonBuilder()
-                .setCustomId('link_roblox')
-                .setLabel('🔗 Link Roblox')
-                .setStyle(ButtonStyle.Success);
-
-            const buttonRow = new ActionRowBuilder().addComponents(linkButton);
-
-            // Persist the chosen channel so unverified-user guard messages can
-            // dynamically link to this exact spot for the /link-roblox embed.
-            const linkSettings = raidStateManager.loadSettings(interaction.guild.id) || {};
-            linkSettings.verificationChannel = selectedChannel.id;
-            raidStateManager.saveSettings(interaction.guild.id, linkSettings);
-
-            await interaction.reply({
-                content: `Posting Roblox link embed in <#${selectedChannel.id}>`,
-                flags: 64
-            }).catch(() => null);
-
-            await interaction.client.channels.fetch(selectedChannel.id).then(channel => {
-                if (channel && channel.isTextBased()) {
-                    channel.send({
-                        embeds: [linkEmbed],
-                        components: [buttonRow]
-                    }).catch(err => console.error('Failed to send link embed:', err));
-                }
-            });
-        }
         // Handle backup panel channel selection — post the panel through a
         // webhook named "backuppanel" (dummy profile with the branded avatar)
         // instead of the bot account itself.
@@ -918,6 +871,14 @@ module.exports = {
 
             try {
                 const backupPanel = require("../commands/backuppanel");
+
+                // Persist the panel channel so unverified-user guard messages
+                // point users to the backup panel, which contains the
+                // "Link Roblox account" button they need.
+                const panelSettings = raidStateManager.loadSettings(interaction.guild.id) || {};
+                panelSettings.verificationChannel = selectedChannel.id;
+                raidStateManager.saveSettings(interaction.guild.id, panelSettings);
+
                 const targetChannel = await interaction.client.channels.fetch(selectedChannel.id);
                 if (!targetChannel || !targetChannel.isTextBased()) {
                     throw new Error("The selected channel is not a text channel.");

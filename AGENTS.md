@@ -145,19 +145,20 @@ Refactored the linking → request → join → close loop per the spec:
 
 ## ⚙️ PIPELINE ARCHITECTURE
 
-1. **Roblox Linking / Verification (`/link-roblox`):**
-   * Staff-only (Administrator **or** Manage Messages) command. Posts an
-     embed + channel-select (`select_link_channel`) so an admin picks where the
-     link embed goes; the chosen channel is persisted as
-     `settings.verificationChannel`.
-   * In that channel a **green** `🔗 Link Roblox` button (`link_roblox`) opens a
+1. **Roblox Linking / Verification (the `/backuppanel` panel):**
+   * `/backuppanel` (Manage Server only) posts the branded Components V2 panel
+     through a webhook named `backuppanel` (dummy profile). Posting it persists
+     the chosen channel as `settings.verificationChannel` (via the
+     `post_backuppanel` handler), so guard messages point at the panel.
+   * The panel's **"Link Roblox account"** button (`link_roblox`) opens a
      modal (`link_roblox_modal`) → username validated via Roblox API
      (`handlers/robloxApi.js`) → `verificationDb.directLink(...)` grants raid
      access **immediately** (no moderator approval round-trip), then replies
      `✅ Successfully linked as <name>!` (ephemeral).
 2. **Unverified Request/Accept handling:** If an unverified user clicks
-   `request_raid` (or a `Join`), the bot replies **ephemeral** telling them to
-   run `/link-roblox`. Public buttons are **never** greyed out for unverified
+   `request_backup` (or a `Join`), the bot replies **ephemeral** pointing them
+   to the backup-panel channel to link their Roblox account. Public buttons are
+   **never** greyed out for unverified
    users — the deny is an ephemeral message in the detected verification area.
 3. **Automatic game, region & server-link detection:** `handlers/robloxApi.js`
    queries the Roblox Presence API (`presence.roblox.com`) for active
@@ -230,7 +231,7 @@ Refactored the linking → request → join → close loop per the spec:
 | `handlers/sharedPingDb.js` | Read-only shared PostgreSQL helper for dashboard-owned country/region ping settings (`getGuildPingSettings`). |
 | `handlers/commandHandler.js` | Loads commands from `commands/` into `client.commands`. |
 | `commands/deploy-commands.js` | `registerGuildCommands(guildId)` — used by `ready.js`; also a standalone CLI (`npm run deploy-commands`). |
-| `commands/*.js` | Slash commands (link-roblox, requestraid, close-raid, channelconfig, setchannels, unsetchannels, setregionping, setlockedpingrole, botinfo, announcement, forceshutallraids, raidtest, etc.). |
+| `commands/*.js` | Slash commands (backuppanel, close-raid, channelconfig, setchannels, unsetchannels, setregionping, setlockedpingrole, botinfo, announcement, forceshutallraids, raidtest, etc.). |
 
 ## 🗑️ REMOVED COMMANDS (this session)
 
@@ -242,12 +243,21 @@ The following slash commands were removed (files deleted from `commands/`):
 4. `/verificationadminrole` (`commands/verificationadminrole.js`) — manage verification admin roles
 5. `/verificationconfig` (`commands/verificationconfig.js`) — show verification configuration
 6. `/verificationstatus` (`commands/verificationstatus.js`) — check user verification status
+7. `/requestraid` (`commands/requestraid.js`) — old rules-embed + `request_raid`
+   button panel. Its raid-request **flow** lives on: the `request_backup` button
+   on the `/backuppanel` panel runs the exact same handler (the legacy
+   `request_raid` customId is still accepted so old posted panels don't break).
+8. `/link-roblox` (`commands/link-roblox.js`) — link-embed setup command. Its
+   linking **flow** lives on via the backuppanel's `link_roblox` button →
+   `link_roblox_modal` → `directLink`. The dead `select_link_channel` handler
+   was removed from `events/interactionCreate.js`, and `settings.verificationChannel`
+   is now persisted when the backup panel is posted (post_backuppanel handler).
+   The `test/link-roblox-command.test.js` test file was deleted with it.
 
-> **`/link-roblox` was NOT removed.** The verification *infrastructure* (handlers/
+> The verification *infrastructure* (handlers/
 > `verificationDb.js`, `verificationHelpers.js`, the unverified-user guard, and the
 > `verificationAdminRoles` setting in `interactionCreate.js`) is retained because
-> `/link-roblox` uses it for direct-link auto-verification. `unsetchannels.js`
-> help text was updated to remove references to the deleted set-commands.
+> the backuppanel link button uses it for direct-link auto-verification.
 
 ## ✅ RECENT KEY DECISIONS (commit `c0685c3`)
 
