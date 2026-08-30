@@ -35,7 +35,8 @@ const NL = String.fromCharCode(10);
 
 /**
  * Builds the "RAID WON" result card (Components V2):
- * header (requester / ender / duration / ender's note), a merged MVP + Helpers
+ * full-width victory banner GIF, header (requester / ender / duration / ender's
+ * note), a merged MVP + Helpers
  * section with thumbnail accessory (Roblox name is itself the profile link),
  * enemy info, raid details (quote bars throughout), raid proof media gallery,
  * and a subtext footer — all separated by native Separator (type 14) components.
@@ -55,6 +56,16 @@ function buildResultsPayload() {
     container.size = 'large';
 
     const contents = [];
+
+    // --- Full-width victory banner (MediaGallery images render edge-to-edge
+    // across the entire card width — the widest thing Discord allows) ---
+    contents.push(new MediaGalleryBuilder().addItems([
+        new MediaGalleryItemBuilder()
+            .setURL(MVP_THUMBNAIL_GIF)
+            .setDescription('Victory banner')
+            .toJSON()
+    ]).toJSON());
+    contents.push(separator());
 
     // --- Header: result, requester, ender, duration, ender's note ---
     contents.push(text(
