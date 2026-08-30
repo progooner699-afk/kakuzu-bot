@@ -20,8 +20,9 @@ const RWINNER_V2_FLAGS = 1 << 15;
 // Accent color bar (green — the raid was WON).
 const RESULTS_ACCENT_COLOR = 0x57F287;
 
-// Fake showcase GIFs (verified 200-OK hosted GIFs). Swap for real media later.
-const FAKE_MVP_THUMBNAIL_GIF = 'https://media.giphy.com/media/l0HlvtIPzPdt2usKs/giphy.gif';
+// MVP thumbnail GIF (hosted on catbox.moe — permanent, hotlinkable URL;
+// Discord thumbnails cannot reference local files).
+const MVP_THUMBNAIL_GIF = 'https://files.catbox.moe/iyqyrd.gif';
 const FAKE_PROOF_GIFS = [
     'https://media.giphy.com/media/3o7qE1YN7aYDCHGGSk/giphy.gif',
     'https://media.giphy.com/media/26gscSgANaMfAagU0/giphy.gif',
@@ -72,7 +73,7 @@ function buildResultsPayload() {
     // player's Roblox profile, so no separate "Profile:" line is needed.
     contents.push(
         new SectionBuilder()
-            .setThumbnailAccessory(new ThumbnailBuilder().setURL(FAKE_MVP_THUMBNAIL_GIF))
+            .setThumbnailAccessory(new ThumbnailBuilder().setURL(MVP_THUMBNAIL_GIF))
             .addTextDisplayComponents(new TextDisplayBuilder().setContent(
                 '### 👑 RAID MVP — **@MVP**' + NL +
                 NL +
