@@ -1,4 +1,4 @@
-const { registerGuildCommands } = require('../commands/deploy-commands');
+const { registerGuildCommands, clearGlobalCommands } = require('../commands/deploy-commands');
 const raidStateManager = require('../handlers/raidStateManager');
 const autoJoinPresence = require('../handlers/autoJoinPresence');
 
@@ -56,6 +56,15 @@ module.exports = {
             }
         });
         console.log(`✅ Commands registered in ${ok}/${guilds.length} guild(s).`);
+
+        // De-dupe: guild + global commands BOTH registered makes Discord show
+        // two copies of every command. Guild-scoped registration above is the
+        // single source of truth, so wipe any global leftovers on startup.
+        try {
+            await clearGlobalCommands();
+        } catch (err) {
+            console.warn('⚠️ Could not clear global command duplicates:', (err && err.message) || err);
+        }
 
         // Self-heal: re-register commands in any guild that failed above after a
         // short delay, so transient failures don't leave the bot command-less.
