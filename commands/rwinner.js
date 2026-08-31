@@ -35,6 +35,13 @@ const MVP_PFP_URL = 'https://files.catbox.moe/iyqyrd.gif';
 // (e.g. '\u2022' for the small classic bullet, '\u2B25' for a diamond).
 const DOT = '\u25CF';
 
+// Custom Discord emojis (hosted on the Discord CDN). The <:name:id> markdown
+// resolves by the numeric ID, so it renders INLINE at emoji size in V2 text:
+//   - INFO_EMOJI → the ⓘ info icon before the INFO header
+//   - MVP_EMOJI  → the golden MVP crown on the Raid MVP line
+const INFO_EMOJI = '<:info:1543995035396218950>';
+const MVP_EMOJI = '<:mvp:1543994867552882699>';
+
 // Fake raid-proof links. They are ONLY rendered as clickable text links in
 // the Info text — they must NEVER be attached as media/gallery items, so
 // Discord does not auto-display them inline.
@@ -106,7 +113,7 @@ function buildResultsPayload() {
     contents.push(text(
         '## 🏆 RAID WON — #421' + NL +
         NL +
-        '### 📋 INFO' + NL +
+        '### ' + INFO_EMOJI + ' INFO' + NL +
         DOT + ' **Requested By:** **@Requester**' + NL +
         DOT + ' **Ended By:** **@RaidEnder**' + NL +
         DOT + ' **Raid Duration:** `24m 18s`' + NL +
@@ -129,7 +136,7 @@ function buildResultsPayload() {
                     .setDescription('MVP profile picture')
             )
             .addTextDisplayComponents(new TextDisplayBuilder().setContent(
-                DOT + ' **Raid MVP:** **@MVP**' + NL +
+                DOT + ' ' + MVP_EMOJI + ' **Raid MVP:** **@MVP**' + NL +
                 DOT + ' **Roblox:** [DisplayName (@RobloxUsername)](https://www.roblox.com/users/1/profile)' + NL +
                 DOT + ' **Discord:** **@MVP**'
             ))
