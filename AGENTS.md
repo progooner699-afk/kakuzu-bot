@@ -210,10 +210,29 @@ Refactored the linking → request → join → close loop per the spec:
      tracks helper time. If no `ROBLOX_API_KEY` is set it no-ops and falls back
      to join→close delta.
    * On `[ Close Raid ]` → outcome picker (`raid_outcome_*`: Win / Whooped /
-     Loss / Can't Say) → the helper with the most `timeSpentSeconds` is set as
-     MVP automatically → raid closed, streak/metrics compiled, final Raid Result
-     embed posted (see `buildReportCardEmbed` + outcome helpers starting ~line
-     236).
+     Loss / **No Result** — the old "Can't Say" option was REMOVED). For
+     Win/Whooped/Loss the helper with the most `timeSpentSeconds` is set as
+     MVP automatically → raid closed, streak/metrics compiled, and the final
+     Raid Result is posted as a **native Components V2 card** (same layout as
+     `/rwinner`) built by `handlers/raidResultCard.js` (`buildResultCardPayload`),
+     with the region-role ping sent as a separate message first (V2 disables
+     `content`); if the V2 send fails it falls back to a classic embed
+     (`buildResultFallbackEmbed`). The **3 card types** share one layout with
+     different title emojis: Win `🏆 RAID WON <:won:…>` (identical to
+     `/rwinner`), Whooped `💀 RAID WHOOPED`, Loss `❌ RAID LOST` (emoji map:
+     `raidResultCard.OUTCOME_STYLES`).
+   * **Rally picture / proof upload flow:** closing a result outcome creates a
+     temporary `raid-uploads-<id>` channel (2 min window). The closer sends
+     their **rally picture** then types `rally` — it becomes the TOP banner of
+     the result card (`rallyPicUrl`; prefers the picture in the same message,
+     else pops the most recently uploaded URL; falls back to the default
+     banner when unset). Remaining pictures are collected as **Raid Proof**
+     (rendered as clickable `[Image n](url)` text links, never gallery items).
+     Typing `done` closes the channel and posts the card.
+   * **No Result option:** `raid_outcome_nolog_<id>` closes the raid WITHOUT a
+     result card, streaks or metrics, skips the upload channel entirely, and
+     posts a simple "🚫 NO RAID RESULTS RECORDED" note embed
+     (`buildNoResultEmbed`) to the configured result channel.
 
 ## 📂 KEY FILES
 
@@ -224,6 +243,7 @@ Refactored the linking → request → join → close loop per the spec:
 | `events/interactionCreate.js` | **Main interaction hub** (buttons, modals, selects). Contains verification decision helpers, link flow, raid application step 1, `open_raid_application` modal launcher, and the RAID OPERATIONS section (`raid_accept_`, `raid_leave_`, `raid_close_`, `raid_outcome_`, `raid_mvp_select_`). |
 | `handlers/raidStateManager.js` | Raid CRUD + persistence + presence polling. |
 | `handlers/raidV2.js` | Native Components V2 raid alert builder (`buildRaidAlertPayload`, `markAlertV2`). |
+| `handlers/raidResultCard.js` | Native Components V2 raid RESULT card (same layout as `/rwinner`): `buildResultCardPayload` (win/whooped/loss title styles, rally-pic TOP banner), `buildResultFallbackEmbed` (classic-embed fallback), `buildNoResultEmbed` (🚫 No Result note). |
 | `handlers/robloxApi.js` | Roblox API/Presence calls, username validation, deep-links. |
 | `handlers/robloxAuth.js` | `.ROBLOSECURITY` handling: safe cookie-auth diagnostic that runs once at startup (`index.js`, `force`) and before each gamejoin (`getServerIp`); logs ONLY `cookieConfigured/cookieLength/authCheck/httpStatus/replacementCookieReceived` — never the value. In-memory rotation adoption on authenticated requests. |
 | `handlers/verificationDb.js` | sql.js persistence for verification records. |

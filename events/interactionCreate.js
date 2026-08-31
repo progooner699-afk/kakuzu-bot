@@ -13,6 +13,7 @@ const {
 } = require("discord.js");
 const raidStateManager = require("../handlers/raidStateManager");
 const raidV2 = require("../handlers/raidV2");
+const raidResultCard = require("../handlers/raidResultCard");
 const robloxApi = require("../handlers/robloxApi");
 const verificationDb = require("../handlers/verificationDb");
 const { formatRobloxProfileValue } = require("../handlers/verificationHelpers");
@@ -520,108 +521,11 @@ async function sendVerificationDM(client, targetUserId, embed) {
     }
 }
 
-async function finalizeRaidOutcome(interaction, raid, outcome) {
-    const settings = raidStateManager.loadSettings(interaction.guild.id);
-    const raidsData = raidStateManager.loadRaids(interaction.guild.id);
-
-    let resultTitle, resultColor, descriptionText;
-    if (outcome === 'win' || outcome === 'whooped') {
-        if (raidsData.streakType === 'WIN') {
-            raidsData.streakCount += 1;
-        } else {
-            raidsData.streakType = 'WIN';
-            raidsData.streakCount = 1;
-        }
-        if (outcome === 'whooped') {
-            resultTitle = '?? OBLITERATION DEPLOYMENT (WHOOPED) ??';
-            resultColor = 0xff0055;
-            descriptionText = `Our combat deployment completely **WHOOPED** the opposition forces! A flawless victory.`;
-        } else {
-            resultTitle = '?? OPERATION VICTORY ??';
-            resultColor = 0x00ff66;
-            descriptionText = `Our active deployment successfully secured a decisive combat victory!`;
-        }
-    } else if (outcome === 'loss') {
-        if (raidsData.streakType === 'LOSS') {
-            raidsData.streakCount += 1;
-        } else {
-            raidsData.streakType = 'LOSS';
-            raidsData.streakCount = 1;
-        }
-        resultTitle = '? DEPLOYMENT LOSS ?';
-        resultColor = 0xff3333;
-        descriptionText = `Our combat crew suffered an operational defeat against enemy forces during deployment.`;
-    } else {
-        resultTitle = '?? INDECISIVE CONCLUSION / CAN\'T SAY ??';
-        resultColor = 0x888888;
-        descriptionText = `The combat operation concluded indeterminately, or was cancelled mid-deployment.`;
-    }
-
-    raidStateManager.saveRaids(interaction.guild.id, raidsData);
-
-    const streakMessage = raidsData.streakCount > 0
-        ? `**Current Streak:** ${raidsData.streakType === 'WIN' ? '??' : '??'} ${raidsData.streakCount} Matches consecutive!`
-        : '**Current Streak:** None tracking';
-
-    const gameLabel = raidStateManager.GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
-    const mvpUserId = raid.mvpUserId;
-
-    const buildReportCardEmbed = (attachments = []) => {
-        const rosterValue = raid.helpers && raid.helpers.length > 0
-            ? raid.helpers.map(h => {
-                const helperUserId = typeof h === 'string' ? h : h.userId;
-                const helperRobloxUsername = typeof h === 'string' ? 'Unknown' : (h.robloxUsername || 'Unknown');
-                const timeSpent = typeof h === 'object' ? raidStateManager.formatTimeSpent(h.timeSpentSeconds || 0) : '0m 0s';
-                const isMvp = helperUserId === mvpUserId;
-                const prefix = isMvp ? '🏆 MVP: ' : '✅ ';
-                return `${prefix}<@${helperUserId}> (Roblox: ${helperRobloxUsername}) ⏱️ Time Spent: ${timeSpent}`;
-            }).join('\n')
-            : 'No operators deployed.';
-
-        const embed = new EmbedBuilder()
-            .setTitle(resultTitle)
-            .setDescription(`${descriptionText}\n\n${streakMessage}`)
-            .setColor(resultColor)
-            .addFields([
-                { name: 'Operation Registry', value: `\`#${raid.raidId}\``, inline: true },
-                { name: 'Squad Leader', value: `<@${raid.requesterId}>`, inline: true },
-                { name: 'Region Server', value: `\`${raid.region || 'Unknown'}\``, inline: true },
-                { name: 'Operation Game', value: `\`${gameLabel}\``, inline: true },
-                { name: 'Hostile Count', value: `\`${raid.enemyCount || 0}\``, inline: true },
-                { name: 'Hostile Names', value: raid.enemyNames ? `\`${raid.enemyNames}\`` : (raid.enemyClanNames ? `\`${raid.enemyClanNames}\`` : '`None`'), inline: true },
-                { name: 'Hostile Grouping', value: raid.enemyClanNames ? `\`${raid.enemyClanNames}\`` : '`None`', inline: true },
-                { name: 'Deployment Squad Roster', value: rosterValue, inline: false }
-            ])
-            .setTimestamp();
-
-        if (attachments.length > 0) {
-            const picsValue = attachments.slice(0, 8).map((url, index) => `${index + 1}. ${url}`).join('\n');
-            embed.addFields({ name: 'Pics', value: picsValue.length > 1024 ? `${picsValue.slice(0, 1020)}...` : picsValue, inline: false });
-            embed.setImage(attachments[0]);
-        } else {
-            embed.addFields({ name: 'Pics', value: 'No pictures uploaded.', inline: false });
-        }
-
-        return embed;
-    };
-
-    const sendResultEmbed = async (attachments = []) => {
-        if (settings.resultChannel) {
-            const targetResultChannel = await interaction.client.channels.fetch(settings.resultChannel).catch(() => null);
-            if (targetResultChannel && targetResultChannel.isTextBased()) {
-                const regionRoleInfo = await getRaidPingInfo(interaction.client, interaction.guild.id, { countryCode: null, region: raid.region });
-                await targetResultChannel.send({
-                    content: regionRoleInfo.mention || undefined,
-                    embeds: [buildReportCardEmbed(attachments)],
-                    allowedMentions: regionRoleInfo.allowedMentions
-                });
-            }
-        }
-    };
-
-    // Update the raid alert message in the (temporary) alert channel. Alerts
-    // are authored by the 'backupalerts' webhook, so edits go through the
-    // webhook too (webhook-authored messages can't be edited via message.edit).
+// Closes the raid alert UI: re-renders the alert message as CLOSED (via the
+// backupalerts webhook for webhook-authored alerts) and schedules the
+// temporary alert channel deletion. Shared by the result outcomes and the
+// "No Result" outcome.
+async function markRaidAlertClosed(interaction, raid) {
     try {
         const updatedAlertEmbeds = raidStateManager.formatRaidMessage(raid, interaction.guild.id);
         const cleanClosedRow = createRaidButtons(raid, interaction.member);
@@ -637,9 +541,82 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
 
     // The raid is closed -> its temporary raid alert channel self-deletes in 1 min.
     raidStateManager.scheduleRaidAlertChannelDeletion(interaction.client, raid.raidId, interaction.guild.id);
+}
+
+async function finalizeRaidOutcome(interaction, raid, outcome) {
+    const settings = raidStateManager.loadSettings(interaction.guild.id);
+    const raidsData = raidStateManager.loadRaids(interaction.guild.id);
+
+    // Streak tracking — only counted outcomes (win / whooped / loss). The
+    // "No Result" outcome never touches streaks or metrics. (The old
+    // "Can't Say" option was removed.)
+    let streakMessage = '**Current Streak:** None tracking';
+    if (outcome === 'win' || outcome === 'whooped') {
+        if (raidsData.streakType === 'WIN') {
+            raidsData.streakCount += 1;
+        } else {
+            raidsData.streakType = 'WIN';
+            raidsData.streakCount = 1;
+        }
+        raidStateManager.saveRaids(interaction.guild.id, raidsData);
+        streakMessage = `**Current Streak:** 🏆 ${raidsData.streakCount} Matches consecutive!`;
+    } else if (outcome === 'loss') {
+        if (raidsData.streakType === 'LOSS') {
+            raidsData.streakCount += 1;
+        } else {
+            raidsData.streakType = 'LOSS';
+            raidsData.streakCount = 1;
+        }
+        raidStateManager.saveRaids(interaction.guild.id, raidsData);
+        streakMessage = `**Current Streak:** 💀 ${raidsData.streakCount} Matches consecutive!`;
+    }
+
+    const sendResultEmbed = async (attachments = [], rallyPicUrl = null) => {
+        if (!settings.resultChannel) return;
+        const targetResultChannel = await interaction.client.channels.fetch(settings.resultChannel).catch(() => null);
+        if (!targetResultChannel || !targetResultChannel.isTextBased()) return;
+        const regionRoleInfo = await getRaidPingInfo(interaction.client, interaction.guild.id, { countryCode: null, region: raid.region });
+        const cardOpts = {
+            raid,
+            outcome,
+            submitterId: interaction.user.id,
+            rallyPicUrl,
+            proofUrls: attachments,
+            streakMessage,
+            endedAtMs: raid.closedAt || Date.now()
+        };
+        try {
+            // Native Components V2 result card — the same layout as /rwinner.
+            // V2 messages disable `content`, so the region-role ping goes out
+            // as a separate message first (same pattern as the raid alert).
+            if (regionRoleInfo.mention) {
+                await targetResultChannel.send({
+                    content: regionRoleInfo.mention,
+                    allowedMentions: regionRoleInfo.allowedMentions
+                });
+            }
+            await targetResultChannel.send({
+                ...raidResultCard.buildResultCardPayload(cardOpts),
+                allowedMentions: regionRoleInfo.allowedMentions
+            });
+        } catch (err) {
+            console.warn('[raid result] V2 card failed, falling back to embed:', err?.message || err);
+            await targetResultChannel.send({
+                content: regionRoleInfo.mention || undefined,
+                embeds: [raidResultCard.buildResultFallbackEmbed(cardOpts)],
+                allowedMentions: regionRoleInfo.allowedMentions
+            }).catch(e2 => console.warn('Failed to send raid result embed:', e2?.message || e2));
+        }
+    };
+
+    // Close the alert UI (re-render as CLOSED + schedule the temporary alert
+    // channel deletion), then collect proof pictures in a temporary channel.
+    await markRaidAlertClosed(interaction, raid);
 
 
-    let uploadedUrls = [];
+    let uploadedUrls = [];   // raid proof pictures (everything not marked as rally)
+    let rallyPicUrl = null;  // rally picture -> TOP banner of the result card
+    const closerId = interaction.user.id;
     const guild = interaction.guild;
     let tempChannel = null;
 
@@ -652,33 +629,47 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             topic: `Temporary upload channel for raid #${raid.raidId}. Will be removed after collection.`
         });
 
-        await interaction.followUp({ content: `?? Upload any pictures or files for this raid result in ${tempChannel} now. Reply with \`done\` in that channel when finished, or wait 60 seconds. The result will be posted to the configured result channel automatically.`, ephemeral: true }).catch(() => null);
+        await interaction.followUp({ content: `📸 Upload your **rally picture** for this raid result in ${tempChannel} now — after sending it, type \`rally\` to set it as the result card banner. Then upload the remaining raid pictures and reply with \`done\` in that channel to post the result (or wait 2 minutes).`, ephemeral: true }).catch(() => null);
 
-        await tempChannel.send({ content: `?? **Upload pictures for Raid #${raid.raidId} here.**\nReply with \`done\` (by <@${interaction.user.id}>) when finished, or wait 60 seconds and the bot will post whatever was uploaded.` }).catch(() => null);
+        await tempChannel.send({ content: `📸 **Upload pictures for Raid #${raid.raidId} here.**\n1️⃣ Send your **rally picture**, then type \`rally\` — it becomes the banner at the top of the result card.\n2️⃣ Send the remaining raid result pictures (raid proof).\n3️⃣ Type \`done\` (by <@${closerId}>) to post the result card — or wait 2 minutes and the bot posts whatever was uploaded.` }).catch(() => null);
 
         const collector = tempChannel.createMessageCollector({
             filter: (msg) => {
-                if (msg.content?.toLowerCase().trim() === 'done' && msg.author.id === interaction.user.id) return true;
+                const content = msg.content?.toLowerCase().trim();
+                if ((content === 'done' || content === 'rally') && msg.author.id === closerId) return true;
                 return msg.attachments && msg.attachments.size > 0;
             },
-            time: 60000,
+            time: 120000,
             max: 100
         });
 
         collector.on('collect', (msg) => {
+            const content = msg.content?.toLowerCase().trim();
             if (msg.attachments && msg.attachments.size > 0) {
                 for (const attachment of msg.attachments.values()) {
                     uploadedUrls.push(attachment.url);
                 }
             }
-            if (msg.content?.toLowerCase().trim() === 'done' && msg.author.id === interaction.user.id) {
+            // `rally` — mark the rally picture: prefer the picture(s) sent in
+            // the SAME message, otherwise the most recently uploaded one.
+            if (content === 'rally' && msg.author.id === closerId) {
+                if (msg.attachments && msg.attachments.size > 0) {
+                    rallyPicUrl = msg.attachments.first().url;
+                } else if (uploadedUrls.length > 0) {
+                    rallyPicUrl = uploadedUrls.pop();
+                }
+                if (rallyPicUrl) {
+                    tempChannel.send({ content: '✅ Rally picture set — it will be the banner at the top of the result card. Send the remaining raid pictures and type `done` to post the result.' }).catch(() => null);
+                }
+            }
+            if (content === 'done' && msg.author.id === closerId) {
                 collector.stop('done_by_user');
             }
         });
 
         collector.on('end', async () => {
             try {
-                await sendResultEmbed(uploadedUrls);
+                await sendResultEmbed(uploadedUrls, rallyPicUrl);
             } catch (err) {
                 console.warn('Failed to send result embed after collection:', err?.message || err);
             }
@@ -695,11 +686,11 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
     }
 
     // Legacy fallback
-    await interaction.followUp({ content: '?? Upload any pictures or files for this raid result in this channel. Reply with `done` when finished, or just wait 30 seconds. The result will be sent automatically after.', ephemeral: true }).catch(() => null);
+    await interaction.followUp({ content: '📸 Upload any pictures or files for this raid result in this channel. Send your rally picture and type `rally` to set it as the card banner, then reply with `done` when finished, or wait 30 seconds. The result will be sent automatically after.', ephemeral: true }).catch(() => null);
 
     const collectorChannel = interaction.channel || await interaction.client.channels.fetch(interaction.channelId).catch(() => null);
     if (!collectorChannel || !collectorChannel.isTextBased()) {
-        await sendResultEmbed(uploadedUrls);
+        await sendResultEmbed(uploadedUrls, rallyPicUrl);
         return;
     }
 
@@ -716,13 +707,20 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             }
         }
         const content = msg.content?.toLowerCase().trim();
+        if (content === 'rally') {
+            if (msg.attachments.size > 0) {
+                rallyPicUrl = msg.attachments.first().url;
+            } else if (uploadedUrls.length > 0) {
+                rallyPicUrl = uploadedUrls.pop();
+            }
+        }
         if (content === 'done') {
             legacyCollector.stop('done');
         }
     });
 
     legacyCollector.on('end', async () => {
-        await sendResultEmbed(uploadedUrls);
+        await sendResultEmbed(uploadedUrls, rallyPicUrl);
     });
 }
 
@@ -1301,7 +1299,7 @@ module.exports = {
                 new ButtonBuilder().setCustomId(`raid_outcome_win_${raidId}`).setLabel('🏆 Win').setStyle(ButtonStyle.Success),
                 new ButtonBuilder().setCustomId(`raid_outcome_whooped_${raidId}`).setLabel('🔥 Whooped').setStyle(ButtonStyle.Danger),
                 new ButtonBuilder().setCustomId(`raid_outcome_loss_${raidId}`).setLabel('❌ Loss').setStyle(ButtonStyle.Danger),
-                new ButtonBuilder().setCustomId(`raid_outcome_indeterminate_${raidId}`).setLabel('🤷 Can\'t Say').setStyle(ButtonStyle.Secondary)
+                new ButtonBuilder().setCustomId(`raid_outcome_nolog_${raidId}`).setLabel('🚫 No Result').setStyle(ButtonStyle.Secondary)
             );
             await interaction.reply({
                 content: '📊 **Select the final raid outcome to compile streaks and log metrics:**',
@@ -1321,6 +1319,34 @@ module.exports = {
                 await interaction.reply({ content: '❌ This raid record has already been locked.', flags: 64 }).catch(() => null);
                 return;
             }
+
+            // 🚫 No Result — close the raid WITHOUT a result card, streaks or
+            // metrics. A simple "no results recorded" note embed is posted to
+            // the configured result channel instead, and the upload-collection
+            // channel is skipped entirely.
+            if (outcome === 'nolog') {
+                raidStateManager.closeRaid(raidId, {
+                    outcome: 'nolog',
+                    closedBy: interaction.user.id,
+                    closedByTag: interaction.user.tag
+                }, interaction.guild.id);
+                let closedRaid = raidStateManager.getRaidById(raidId, interaction.guild.id) || raid;
+                closedRaid.status = 'CLOSED';
+                closedRaid.outcome = 'nolog';
+                await interaction.reply({ content: '✅ Raid closed — no result card will be posted.', flags: 64 }).catch(() => null);
+                await markRaidAlertClosed(interaction, closedRaid);
+                const nologSettings = raidStateManager.loadSettings(interaction.guild.id);
+                if (nologSettings.resultChannel) {
+                    const noteChannel = await interaction.client.channels.fetch(nologSettings.resultChannel).catch(() => null);
+                    if (noteChannel && noteChannel.isTextBased()) {
+                        await noteChannel.send({
+                            embeds: [raidResultCard.buildNoResultEmbed({ raid: closedRaid, closedById: interaction.user.id })]
+                        }).catch(() => null);
+                    }
+                }
+                return;
+            }
+
             raidStateManager.closeRaid(raidId, { outcome }, interaction.guild.id);
             let finalRaid = raidStateManager.getRaidById(raidId, interaction.guild.id) || raid;
             finalRaid.status = 'CLOSED';
