@@ -141,9 +141,8 @@ function buildBackupPanelPayload() {
             '> • **Automatic player details** — Your linked Roblox account provides your username and profile information.' + NL +
             '> • **Automatic backup alerts** — The bot pings clan members to notify them that you need support.' + NL +
             '>' + NL +
-            '> Discover more features on our website or dashboard.' + NL +
-            '> **Website / Dashboard:** [insert link]' + NL +
-            '> **Support Server:** [insert Discord invite]'
+            '> 🛠️ **Want this bot in your clan?** Join our **Support Server**: https://discord.gg/6zWMf3s9BD' + NL +
+            '> 🌐 **Community:** Join **BL Clanning Community**: https://discord.gg/bEtnN6adh4'
         ));
         contents.push(separator());
 
