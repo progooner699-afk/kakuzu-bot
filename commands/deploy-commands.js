@@ -38,7 +38,12 @@ async function run() {
 }
 
 if (require.main === module) {
-    run().catch(() => process.exit(1));
+    run().catch((error) => {
+        // Print the real failure (validation errors, auth, rate limits) before
+        // exiting non-zero — a silent exit hides the reason a deploy failed.
+        console.error('❌ Deploy failed:', (error && (error.stack || error.message)) || error);
+        process.exit(1);
+    });
 }
 
 // Register this bot's slash commands to a single guild.
