@@ -18,9 +18,15 @@ function loadCommands(client) {
 
     for (const file of listCommandFiles()) {
         const filePath = path.join(commandsPath, file);
-        const command = require(filePath);
-        if (command.data && command.execute) {
-            commands.set(command.data.name, command);
+        try {
+            const command = require(filePath);
+            if (command.data && command.execute) {
+                commands.set(command.data.name, command);
+            }
+        } catch (err) {
+            // One broken command file must never take down the whole bot —
+            // log it and keep loading the rest.
+            console.error(`[commandHandler] Failed to load command file ${file}:`, (err && err.message) || err);
         }
     }
 
@@ -33,9 +39,13 @@ function getCommandDataArray() {
     const data = [];
 
     for (const file of listCommandFiles()) {
-        const command = require(path.join(commandsPath, file));
-        if (command.data) {
-            data.push(command.data.toJSON());
+        try {
+            const command = require(path.join(commandsPath, file));
+            if (command.data) {
+                data.push(command.data.toJSON());
+            }
+        } catch (err) {
+            console.error(`[commandHandler] Skipping invalid command file ${file}:`, (err && err.message) || err);
         }
     }
 
