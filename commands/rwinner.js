@@ -105,7 +105,11 @@ function buildResultsPayload() {
         '**Requested By:** **@Requester**' + NL +
         '**Ended By:** **@RaidEnder**' + NL +
         '**Raid Duration:** `24m 18s`' + NL +
-        "**Ender's Note:** They called more people, but we still destroyed them."
+        NL +
+        // Ender's Note rendered as a FULL quote block (both the label and the
+        // note text sit behind quote bars); all other content stays unquoted.
+        '> 📝 **Ender\u2019s Note**' + NL +
+        '> They called more people, but we still destroyed them.'
     ));
     contents.push(separator());
 
