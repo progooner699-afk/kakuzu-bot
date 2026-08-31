@@ -43,9 +43,9 @@ const INFO_EMOJI = '<:info:1543995035396218950>';
 const MVP_EMOJI = '<:mvp:1543994867552882699>';
 
 // "Won" emoji — the sunglasses-face, rendered right after RAID WON in the
-// title line. Unicode, so it needs no hosting; to use a custom server emoji
-// instead, replace with '<:name:id>'.
-const WON_EMOJI = '\u{1F60E}';
+// title line. Custom Discord emoji (CDN ID 1543997297593946162); <:name:id>
+// markdown resolves by the numeric ID at emoji size.
+const WON_EMOJI = '<:won:1543997297593946162>';
 
 // Fake raid-proof links. They are ONLY rendered as clickable text links in
 // the Info text — they must NEVER be attached as media/gallery items, so
