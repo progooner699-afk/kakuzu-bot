@@ -8,7 +8,7 @@ module.exports = {
         .addChannelOption(option =>
             option
                 .setName('result_channel')
-                .setDescription('Channel where raid result embeds will be posted (temp raid alert channels are created in its category)')
+                .setDescription('Raid result embeds go here; temp alert channels are created in its category')
                 .setRequired(true)
         )
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
