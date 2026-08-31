@@ -80,21 +80,22 @@ module.exports = {
                 .setDisabled(true)
         );
 
-        // Get configured raid channel
+        // Get configured alert target channel (legacy raid channel or result channel)
         const settings = raidStateManager.loadSettings(interaction.guild.id);
+        const targetChannelId = settings.raidChannel || settings.resultChannel;
 
-        if (!settings.raidChannel) {
+        if (!targetChannelId) {
             return interaction.reply({
-                content: 'No raid channel configured. Run /setchannels first.',
+                content: 'No result channel configured. Run /setchannels and set the `result_channel` first.',
                 flags: 64
             });
         }
 
-        const targetChannel = await interaction.client.channels.fetch(settings.raidChannel).catch(() => null);
+        const targetChannel = await interaction.client.channels.fetch(targetChannelId).catch(() => null);
 
         if (!targetChannel || !targetChannel.isTextBased()) {
             return interaction.reply({
-                content: 'Configured raid channel is unavailable.',
+                content: 'Configured alert target channel is unavailable.',
                 flags: 64
             });
         }

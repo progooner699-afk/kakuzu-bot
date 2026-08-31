@@ -46,21 +46,19 @@ module.exports = {
         }
 
         const settings = raidStateManager.loadSettings(interaction.guild.id);
-        const alertChannel = await interaction.client.channels.fetch(updatedRaid.channelId).catch(() => null);
-        if (alertChannel && alertChannel.isTextBased()) {
-            const alertMessage = await alertChannel.messages.fetch(updatedRaid.messageId).catch(() => null);
-            if (alertMessage) {
-                if (updatedRaid.alertFormat === 'v2') {
-                    const closedPayload = await raidV2.buildRaidAlertPayload(updatedRaid);
-                    // Keep the IS_COMPONENTS_V2 flag on edit + log failures.
-                    await alertMessage.edit({ flags: raidV2.RAID_ALERT_V2_FLAGS, components: closedPayload.components })
-                        .catch((err) => console.warn('[raid alert] V2 /close-raid edit failed:', (err && err.message) || err));
-                } else {
-                    const closedEmbeds = raidStateManager.formatRaidMessage(updatedRaid, interaction.guild.id);
-                    await alertMessage.edit({ embeds: closedEmbeds, components: [] }).catch(() => null);
-                }
-            }
+        // Alerts are authored by the 'backupalerts' webhook -> edit via webhook.
+        if (updatedRaid.alertFormat === 'v2') {
+            const closedPayload = await raidV2.buildRaidAlertPayload(updatedRaid);
+            // Keep the IS_COMPONENTS_V2 flag on edit + log failures.
+            await raidStateManager.editRaidAlertMessage(interaction.client, updatedRaid, { flags: raidV2.RAID_ALERT_V2_FLAGS, components: closedPayload.components })
+                .catch((err) => console.warn('[raid alert] V2 /close-raid edit failed:', (err && err.message) || err));
+        } else {
+            const closedEmbeds = raidStateManager.formatRaidMessage(updatedRaid, interaction.guild.id);
+            await raidStateManager.editRaidAlertMessage(interaction.client, updatedRaid, { embeds: closedEmbeds, components: [] });
         }
+
+        // Raid closed -> its temporary raid alert channel self-deletes in 1 min.
+        raidStateManager.scheduleRaidAlertChannelDeletion(interaction.client, updatedRaid.raidId, interaction.guild.id);
 
         if (settings.resultChannel) {
             const resultChannel = await interaction.client.channels.fetch(settings.resultChannel).catch(() => null);

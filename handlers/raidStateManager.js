@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ChannelType } = require('discord.js');
 const leaderboardDb = require('./leaderboardDb');
 const robloxApi = require('./robloxApi');
 
@@ -416,9 +416,27 @@ function updateRaidMessageReference(raidId, channelId, messageId, guildId) {
     saveRaids(guildId, raids);
 }
 
+/**
+ * Derive the alert status from the LIVE helper count:
+ *   CLOSED only when the raid is actually closed, FULL when the helper count
+ *   reached the limit, otherwise OPEN. The raw stored status is never trusted
+ *   for OPEN/FULL rendering — a freshly posted raid is still a 'PENDING'
+ *   draft when the alert is first built, and the old code rendered that as
+ *   CLOSED (the "status shows CLOSED only" bug).
+ */
+function resolveRaidStatus(raid, helperCount) {
+    if (raid && raid.status === 'CLOSED') return 'CLOSED';
+    const limit = Number(raid && raid.helperLimit) || 0;
+    const count = (helperCount !== undefined && helperCount !== null)
+        ? helperCount
+        : ((raid && raid.helpers && raid.helpers.length) || 0);
+    if (limit > 0 && count >= limit) return 'FULL';
+    return 'OPEN';
+}
+
 function formatRaidMessage(raid, guildId = null) {
     const helperCount = (raid.helpers && raid.helpers.length) || 0;
-    const statusText = raid.status === 'OPEN' ? 'OPEN' : raid.status === 'FULL' ? 'FULL' : 'CLOSED';
+    const statusText = resolveRaidStatus(raid, helperCount);
     const gameLabel = GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
     const createdMs = Number(raid.createdAt) || Date.now();
     const createdTs = Math.floor(createdMs / 1000);
@@ -442,7 +460,7 @@ function formatRaidMessage(raid, guildId = null) {
 
     const embed = new EmbedBuilder()
         .setTitle('RAID ALERT')
-        .setDescription('\u{1F6A8} **RAID ALERT**\n\n> \u{1F64F} Please remain patient while our helpers make their way to assist you. Someone will be with you shortly!')
+        .setDescription((raid.pingMention ? raid.pingMention + '\n' : '') + '\u{1F6A8} **RAID ALERT**\n\n> \u{1F64F} Please remain patient while our helpers make their way to assist you. Someone will be with you shortly!')
         .addFields([
             {
             name: '🎯 ENEMY NAMES',
@@ -754,6 +772,18 @@ function setRaidOpen(raidId, guildId) {
     return raid;
 }
 
+// Persist the ping mention (e.g. '<@&ROLE_ID>') that is rendered INSIDE the
+// raid alert (first line of the description / V2 header) so later alert edits
+// (accept / leave / close / auto-join) re-render it instead of dropping it.
+function setRaidPingMention(raidId, mention, guildId) {
+    const raids = loadRaids(guildId);
+    const raid = raids.raids.find(item => item.raidId === raidId);
+    if (!raid) return null;
+    raid.pingMention = mention || null;
+    saveRaids(guildId, raids);
+    return raid;
+}
+
 // Remove any raids this requester still has in the PENDING/draft state (e.g.
 // from an interrupted run that never posted its alert embed). This lets the
 // user retry without hitting a stale "already open raid" error.
@@ -762,6 +792,136 @@ function cleanupPendingRaids(userId, guildId) {
     const before = raids.raids.length;
     raids.raids = raids.raids.filter(r => !(r.status === 'PENDING' && r.requesterId === userId));
     if (raids.raids.length !== before) saveRaids(guildId, raids);
+}
+
+// ---- Raid alert webhook + temporary alert channel ---------------------------
+// Raid alerts are NOT posted as the bot account and NOT in a fixed channel:
+// every raid gets its own temporary text channel (raid-alert-<raidId>) created
+// in the SAME CATEGORY as the configured raid result channel, and the alert is
+// posted through a webhook named 'backupalerts' (dummy profile).
+const RAID_ALERT_WEBHOOK_NAME = 'backupalerts';
+// How long after a raid closes its temporary alert channel is deleted.
+const RAID_TEMP_CHANNEL_DELETE_DELAY_MS = 60 * 1000;
+// Dedupe guard so a raid's temp channel is only scheduled for deletion once.
+const pendingAlertChannelDeletions = new Map();
+
+/**
+ * Creates the temporary raid alert channel (raid-alert-<raidId>) in the given
+ * category (the result channel's category) and persists its id on the raid
+ * record as alertChannelId. Returns the channel or null. Never throws.
+ */
+async function createRaidAlertChannel(client, raid, guildId, categoryId) {
+    try {
+        const guild = await client.guilds.fetch(guildId).catch(() => null);
+        if (!guild) return null;
+        const channel = await guild.channels.create({
+            name: 'raid-alert-' + raid.raidId,
+            type: ChannelType.GuildText,
+            parent: categoryId || undefined,
+            topic: 'Temporary raid alert channel for raid #' + raid.raidId + '. Auto-deletes 1 minute after the raid closes.',
+            reason: 'Temporary raid alert channel for raid #' + raid.raidId
+        }).catch((err) => {
+            console.warn('[raid alert] temp channel create failed:', (err && err.message) || err);
+            return null;
+        });
+        if (channel) {
+            raid.alertChannelId = channel.id;
+            const raids = loadRaids(guildId);
+            const stored = raids.raids.find(item => item.raidId === raid.raidId);
+            if (stored) {
+                stored.alertChannelId = channel.id;
+                saveRaids(guildId, raids);
+            }
+        }
+        return channel || null;
+    } catch (err) {
+        console.warn('[raid alert] temp channel create failed:', (err && err.message) || err);
+        return null;
+    }
+}
+
+/**
+ * Finds (or creates) the 'backupalerts' webhook in the given channel.
+ * Returns the webhook or null. Never throws.
+ */
+async function getRaidAlertWebhook(channel) {
+    try {
+        if (!channel || !channel.isTextBased()) return null;
+        const webhooks = await channel.fetchWebhooks().catch(() => null);
+        let webhook = webhooks ? webhooks.find(w => w.name === RAID_ALERT_WEBHOOK_NAME) : null;
+        if (!webhook) {
+            webhook = await channel.createWebhook({
+                name: RAID_ALERT_WEBHOOK_NAME,
+                reason: 'Raid alert webhook (backupalerts dummy profile)'
+            }).catch((err) => {
+                console.warn('[raid alert] webhook create failed:', (err && err.message) || err);
+                return null;
+            });
+        }
+        return webhook || null;
+    } catch (err) {
+        console.warn('[raid alert] webhook lookup failed:', (err && err.message) || err);
+        return null;
+    }
+}
+
+/**
+ * Edits an existing raid alert message. Alerts are authored by the
+ * 'backupalerts' webhook, so edits MUST go through webhook.editMessage —
+ * message.edit on a webhook-authored message is rejected by Discord.
+ * Falls back to message.edit for legacy (bot-authored) alerts. Never throws.
+ */
+async function editRaidAlertMessage(client, raid, payload) {
+    try {
+        if (!raid || !raid.channelId || !raid.messageId) return null;
+        const channel = await client.channels.fetch(raid.channelId).catch(() => null);
+        if (!channel || !channel.isTextBased()) return null;
+        const webhook = await getRaidAlertWebhook(channel);
+        if (webhook) {
+            return await webhook.editMessage(raid.messageId, payload).catch((err) => {
+                console.warn('[raid alert] webhook edit failed:', (err && err.message) || err);
+                return null;
+            });
+        }
+        // Legacy fallback: alert posted by the bot account itself.
+        const message = await channel.messages.fetch(raid.messageId).catch(() => null);
+        if (!message) return null;
+        return await message.edit(payload).catch((err) => {
+            console.warn('[raid alert] message edit failed:', (err && err.message) || err);
+            return null;
+        });
+    } catch (err) {
+        console.warn('[raid alert] edit failed:', (err && err.message) || err);
+        return null;
+    }
+}
+
+/**
+ * Schedules deletion of a raid's temporary alert channel (alertChannelId).
+ * Called when the raid closes; the channel is deleted after delayMs
+ * (default: 1 minute). Safe to call multiple times — deduped per raid.
+ */
+function scheduleRaidAlertChannelDeletion(client, raidId, guildId, delayMs) {
+    try {
+        const wait = (typeof delayMs === 'number') ? delayMs : RAID_TEMP_CHANNEL_DELETE_DELAY_MS;
+        const key = guildId + ':' + raidId;
+        if (pendingAlertChannelDeletions.has(key)) return;
+        const raid = getRaidById(raidId, guildId);
+        const channelId = raid && raid.alertChannelId;
+        if (!channelId) return;
+        const timer = setTimeout(async () => {
+            pendingAlertChannelDeletions.delete(key);
+            const channel = await client.channels.fetch(channelId).catch(() => null);
+            if (channel) {
+                await channel.delete('Raid closed — temporary raid alert channel cleanup').catch((err) => {
+                    console.warn('[raid alert] temp channel delete failed:', (err && err.message) || err);
+                });
+            }
+        }, wait);
+        pendingAlertChannelDeletions.set(key, timer);
+    } catch (err) {
+        console.warn('[raid alert] deletion schedule failed:', (err && err.message) || err);
+    }
 }
 
 module.exports = {
@@ -776,6 +936,13 @@ module.exports = {
     blacklistUser,
     createRaid,
     setRaidOpen,
+    setRaidPingMention,
+    RAID_ALERT_WEBHOOK_NAME,
+    resolveRaidStatus,
+    createRaidAlertChannel,
+    getRaidAlertWebhook,
+    editRaidAlertMessage,
+    scheduleRaidAlertChannelDeletion,
     cleanupPendingRaids,
     getRaidById,
     addHelper,

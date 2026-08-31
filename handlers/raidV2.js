@@ -107,7 +107,7 @@ function resolveGameThumbnailUrl(raid) {
 async function buildRaidAlertPayload(raid, buttons) {
     if (buttons === undefined) buttons = null;
     const helperCount = (raid.helpers && raid.helpers.length) || 0;
-    const statusText = raid.status === 'OPEN' ? 'OPEN' : raid.status === 'FULL' ? 'FULL' : 'CLOSED';
+    const statusText = rsm.resolveRaidStatus(raid, helperCount);
     const gameLabel = (rsm.GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown');
     const createdMs = Number(raid.createdAt) || Date.now();
     const createdTs = Math.floor(createdMs / 1000);
@@ -144,9 +144,13 @@ async function buildRaidAlertPayload(raid, buttons) {
     const sections = [];
 
     // --- Section 1: header (title) — carries the requester pfp ---
+    // The role ping (raid.pingMention) is rendered INSIDE the alert as the very
+    // first line of the header text (above the RAID ALERT title) instead of
+    // being sent as separate message content.
+    const headerTitle = (raid.pingMention ? raid.pingMention + NL10 : '') + '### 🚨 RAID ALERT #' + raid.raidId;
     const headerSection = new SectionBuilder()
         .addTextDisplayComponents(
-            new TextDisplayBuilder().setContent('### 🚨 RAID ALERT #' + raid.raidId),
+            new TextDisplayBuilder().setContent(headerTitle),
             // Patient message shown straight after the raid alert title.
             new TextDisplayBuilder().setContent(
                 '🙏 Please remain patient while our helpers make their way to assist you. Someone will be with you shortly!'
@@ -191,7 +195,7 @@ async function buildRaidAlertPayload(raid, buttons) {
     );
 
     // --- Section 3: in-game helpers ---
-    sections.push(text('### ♟️ IN-GAME HELPERS' + NL10 + NL10 +
+    sections.push(text('### 🎮 IN-GAME HELPERS' + NL10 + NL10 +
         '> **Helpers Needed:** `' + helperNamesText + '`' + NL10 +
         '> **Total Helpers Joined:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`'));
 

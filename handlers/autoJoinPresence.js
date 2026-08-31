@@ -116,10 +116,6 @@ async function pollAutoJoin(client, guildId) {
 async function updateAlertMessage(client, raid, guildId) {
     try {
         if (!raid || !raid.channelId || !raid.messageId) return;
-        const channel = await client.channels.fetch(raid.channelId).catch(() => null);
-        if (!channel || !channel.isTextBased()) return;
-        const message = await channel.messages.fetch(raid.messageId).catch(() => null);
-        if (!message) return;
 
         // Lazily required to avoid a load-time cycle with events/interactionCreate.
         const { createRaidButtons } = require('../events/interactionCreate');
@@ -129,14 +125,14 @@ async function updateAlertMessage(client, raid, guildId) {
             : null;
         const row = createRaidButtons(raid, member);
 
+        // Alerts are authored by the 'backupalerts' webhook, so edits go
+        // through the webhook too (message.edit is rejected for webhook posts).
         if (raid.alertFormat === 'v2') {
             const payload = await raidV2.buildRaidAlertPayload(raid, row);
-            await message.edit({ flags: raidV2.RAID_ALERT_V2_FLAGS, components: payload.components })
-                .catch((err) => console.warn('[raid alert] V2 auto-join edit failed:', (err && err.message) || err));
+            await raidStateManager.editRaidAlertMessage(client, raid, { flags: raidV2.RAID_ALERT_V2_FLAGS, components: payload.components });
         } else {
             const embeds = raidStateManager.formatRaidMessage(raid, guildId);
-            await message.edit({ embeds: embeds, components: [row] })
-                .catch((err) => console.warn('[raid alert] auto-join embed edit failed:', (err && err.message) || err));
+            await raidStateManager.editRaidAlertMessage(client, raid, { embeds: embeds, components: [row] });
         }
     } catch (err) {
         console.warn('[auto-join] alert update failed:', (err && err.message) || err);

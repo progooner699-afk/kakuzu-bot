@@ -619,26 +619,24 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
         }
     };
 
-    // Update the raid alert message in the channel
+    // Update the raid alert message in the (temporary) alert channel. Alerts
+    // are authored by the 'backupalerts' webhook, so edits go through the
+    // webhook too (webhook-authored messages can't be edited via message.edit).
     try {
-        const alertChannel = await interaction.client.channels.fetch(raid.channelId).catch(() => null);
-        if (alertChannel && alertChannel.isTextBased()) {
-            const baseAlertMsg = await alertChannel.messages.fetch(raid.messageId).catch(() => null);
-            if (baseAlertMsg) {
-                const updatedAlertEmbeds = raidStateManager.formatRaidMessage(raid, interaction.guild.id);
-                const cleanClosedRow = createRaidButtons(raid, interaction.member);
-                if (raid.alertFormat === 'v2') {
-                    const payload = await raidV2.buildRaidAlertPayload(raid, cleanClosedRow);
-                    // The IS_COMPONENTS_V2 flag must be kept on every edit of a
-                    // V2 message, otherwise Discord rejects the components payload.
-                    await baseAlertMsg.edit({ flags: raidV2.RAID_ALERT_V2_FLAGS, components: payload.components })
-                        .catch((err) => console.warn('[raid alert] V2 close edit failed:', (err && err.message) || err));
-                } else {
-                    await baseAlertMsg.edit({ embeds: updatedAlertEmbeds, components: [cleanClosedRow] }).catch(() => null);
-                }
-            }
+        const updatedAlertEmbeds = raidStateManager.formatRaidMessage(raid, interaction.guild.id);
+        const cleanClosedRow = createRaidButtons(raid, interaction.member);
+        if (raid.alertFormat === 'v2') {
+            const payload = await raidV2.buildRaidAlertPayload(raid, cleanClosedRow);
+            // The IS_COMPONENTS_V2 flag must be kept on every edit of a
+            // V2 message, otherwise Discord rejects the components payload.
+            await raidStateManager.editRaidAlertMessage(interaction.client, raid, { flags: raidV2.RAID_ALERT_V2_FLAGS, components: payload.components });
+        } else {
+            await raidStateManager.editRaidAlertMessage(interaction.client, raid, { embeds: updatedAlertEmbeds, components: [cleanClosedRow] });
         }
     } catch (e) { /* ignore */ }
+
+    // The raid is closed -> its temporary raid alert channel self-deletes in 1 min.
+    raidStateManager.scheduleRaidAlertChannelDeletion(interaction.client, raid.raidId, interaction.guild.id);
 
 
     let uploadedUrls = [];
@@ -1093,14 +1091,8 @@ module.exports = {
             const raidButtonRow = createRaidButtons(raid, interaction.member);
             const regionRoleInfo = await getRaidPingInfo(interaction.client, guildId, { countryCode, region });
 
-            if (!settings.raidChannel) {
-                return interaction.reply({ content: 'Raid channel is not configured. Please run `/setchannels` and set the `raid_channel` first (Raid Alert channel).', flags: 64 }).catch(() => null);
-            }
-
-            const targetChannel = await interaction.client.channels.fetch(settings.raidChannel).catch(() => null);
-
-            if (!targetChannel || !targetChannel.isTextBased()) {
-                return interaction.reply({ content: 'Configured raid channel is unavailable or not a text channel. Please reconfigure it with `/setchannels`.', flags: 64 }).catch(() => null);
+            if (!settings.resultChannel) {
+                return interaction.reply({ content: 'Result channel is not configured. Please run `/setchannels` and set the `result_channel` first — raid alerts are posted in a temporary channel created in the same category.', flags: 64 }).catch(() => null);
             }
 
             const completionEmbed = new EmbedBuilder()
@@ -1117,30 +1109,62 @@ module.exports = {
 
             await interaction.reply({ embeds: [completionEmbed], flags: 64 }).catch(() => null);
 
+            // Temporary raid alert channel: created in the SAME CATEGORY as the
+            // configured raid result channel, named raid-alert-<raidId>. It
+            // lives while the raid is open and is auto-deleted 1 minute after
+            // the raid closes (see scheduleRaidAlertChannelDeletion).
+            const resultChannel = await interaction.client.channels.fetch(settings.resultChannel).catch(() => null);
+            const alertCategoryId = (resultChannel && resultChannel.parentId) || undefined;
+            const alertChannel = await raidStateManager.createRaidAlertChannel(interaction.client, raid, guildId, alertCategoryId);
+            if (!alertChannel) {
+                raidStateManager.cleanupPendingRaids(userId, guildId);
+                return interaction.followUp({ content: '⚠️ Could not create the temporary raid alert channel. Please make sure the bot has **Manage Channels** permission in the result channel category.', flags: 64 }).catch(() => null);
+            }
+
+            const alertWebhook = await raidStateManager.getRaidAlertWebhook(alertChannel);
+            if (!alertWebhook) {
+                raidStateManager.cleanupPendingRaids(userId, guildId);
+                await alertChannel.delete('Raid alert setup failed — no webhook permission').catch(() => null);
+                return interaction.followUp({ content: '⚠️ Could not create the `backupalerts` webhook. Please make sure the bot has **Manage Webhooks** permission.', flags: 64 }).catch(() => null);
+            }
+
             try {
+                // The ping is rendered INSIDE the alert (raidV2 reads
+                // raid.pingMention); persist it so later alert edits keep it.
+                raid.pingMention = regionRoleInfo.mention || null;
+                raidStateManager.setRaidPingMention(raid.raidId, raid.pingMention, guildId);
                 const v2Payload = await raidV2.buildRaidAlertPayload(raid, raidButtonRow);
-                if (regionRoleInfo.mention) {
-                    await targetChannel.send({ content: regionRoleInfo.mention, allowedMentions: regionRoleInfo.allowedMentions }).catch(() => null);
-                }
-                const v2Message = await targetChannel.send(v2Payload);
+                // allowedMentions restricts the ping to exactly the chosen role.
+                const v2SendOptions = Object.assign({ username: raidStateManager.RAID_ALERT_WEBHOOK_NAME }, v2Payload);
+                if (regionRoleInfo.allowedMentions) v2SendOptions.allowedMentions = regionRoleInfo.allowedMentions;
+                const v2Message = await alertWebhook.send(v2SendOptions);
                 raidV2.markAlertV2(raid.raidId, guildId);
                 raidStateManager.setRaidOpen(raid.raidId, guildId);
-                raidStateManager.updateRaidMessageReference(raid.raidId, targetChannel.id, v2Message.id, guildId);
+                raidStateManager.updateRaidMessageReference(raid.raidId, alertChannel.id, v2Message.id, guildId);
             } catch (err) {
                 console.warn('Components V2 alert failed, falling back to embed:', (err && err.message) || err);
                 try {
-                    const message = await targetChannel.send({
-                        content: regionRoleInfo.mention || undefined,
+                    // Ping lives INSIDE the embed description (formatRaidMessage
+                    // prepends raid.pingMention); mirror it on the pre-built
+                    // embeds here since they were rendered before the ping was set.
+                    if (raid.pingMention && embeds.length > 0 && typeof embeds[0].setDescription === 'function') {
+                        const existingDesc = (embeds[0].data && embeds[0].data.description) || '';
+                        embeds[0].setDescription(raid.pingMention + '\n' + existingDesc);
+                    }
+                    const message = await alertWebhook.send({
+                        username: raidStateManager.RAID_ALERT_WEBHOOK_NAME,
                         embeds: embeds,
                         components: [raidButtonRow],
                         allowedMentions: regionRoleInfo.allowedMentions
                     });
                     raidStateManager.setRaidOpen(raid.raidId, guildId);
-                    raidStateManager.updateRaidMessageReference(raid.raidId, targetChannel.id, message.id, guildId);
+                    raidStateManager.updateRaidMessageReference(raid.raidId, alertChannel.id, message.id, guildId);
                 } catch (err2) {
                     console.warn('Failed to post raid alert embed:', (err2 && err2.message) || err2);
                     raidStateManager.cleanupPendingRaids(userId, guildId);
-                    await interaction.followUp({ content: '⚠️ The raid alert could not be posted to the configured raid channel. Please ask an admin to verify the channel configuration and try again.', flags: 64 }).catch(() => null);
+                    // The channel never got a live alert -> remove it shortly.
+                    raidStateManager.scheduleRaidAlertChannelDeletion(interaction.client, raid.raidId, guildId, 5000);
+                    await interaction.followUp({ content: '⚠️ The raid alert could not be posted. Please ask an admin to verify the bot permissions and try again.', flags: 64 }).catch(() => null);
                 }
             }
         }
@@ -1247,21 +1271,15 @@ module.exports = {
                 return;
             }
             const updated = result.raid;
-            const embeds = raidStateManager.formatRaidMessage(updated, interaction.guild.id);
             const row = createRaidButtons(updated, interaction.member);
-            const channel = await interaction.client.channels.fetch(updated.channelId).catch(() => null);
-            if (channel) {
-                const message = await channel.messages.fetch(updated.messageId).catch(() => null);
-                if (message) {
-                    if (updated.alertFormat === 'v2') {
-                        const updatedPayload = await raidV2.buildRaidAlertPayload(updated, row);
-                        // Keep the IS_COMPONENTS_V2 flag on edit + log failures.
-                        await message.edit({ flags: raidV2.RAID_ALERT_V2_FLAGS, components: updatedPayload.components })
-                            .catch((err) => console.warn('[raid alert] V2 leave edit failed:', (err && err.message) || err));
-                    } else {
-                        await message.edit({ embeds: embeds, components: [row] }).catch(() => null);
-                    }
-                }
+            if (updated.alertFormat === 'v2') {
+                const updatedPayload = await raidV2.buildRaidAlertPayload(updated, row);
+                // Alerts are webhook-authored -> edit via the backupalerts webhook.
+                await raidStateManager.editRaidAlertMessage(interaction.client, updated, { flags: raidV2.RAID_ALERT_V2_FLAGS, components: updatedPayload.components })
+                    .catch((err) => console.warn('[raid alert] V2 leave edit failed:', (err && err.message) || err));
+            } else {
+                const embeds = raidStateManager.formatRaidMessage(updated, interaction.guild.id);
+                await raidStateManager.editRaidAlertMessage(interaction.client, updated, { embeds: embeds, components: [row] });
             }
             await interaction.reply({ content: 'You have left the raid.', flags: 64 }).catch(() => null);
             return;
@@ -1380,20 +1398,15 @@ module.exports = {
             raidStateManager.saveRaids(guildId, raids);
 
             // Re-render the EXISTING alert message IN PLACE (no new embed/message).
+            // Alerts are webhook-authored -> edit via the backupalerts webhook.
             if (raid.channelId && raid.messageId) {
-                const channel = await interaction.client.channels.fetch(raid.channelId).catch(() => null);
-                if (channel) {
-                    const message = await channel.messages.fetch(raid.messageId).catch(() => null);
-                    if (message) {
-                        const row = createRaidButtons(raid, interaction.member);
-                        if (raid.alertFormat === 'v2') {
-                            const payload = await raidV2.buildRaidAlertPayload(raid, row);
-                            await message.edit({ components: payload.components }).catch(() => null);
-                        } else {
-                            const embeds = raidStateManager.formatRaidMessage(raid, guildId);
-                            await message.edit({ embeds: embeds, components: [row] }).catch(() => null);
-                        }
-                    }
+                const row = createRaidButtons(raid, interaction.member);
+                if (raid.alertFormat === 'v2') {
+                    const payload = await raidV2.buildRaidAlertPayload(raid, row);
+                    await raidStateManager.editRaidAlertMessage(interaction.client, raid, { components: payload.components });
+                } else {
+                    const embeds = raidStateManager.formatRaidMessage(raid, guildId);
+                    await raidStateManager.editRaidAlertMessage(interaction.client, raid, { embeds: embeds, components: [row] });
                 }
             }
             await interaction.reply({ content: '✅ Raid fields updated in the alert.', flags: 64 }).catch(() => null);
@@ -1438,22 +1451,17 @@ module.exports = {
                 return;
             }
             const updated = result.raid;
-            const embeds = raidStateManager.formatRaidMessage(updated, interaction.guild.id);
             const row = createRaidButtons(updated, interaction.member);
-            const channel = await interaction.client.channels.fetch(updated.channelId).catch(() => null);
-            if (channel) {
-                const message = await channel.messages.fetch(updated.messageId).catch(() => null);
-                if (message) {
-                    if (updated.alertFormat === 'v2') {
-                        const updatedPayload = await raidV2.buildRaidAlertPayload(updated, row);
-                        // Keep the IS_COMPONENTS_V2 flag on edit + log failures so a
-                        // rejected LIVE HELPERS update is visible in the logs.
-                        await message.edit({ flags: raidV2.RAID_ALERT_V2_FLAGS, components: updatedPayload.components })
-                            .catch((err) => console.warn('[raid alert] V2 accept edit failed:', (err && err.message) || err));
-                    } else {
-                        await message.edit({ embeds: embeds, components: [row] }).catch(() => null);
-                    }
-                }
+            // Alerts are webhook-authored -> edit via the backupalerts webhook.
+            if (updated.alertFormat === 'v2') {
+                const updatedPayload = await raidV2.buildRaidAlertPayload(updated, row);
+                // Keep the IS_COMPONENTS_V2 flag on edit + log failures so a
+                // rejected LIVE HELPERS update is visible in the logs.
+                await raidStateManager.editRaidAlertMessage(interaction.client, updated, { flags: raidV2.RAID_ALERT_V2_FLAGS, components: updatedPayload.components })
+                    .catch((err) => console.warn('[raid alert] V2 accept edit failed:', (err && err.message) || err));
+            } else {
+                const embeds = raidStateManager.formatRaidMessage(updated, interaction.guild.id);
+                await raidStateManager.editRaidAlertMessage(interaction.client, updated, { embeds: embeds, components: [row] });
             }
             // Send the helper their deployment info.
             const gameLabel = raidStateManager.GAME_CONFIG[updated.targetGame] || updated.targetGame || 'Unknown';
