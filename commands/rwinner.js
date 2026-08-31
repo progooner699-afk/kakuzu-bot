@@ -3,16 +3,18 @@
 const {
     SlashCommandBuilder,
     ContainerBuilder,
+    SectionBuilder,
     TextDisplayBuilder,
     SeparatorBuilder,
     SeparatorSpacingSize,
+    ThumbnailBuilder,
     MediaGalleryBuilder,
     MediaGalleryItemBuilder
 } = require('discord.js');
 
 // Native Components V2 flag (IS_COMPONENTS_V2) — required for Separator /
-// MediaGallery components. V2 messages render FULL WIDTH (much wider than a
-// classic embed) and disable content + embeds on the message.
+// Section / Thumbnail / MediaGallery components. V2 messages render FULL
+// WIDTH (much wider than a classic embed) and disable content + embeds.
 const RWINNER_V2_FLAGS = 1 << 15;
 
 // Accent color matched to Discord's dark chat background (#2b2d31) so the
@@ -23,6 +25,10 @@ const RESULTS_NEUTRAL_COLOR = 0x2B2D31;
 // Discord components cannot reference local files). Rendered FIRST in the
 // Container so it sits at the TOP of the card, edge-to-edge full width.
 const BANNER_IMAGE = 'https://files.catbox.moe/iyqyrd.gif';
+
+// Fake MVP profile picture — rendered as a Thumbnail accessory on the RIGHT
+// side of the MVP section (hosted on catbox.moe, hotlinkable).
+const MVP_PFP_URL = 'https://files.catbox.moe/iyqyrd.gif';
 
 // Fake raid-proof links. They are ONLY rendered as clickable text links in
 // the Info text — they must NEVER be attached as media/gallery items, so
@@ -50,7 +56,9 @@ const NL = String.fromCharCode(10);
  * Builds the "RAID WON" result card (native Components V2 — full width):
  *   - banner MediaGallery rendered FIRST → image sits at the TOP, edge-to-edge
  *   - neutral #2b2d31 Container accent → no visible colored accent bar
- *   - ONE merged "📋 INFO" text block holding everything except the roster
+ *   - merged "📋 INFO" text blocks (everything except the roster), with the
+ *     MVP block as a Section carrying a fake profile-picture Thumbnail on the
+ *     RIGHT side
  *   - a "🛡️ HELPERS" section with a native Separator divider between EVERY
  *     helper line
  *   - "Kakuzu Raid Network · Raid #<id> · Result submitted by @<submitter>" footer
@@ -97,14 +105,30 @@ function buildResultsPayload() {
         '**Requested By:** **@Requester**' + NL +
         '**Ended By:** **@RaidEnder**' + NL +
         '**Raid Duration:** `24m 18s`' + NL +
-        "**Ender's Note:** They called more people, but we still destroyed them." + NL +
-        NL +
-        '**Raid MVP:** **@MVP**' + NL +
-        // The Roblox name itself is the profile link — tapping it opens the
-        // player's Roblox profile.
-        '**Roblox:** [DisplayName (@RobloxUsername)](https://www.roblox.com/users/1/profile)' + NL +
-        '**Discord:** **@MVP**' + NL +
-        NL +
+        "**Ender's Note:** They called more people, but we still destroyed them."
+    ));
+    contents.push(separator());
+
+    // --- MVP section: fake profile picture as a Thumbnail accessory pinned
+    // to the RIGHT side of the section (the only right-side media a V2 card
+    // supports). The Roblox name itself is the profile link. ---
+    contents.push(
+        new SectionBuilder()
+            .setThumbnailAccessory(
+                new ThumbnailBuilder()
+                    .setURL(MVP_PFP_URL)
+                    .setDescription('MVP profile picture')
+            )
+            .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+                '**Raid MVP:** **@MVP**' + NL +
+                '**Roblox:** [DisplayName (@RobloxUsername)](https://www.roblox.com/users/1/profile)' + NL +
+                '**Discord:** **@MVP**'
+            ))
+            .toJSON()
+    );
+    contents.push(separator());
+
+    contents.push(text(
         '**Enemy Clan:** `Lucent`' + NL +
         '**Enemies — 3:** `enemy_one` • `enemy_two` • `enemy_three`' + NL +
         NL +
