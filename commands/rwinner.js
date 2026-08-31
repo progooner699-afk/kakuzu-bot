@@ -30,6 +30,11 @@ const BANNER_IMAGE = 'https://files.catbox.moe/iyqyrd.gif';
 // side of the MVP section (hosted on catbox.moe, hotlinkable).
 const MVP_PFP_URL = 'https://files.catbox.moe/iyqyrd.gif';
 
+// Big-dot unicode bullet placed before every labeled INFO line
+// (U+25CF BLACK CIRCLE). Change this ONE constant to restyle every line
+// (e.g. '\u2022' for the small classic bullet, '\u2B25' for a diamond).
+const DOT = '\u25CF';
+
 // Fake raid-proof links. They are ONLY rendered as clickable text links in
 // the Info text — they must NEVER be attached as media/gallery items, so
 // Discord does not auto-display them inline.
@@ -102,9 +107,9 @@ function buildResultsPayload() {
         '## 🏆 RAID WON — #421' + NL +
         NL +
         '### 📋 INFO' + NL +
-        '**Requested By:** **@Requester**' + NL +
-        '**Ended By:** **@RaidEnder**' + NL +
-        '**Raid Duration:** `24m 18s`' + NL +
+        DOT + ' **Requested By:** **@Requester**' + NL +
+        DOT + ' **Ended By:** **@RaidEnder**' + NL +
+        DOT + ' **Raid Duration:** `24m 18s`' + NL +
         NL +
         // Ender's Note rendered as a FULL quote block (both the label and the
         // note text sit behind quote bars); all other content stays unquoted.
@@ -124,24 +129,24 @@ function buildResultsPayload() {
                     .setDescription('MVP profile picture')
             )
             .addTextDisplayComponents(new TextDisplayBuilder().setContent(
-                '**Raid MVP:** **@MVP**' + NL +
-                '**Roblox:** [DisplayName (@RobloxUsername)](https://www.roblox.com/users/1/profile)' + NL +
-                '**Discord:** **@MVP**'
+                DOT + ' **Raid MVP:** **@MVP**' + NL +
+                DOT + ' **Roblox:** [DisplayName (@RobloxUsername)](https://www.roblox.com/users/1/profile)' + NL +
+                DOT + ' **Discord:** **@MVP**'
             ))
             .toJSON()
     );
     contents.push(separator());
 
     contents.push(text(
-        '**Enemy Clan:** `Lucent`' + NL +
-        '**Enemies — 3:** `enemy_one` • `enemy_two` • `enemy_three`' + NL +
+        DOT + ' **Enemy Clan:** `Lucent`' + NL +
+        DOT + ' **Enemies — 3:** `enemy_one` • `enemy_two` • `enemy_three`' + NL +
         NL +
-        '**Game:** The Strongest Battlegrounds' + NL +
-        '**Location:** `ASIA • India`' + NL +
-        '**Started:** 30 August 2026 at 16:58' + NL +
-        '**Ended:** 30 August 2026 at 17:22' + NL +
+        DOT + ' **Game:** The Strongest Battlegrounds' + NL +
+        DOT + ' **Location:** `ASIA • India`' + NL +
+        DOT + ' **Started:** 30 August 2026 at 16:58' + NL +
+        DOT + ' **Ended:** 30 August 2026 at 17:22' + NL +
         NL +
-        '**Raid Proof:** ' + proofLinks
+        DOT + ' **Raid Proof:** ' + proofLinks
     ));
     contents.push(separator());
 
