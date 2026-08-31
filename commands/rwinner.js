@@ -1,18 +1,31 @@
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const {
+    SlashCommandBuilder,
+    ContainerBuilder,
+    TextDisplayBuilder,
+    SeparatorBuilder,
+    SeparatorSpacingSize,
+    MediaGalleryBuilder,
+    MediaGalleryItemBuilder
+} = require('discord.js');
 
-// Neutral embed color that exactly matches Discord's dark chat background
-// (#2b2d31) — with no contrast against the message surface, the colored
-// accent bar on the left edge of the embed is invisible.
+// Native Components V2 flag (IS_COMPONENTS_V2) — required for Separator /
+// MediaGallery components. V2 messages render FULL WIDTH (much wider than a
+// classic embed) and disable content + embeds on the message.
+const RWINNER_V2_FLAGS = 1 << 15;
+
+// Accent color matched to Discord's dark chat background (#2b2d31) so the
+// Container's left accent bar is effectively invisible.
 const RESULTS_NEUTRAL_COLOR = 0x2B2D31;
 
 // Top banner image (hosted on catbox.moe — permanent, hotlinkable URL;
-// Discord embeds cannot reference local files).
+// Discord components cannot reference local files). Rendered FIRST in the
+// Container so it sits at the TOP of the card, edge-to-edge full width.
 const BANNER_IMAGE = 'https://files.catbox.moe/iyqyrd.gif';
 
 // Fake raid-proof links. They are ONLY rendered as clickable text links in
-// the Info field — they must NEVER be attached as embed images/media, so
+// the Info text — they must NEVER be attached as media/gallery items, so
 // Discord does not auto-display them inline.
 const FAKE_PROOF_URLS = [
     'https://media.giphy.com/media/3o7qE1YN7aYDCHGGSk/giphy.gif',
@@ -20,74 +33,110 @@ const FAKE_PROOF_URLS = [
     'https://media.giphy.com/media/13Y6LAwZuTGsgI/giphy.gif'
 ];
 
-// Runtime newline used while composing field values (avoids escape sequence
-// mangling in the source file itself).
+// Fake helper roster — one entry per helper, each separated by a native
+// Separator (type 14) divider component.
+const FAKE_HELPERS = [
+    { name: '@HelperOne', duration: '24m 18s' },
+    { name: '@HelperTwo', duration: '19m 42s' },
+    { name: '@HelperThree', duration: '12m 05s' },
+    { name: '@HelperFour', duration: '08m 31s' }
+];
+
+// Runtime newline used while composing TextDisplay content (avoids escape
+// sequence mangling in the source file itself).
 const NL = String.fromCharCode(10);
 
-// Field values are hard-capped at 1024 chars by Discord — trim defensively.
-function clampFieldValue(value) {
-    return value.length > 1024 ? value.slice(0, 1020) + '…' : value;
-}
-
 /**
- * Builds the "RAID WON" result embed (classic embed, NOT Components V2):
- *   - neutral #2b2d31 color → no colored accent bar on the left edge
- *   - large banner image at the top (embed `image`)
- *   - ONE merged "📋 Info" field holding everything except the helper roster
- *   - a separate "🛡️ Helpers" field (one "@name — duration" per line)
+ * Builds the "RAID WON" result card (native Components V2 — full width):
+ *   - banner MediaGallery rendered FIRST → image sits at the TOP, edge-to-edge
+ *   - neutral #2b2d31 Container accent → no visible colored accent bar
+ *   - ONE merged "📋 INFO" text block holding everything except the roster
+ *   - a "🛡️ HELPERS" section with a native Separator divider between EVERY
+ *     helper line
  *   - "Kakuzu Raid Network · Raid #<id> · Result submitted by @<submitter>" footer
  * Raid proof is rendered as plain clickable text links ([Image 1](url) • ...)
- * so the screenshots do NOT auto-display inside the embed.
+ * so the screenshots do NOT auto-display inside the card.
  */
 function buildResultsPayload() {
-    // --- Raid proof: text links only, never auto-displayed ---
+    const text = function (content) {
+        return new TextDisplayBuilder().setContent(content).toJSON(); // type 10
+    };
+    const separator = function () {
+        return new SeparatorBuilder() // type 14
+            .setDivider(true)
+            .setSpacing(SeparatorSpacingSize.Small)
+            .toJSON();
+    };
+
+    const container = new ContainerBuilder().setAccentColor(RESULTS_NEUTRAL_COLOR).toJSON();
+    container.size = 'large';
+
+    const contents = [];
+
+    // --- TOP banner: MediaGallery images render edge-to-edge across the full
+    // card width and sit ABOVE everything else in the container ---
+    contents.push(new MediaGalleryBuilder().addItems([
+        new MediaGalleryItemBuilder()
+            .setURL(BANNER_IMAGE)
+            .setDescription('Victory banner')
+            .toJSON()
+    ]).toJSON());
+    contents.push(separator());
+
+    // --- ONE consolidated Info block (everything except Helpers) ---
     const proofLinks = FAKE_PROOF_URLS
-        .map((url, index) => '[Image ' + (index + 1) + '](' + url + ')')
+        .map(function (url, index) {
+            return '[Image ' + (index + 1) + '](' + url + ')';
+        })
         .join(' • ');
 
-    // --- ONE consolidated Info field (everything except Helpers) ---
-    const infoValue = [
+    contents.push(text(
+        '## 🏆 RAID WON — #421' + NL +
+        NL +
+        '### 📋 INFO' + NL +
         '**Requested By:** **@Requester**' + NL +
         '**Ended By:** **@RaidEnder**' + NL +
         '**Raid Duration:** `24m 18s`' + NL +
-        "**Ender's Note:** They called more people, but we still destroyed them.",
+        "**Ender's Note:** They called more people, but we still destroyed them." + NL +
         NL +
         '**Raid MVP:** **@MVP**' + NL +
         // The Roblox name itself is the profile link — tapping it opens the
         // player's Roblox profile.
         '**Roblox:** [DisplayName (@RobloxUsername)](https://www.roblox.com/users/1/profile)' + NL +
-        '**Discord:** **@MVP**',
+        '**Discord:** **@MVP**' + NL +
         NL +
         '**Enemy Clan:** `Lucent`' + NL +
-        '**Enemies — 3:** `enemy_one` • `enemy_two` • `enemy_three`',
+        '**Enemies — 3:** `enemy_one` • `enemy_two` • `enemy_three`' + NL +
         NL +
         '**Game:** The Strongest Battlegrounds' + NL +
         '**Location:** `ASIA • India`' + NL +
         '**Started:** 30 August 2026 at 16:58' + NL +
-        '**Ended:** 30 August 2026 at 17:22',
+        '**Ended:** 30 August 2026 at 17:22' + NL +
         NL +
         '**Raid Proof:** ' + proofLinks
-    ].join(NL);
+    ));
+    contents.push(separator());
 
-    // --- Separate Helpers field: one "@username — duration" per line ---
-    const helpersValue = [
-        '**@HelperOne** — `24m 18s`',
-        '**@HelperTwo** — `19m 42s`',
-        '**@HelperThree** — `12m 05s`',
-        '**@HelperFour** — `08m 31s`'
-    ].join(NL);
+    // --- Helpers section: each helper in its own TextDisplay with a native
+    // Separator divider between helpers ---
+    contents.push(text('### 🛡️ HELPERS'));
+    FAKE_HELPERS.forEach(function (helper, index) {
+        contents.push(text('**' + helper.name + '** — `' + helper.duration + '`'));
+        if (index < FAKE_HELPERS.length - 1) {
+            contents.push(separator());
+        }
+    });
 
-    const embed = new EmbedBuilder()
-        .setColor(RESULTS_NEUTRAL_COLOR)
-        .setTitle('🏆 RAID WON — #421')
-        .setImage(BANNER_IMAGE)
-        .addFields([
-            { name: '📋 Info', value: clampFieldValue(infoValue) },
-            { name: '🛡️ Helpers', value: clampFieldValue(helpersValue) }
-        ])
-        .setFooter({ text: 'Kakuzu Raid Network · Raid #421 · Result submitted by @RaidEnder' });
+    // --- Subtext footer ---
+    contents.push(separator());
+    contents.push(text('-# Kakuzu Raid Network · Raid #421 · Result submitted by **@RaidEnder**'));
 
-    return { embeds: [embed] };
+    container.components = contents;
+
+    return {
+        flags: RWINNER_V2_FLAGS,
+        components: [container]
+    };
 }
 
 module.exports = {
