@@ -42,6 +42,11 @@ const DOT = '\u25CF';
 const INFO_EMOJI = '<:info:1543995035396218950>';
 const MVP_EMOJI = '<:mvp:1543994867552882699>';
 
+// "Won" emoji — the sunglasses-face, rendered right after RAID WON in the
+// title line. Unicode, so it needs no hosting; to use a custom server emoji
+// instead, replace with '<:name:id>'.
+const WON_EMOJI = '\u{1F60E}';
+
 // Fake raid-proof links. They are ONLY rendered as clickable text links in
 // the Info text — they must NEVER be attached as media/gallery items, so
 // Discord does not auto-display them inline.
@@ -111,7 +116,7 @@ function buildResultsPayload() {
         .join(' • ');
 
     contents.push(text(
-        '## 🏆 RAID WON — #421' + NL +
+        '## 🏆 RAID WON ' + WON_EMOJI + ' — #421' + NL +
         NL +
         '### ' + INFO_EMOJI + ' INFO' + NL +
         DOT + ' **Requested By:** **@Requester**' + NL +
