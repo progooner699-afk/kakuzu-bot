@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+﻿const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const raidStateManager = require('../handlers/raidStateManager');
 const raidV2 = require('../handlers/raidV2');
 
@@ -22,7 +22,7 @@ module.exports = {
         const raid = raidStateManager.getRaidById(raidId, interaction.guild.id);
 
         if (!raid) {
-            return interaction.reply({ content: 'Raid not found.', ephemeral: true });
+            return interaction.editReply({ content: 'Raid not found.', ephemeral: true });
         }
 
         const member = interaction.member;
@@ -32,7 +32,7 @@ module.exports = {
             member.roles.cache.some(role => ['Administrator', 'Management Supervisor', 'Community Manager', 'Senior Moderator', '💣 ‖ SUPREME LEADER'].includes(role.name))
         );
         if (!canClose) {
-            return interaction.reply({ content: 'Access Denied: Only the Raid Leader or an Administrator can close this.', ephemeral: true });
+            return interaction.editReply({ content: 'Access Denied: Only the Raid Leader or an Administrator can close this.', ephemeral: true });
         }
 
         const updatedRaid = raidStateManager.closeRaid(raidId, {
@@ -42,7 +42,7 @@ module.exports = {
         }, interaction.guild.id);
 
         if (!updatedRaid) {
-            return interaction.reply({ content: 'Unable to close the raid.', ephemeral: true });
+            return interaction.editReply({ content: 'Unable to close the raid.', ephemeral: true });
         }
 
         const settings = raidStateManager.loadSettings(interaction.guild.id);
@@ -69,6 +69,6 @@ module.exports = {
             }
         }
 
-        return interaction.reply({ content: `Raid #${raidId} has been closed and logged.`, ephemeral: true });
+        return interaction.editReply({ content: `Raid #${raidId} has been closed and logged.`, ephemeral: true });
     }
 };

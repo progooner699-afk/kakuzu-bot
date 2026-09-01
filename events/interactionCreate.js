@@ -713,7 +713,27 @@ module.exports = {
     async execute(interaction) {
         if (interaction.isChatInputCommand()) {
             const command = interaction.client.commands.get(interaction.commandName);
-            if (!command) return;
+            // Never silently swallow a command: a bare `return` here makes Discord
+            // show "The application did not respond" for EVERY command whenever the
+            // command cache is empty/broken. Acknowledge so the user gets feedback.
+            if (!command) {
+                console.warn(`No local handler for /${interaction.commandName || 'unknown'} - acknowledging instead of timing out.`);
+                return interaction.reply({
+                    content: '⚠️ This command is not loaded on the bot instance. Please try again in a few seconds.',
+                    flags: 64
+                }).catch(() => null);
+            }
+
+            // Acknowledge IMMEDIATELY (ephemeral). Data-backed commands (close-raid,
+            // setchannels, ...) do DB/webhook work BEFORE their final reply and can
+            // easily blow past Discord's 3-second ack window - especially right
+            // after a Render cold-restart when sql.js / REST are cold. Commands
+            // that must control the INITIAL response (Components V2 flag, modals)
+            // opt out with `deferFirst: false` (see announcement/backuppanel).
+            if (command.deferFirst !== false) {
+                await interaction.deferReply({ flags: 64 }).catch(() => null);
+            }
+
             try {
                 await command.execute(interaction);
             } catch (error) {

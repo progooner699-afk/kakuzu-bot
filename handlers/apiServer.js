@@ -31,6 +31,7 @@
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
+const { reconnectDiscord, getGatewayDiagnostics } = require('./gatewayGuard');
 
 // Rolling-window rate limit helper (per client IP), 300/min.
 //
@@ -336,13 +337,17 @@ function createApiServer(client) {
     app.post('/api/action/restart', async (req, res) => {
         res.json({ success: true, message: 'Bot restarting...' });
         console.log('[API] Restart requested - reconnecting Discord client...');
-        try {
-            await client.destroy();
-            await client.login(process.env.DISCORD_TOKEN);
-            console.log('[API] Bot reconnected successfully.');
-        } catch (error) {
-            console.error('[API] Restart failed:', error);
-        }
+        const ok = await reconnectDiscord(client);
+        console.log(ok ? '[API] Bot reconnected successfully.' : '[API] Reconnect attempt finished but failed (see [gateway] logs).');
+    });
+
+    // Real Discord-connection diagnostics - distinct fromthe Render health
+    // check: GET / returns 200 wheneverthe HTTP server is up, which is what
+    // makes Render show "Live" even when the bot is offlinein Discord. This
+    // endpoint reports the ACTUAL gateway state so a browser can confirm real
+    // connectivity instead of trusting the Render badge..
+    app.get('/api/health/discord', (req, res) => {
+        res.json(getGatewayDiagnostics(client));
     });
 
     // -------------------------------------------------------------------

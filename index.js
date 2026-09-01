@@ -7,6 +7,7 @@ const config = require('./config.json');
 const commandHandler = require('./handlers/commandHandler');
 const raidStateManager = require('./handlers/raidStateManager');
 const { checkRobloxCookieAuth } = require('./handlers/robloxAuth');
+const { attachGatewayGuard, startGatewayWatchdog } = require('./handlers/gatewayGuard');
 
 // FIXED: Added GuildMessages, MessageContent and GuildMembers for verification DMs
 const client = new Client({ 
@@ -20,6 +21,12 @@ const client = new Client({
 
 client.commands = new Collection();
 client.raidStateManager = raidStateManager;
+
+// Gateway self-heal + lifecycle logging: prevents the zombie state where Render
+// shows "Live" (HTTP health-check 200) but the bot is actually offline in Discord
+// (see handlers/gatewayGuard.js for details)..
+attachGatewayGuard(client);
+startGatewayWatchdog(client);
 
 // Process-level safety nets: a single unhandled promise rejection would by
 // default CRASH the whole process (making EVERY command stop working). Log it
@@ -71,5 +78,28 @@ checkRobloxCookieAuth('startup', true).catch(err => {
     console.error('[robloxAuth] startup cookie diagnostic failed (bot kept alive):', err && err.stack ? err.stack : err);
 });
 
-// Discord bot login
-client.login(process.env.DISCORD_TOKEN);
+// Discord bot login - handled explicitly so a boot-time login rejection (Discord
+// session_start_limit 429 after repeated Render restarts/or transient Gateway 5xx)
+// logs loudly and exits with a non-zero code so Render recycles the service and retries with
+// a fresh Discord session budget - instead of sitting "Live" but never connecting..
+const loginPromise = client.login(process.env.DISCORD_TOKEN);
+loginPromise.then(() => console.log('Discord login OK.')).catch(async (error) => {
+    console.error('Discord login FAILED - exiting so Render restarts with a fresh session:', error && error.stack ? error.stack : error);
+    try { await client.destroy(); } catch (err) { /* ignore */ }
+    process.exit(1);
+});
+
+// Graceful shutdown: closes the Discord Gateway connection cleanly(close code
+// 1000) so Discord frees the session slot, keeping the session_start_limit budget
+// healthy across Render redeploys..
+let shuttingDown = false;
+function shutdownGracefully(reason) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log('Shutdown requested (' + reason + ') - closing Discord connection cleanly...');
+    const exitTimer = setTimeout(() => process.exit(0), 3000);
+    if (exitTimer.unref) exitTimer.unref();
+    client.destroy().then(() => process.exit(0)).catch(() => process.exit(0));
+}
+process.on('SIGTERM', () => shutdownGracefully('SIGTERM from Render deploy/stop'));
+process.on('SIGINT', () => shutdownGracefully('SIGINT manual stop'));

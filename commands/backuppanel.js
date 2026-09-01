@@ -210,6 +210,10 @@ module.exports = {
     BACKUP_PANEL_WEBHOOK_NAME,
     BACKUP_PANEL_V2_FLAGS,
     getBackupPanelAvatarBuffer: getAvatarBuffer,
+    // The command reply is the ephemeral channel-picker (instant) — no DB or
+    // network work before it, so it opts out of the dispatcher's auto-defer to
+    // keep the reply path identical to before.
+    deferFirst: false,
     async execute(interaction) {
         if (!interaction.memberPermissions || !interaction.memberPermissions.has(PermissionFlagsBits.ManageGuild)) {
             return interaction.reply({

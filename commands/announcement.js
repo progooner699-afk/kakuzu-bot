@@ -883,6 +883,10 @@ module.exports = {
     buildAnnouncementPayload,
     buildBuilderComponents,
     handleAnnouncementComponent,
+    // The builder panel must set Components V2 + ephemeral flags on the INITIAL
+    // response (editReply cannot change flags after a defer), so it opts out of
+    // the dispatcher's auto-defer. Its first reply is instant anyway.
+    deferFirst: false,
     async execute(interaction) {
         if (!interaction.guild) {
             return interaction.reply({ content: 'This command can only be used inside a server.', flags: EPHEMERAL_FLAG });

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+﻿const { SlashCommandBuilder } = require('discord.js');
 const raidStateManager = require('../handlers/raidStateManager');
 
 module.exports = {
@@ -14,7 +14,7 @@ module.exports = {
     async execute(interaction) {
         // Server Owner only check
         if (interaction.user.id !== interaction.guild.ownerId) {
-            return interaction.reply({
+            return interaction.editReply({
                 content: '❌ **Access Denied.** Only the Server Owner can configure the locked ping role.',
                 flags: 64
             });
@@ -26,7 +26,7 @@ module.exports = {
         settings.lockedPingRoleId = role.id;
         raidStateManager.saveSettings(guildId, settings);
 
-        await interaction.reply({
+        await interaction.editReply({
             content: `✅ Locked ping role set to ${role}. New members will automatically receive this role upon joining.`,
             flags: 64
         });

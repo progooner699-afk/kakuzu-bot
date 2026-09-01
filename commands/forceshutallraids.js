@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+﻿const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const raidStateManager = require('../handlers/raidStateManager');
 
 module.exports = {
@@ -14,6 +14,6 @@ module.exports = {
         for (const r of raidsData.raids) {
             raidStateManager.scheduleRaidAlertChannelDeletion(interaction.client, r.raidId, guildId);
         }
-        await interaction.reply({ content: `All raids have been force-closed. ${closedCount} raid(s) were shut down. Temporary raid alert channels will be deleted in 1 minute.`, flags: 64 });
+        await interaction.editReply({ content: `All raids have been force-closed. ${closedCount} raid(s) were shut down. Temporary raid alert channels will be deleted in 1 minute.`, flags: 64 });
     }
 };

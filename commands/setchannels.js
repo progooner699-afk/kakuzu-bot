@@ -20,7 +20,7 @@ module.exports = {
         settings.resultChannel = resultChannel;
 
         raidStateManager.saveSettings(guildId, settings);
-        await interaction.reply({
+        await interaction.editReply({
             content: '✅ Result channel set to <#' + resultChannel + '>. Raid result embeds will be posted there, and each raid alert gets its own temporary `raid-alert-<id>` channel created in the same category — it is deleted automatically 1 minute after the raid closes. Alerts are posted via the `backupalerts` webhook.',
             flags: 64
         });

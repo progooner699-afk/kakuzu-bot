@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+﻿const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const raidStateManager = require('../handlers/raidStateManager');
 
 module.exports = {
@@ -61,7 +61,7 @@ module.exports = {
 
         raidStateManager.saveSettings(guildId, settings);
 
-        await interaction.reply({
+        await interaction.editReply({
             content: '✅ **Channel configuration cleared.**\n\n' +
                      'Cleared:\n' +
                      cleared.map(channel => `• ${channel}`).join('\n') +
