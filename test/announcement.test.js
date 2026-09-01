@@ -81,7 +81,7 @@ test('title, description and footer sections are present', () => {
   assert.ok(textContents.includes('Announced <t:'));
 });
 
-test('builder panel exposes all button rows including Field 1-8', () => {
+test('builder panel exposes all button rows including Field 1-8, Icon and Color', () => {
   const panel = announcement.buildBuilderComponents(fakeState());
   assert.strictEqual(panel.flags, 1 << 15);
   const container = panel.components[0];
@@ -89,9 +89,31 @@ test('builder panel exposes all button rows including Field 1-8', () => {
   assert.ok(rows.length >= 4);
 
   const ids = rows.flatMap((r) => r.components.map((b) => b.custom_id));
-  ['annb_title', 'annb_desc', 'annb_thumb', 'annb_ping', 'annb_webhook',
+  ['annb_title', 'annb_desc', 'annb_thumb', 'annb_icon', 'annb_color',
+    'annb_ping', 'annb_webhook',
     'annb_preview', 'annb_publish', 'annb_cancel', 'annb_clearfields',
     'annb_field_1', 'annb_field_2', 'annb_field_3', 'annb_field_4', 'annb_field_5',
     'annb_field_6', 'annb_field_7', 'annb_field_8'
   ].forEach((id) => assert.ok(ids.includes(id), 'missing button ' + id));
+});
+
+test('accent color drives the Container embed line and falls back cleanly', () => {
+  const payload = announcement.buildAnnouncementPayload(fakeState({ accentColor: '#ED4245' }));
+  assert.strictEqual(payload.components[0].accent_color, 0xed4245);
+
+  // Default when not set.
+  const defaultPayload = announcement.buildAnnouncementPayload(fakeState({ accentColor: '' }));
+  assert.strictEqual(defaultPayload.components[0].accent_color, 0x5865f2);
+
+  // Invalid hex falls back to default too.
+  const invalid = announcement.buildAnnouncementPayload(fakeState({ accentColor: '#zzzzzz' }));
+  assert.strictEqual(invalid.components[0].accent_color, 0x5865f2);
+});
+
+test('bundled invisible avatar is a transparent PNG buffer', () => {
+  const buf = announcement.getInvisibleAvatarBuffer();
+  assert.ok(buf, 'transparent avatar asset should exist');
+  assert.ok(Buffer.isBuffer(buf));
+  // PNG signature bytes.
+  assert.strictEqual(buf.slice(0, 8).toString('hex'), '89504e470d0a1a0a');
 });
