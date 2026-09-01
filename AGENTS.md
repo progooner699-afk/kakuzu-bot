@@ -55,10 +55,12 @@
   `countryCode` was detected, only `countryPings[COUNTRY_CODE]` is considered;
   if that role is missing/deleted/invalid the alert posts with **no** location
   ping (no broad-region fallback). If no `countryCode` was detected, only
-  `regionPings[BROAD_REGION]` is considered. If Postgres is unconfigured/down/
-  empty the legacy `settings.regionPings` (from `/setregionping`) fallback runs,
-  but only on the no-country region path. `allowedMentions.roles` restricts
-  pings to exactly the chosen role. The alert embed shows the human-readable
+  `regionPings[BROAD_REGION]` is considered. Config comes **exclusively** from
+  the shared Postgres dashboard (`getGuildPingSettings`); the legacy
+  `settings.regionPings` (from the removed `/setregionping` command) is no
+  longer read — if the DB is unconfigured/down/empty there is simply **no**
+  location ping on either path. `allowedMentions.roles` restricts pings to
+  exactly the chosen role. The alert embed shows the human-readable
   `Country` name (from `raidStateManager.countryCodeToName`, e.g. `IN` → `India`)
   directly under `Region`, or `Unknown` when undetected.
 * **Detector:** `robloxApi.detectGameAndRegion` now also returns `countryCode`
@@ -94,11 +96,11 @@
   ephemeral error, and uses `editReply` throughout. `createRaidButtons` is
   exported from `events/interactionCreate.js` for reuse by the auto-join
   alert re-render.
-* **Transition:** `/setregionping` is intentionally UNTOUCHED for now (it still
-  writes `settings.json`). A later stage removes it once the
-  dashboard→Postgres→bot path is verified.
+* **Removed `/setregionping`:** the legacy settings.json `regionPings` command was
+  deleted — the dashboard→Postgres→bot path is now the SOLE source of truth.
 * **Running:** if `DATABASE_URL` is unset or empty, `sharedPingDb` returns empty
-  maps and the legacy ping path runs — the bot needs zero Postgres changes.
+  maps and the bot simply posts with **no** location ping — it needs zero
+  Postgres changes and zero legacy config.
 
 ## 🔁 IMPORTANT RECOVERY NOTE (as of latest commit)
 
@@ -182,7 +184,7 @@ Refactored the linking → request → join → close loop per the spec:
      plus the requester thumbnail via `setThumbnail`, so the separator line and
      thumbnail stay visible even when Discord rejects the native V2 payload
      (Components V2 is a Discord beta that must be granted to the bot; if not,
-     the send fails and `/raidtest` reports "embed fallback"). Native
+     the send falls back to embeds). Native
      `Separator` (`type: 14`) and `Thumbnail` (`type: 11`) components are still
      emitted by `handlers/raidV2.js` for when V2 is enabled.
    * V2 alert lifecycle: a successful V2 post sets `alertFormat: 'v2'` on the
@@ -213,13 +215,13 @@ Refactored the linking → request → join → close loop per the spec:
      Loss / **No Result** — the old "Can't Say" option was REMOVED). For
      Win/Whooped/Loss the helper with the most `timeSpentSeconds` is set as
      MVP automatically → raid closed, streak/metrics compiled, and the final
-     Raid Result is posted as a **native Components V2 card** (same layout as
-     `/rwinner`) built by `handlers/raidResultCard.js` (`buildResultCardPayload`),
+     Raid Result is posted as a **native Components V2 card** built by
+     `handlers/raidResultCard.js` (`buildResultCardPayload`),
      with the region-role ping sent as a separate message first (V2 disables
      `content`); if the V2 send fails it falls back to a classic embed
      (`buildResultFallbackEmbed`). The **3 card types** share one layout with
-     different title emojis: Win `🏆 RAID WON <:won:…>` (identical to
-     `/rwinner`), Whooped `💀 RAID WHOOPED`, Loss `❌ RAID LOST` (emoji map:
+     different title emojis: Win `🏆 RAID WON <:won:…>` , Whooped `💀 RAID
+     WHOOPED`, Loss `❌ RAID LOST` (emoji map:
      `raidResultCard.OUTCOME_STYLES`).
    * **Rally picture / proof upload flow:** closing a result outcome creates a
      temporary `raid-uploads-<id>` channel (2 min window). The closer sends
@@ -243,7 +245,7 @@ Refactored the linking → request → join → close loop per the spec:
 | `events/interactionCreate.js` | **Main interaction hub** (buttons, modals, selects). Contains verification decision helpers, link flow, raid application step 1, `open_raid_application` modal launcher, and the RAID OPERATIONS section (`raid_accept_`, `raid_leave_`, `raid_close_`, `raid_outcome_`, `raid_mvp_select_`). |
 | `handlers/raidStateManager.js` | Raid CRUD + persistence + presence polling. |
 | `handlers/raidV2.js` | Native Components V2 raid alert builder (`buildRaidAlertPayload`, `markAlertV2`). |
-| `handlers/raidResultCard.js` | Native Components V2 raid RESULT card (same layout as `/rwinner`): `buildResultCardPayload` (win/whooped/loss title styles, rally-pic TOP banner), `buildResultFallbackEmbed` (classic-embed fallback), `buildNoResultEmbed` (🚫 No Result note). |
+| `handlers/raidResultCard.js` | Native Components V2 raid RESULT card: `buildResultCardPayload` (win/whooped/loss title styles, rally-pic TOP banner), `buildResultFallbackEmbed` (classic-embed fallback), `buildNoResultEmbed` (🚫 No Result note). |
 | `handlers/robloxApi.js` | Roblox API/Presence calls, username validation, deep-links. |
 | `handlers/robloxAuth.js` | `.ROBLOSECURITY` handling: safe cookie-auth diagnostic that runs once at startup (`index.js`, `force`) and before each gamejoin (`getServerIp`); logs ONLY `cookieConfigured/cookieLength/authCheck/httpStatus/replacementCookieReceived` — never the value. In-memory rotation adoption on authenticated requests. |
 | `handlers/verificationDb.js` | sql.js persistence for verification records. |
@@ -252,7 +254,7 @@ Refactored the linking → request → join → close loop per the spec:
 | `handlers/commandHandler.js` | Loads commands from `commands/` into `client.commands`. |
 | `commands/deploy-commands.js` | `registerGuildCommands(guildId)` — used by `ready.js`; also a standalone CLI (`npm run deploy-commands`). |
 | `commands/announcement.js` | **Interactive Components V2 announcement builder** (`/announcement`, Manage Messages): ephemeral builder panel (Title / Description / **Thumbnail upload collector** / Ping / **Webhook name** / **Field 1-8** / Clear Fields / Preview / Publish / Cancel). Up to **8 fields**, each separated by a native V2 `Separator` (`type: 14`). The thumbnail is a **wide full-width MediaGallery (`type: 12`) TOP banner**. Publishing asks for a target channel, then finds/creates a **webhook with the user-typed name** in that channel and posts the V2 card through it (the ping, if set, is sent as a separate message first because the V2 flag disables `content`). Exposes `buildAnnouncementPayload`, `buildBuilderComponents`, `handleAnnouncementComponent`, `ANNOUNCEMENT_V2_FLAGS`, `MAX_FIELDS`; wired into `events/interactionCreate.js` via an early `annb_` customId dispatch. |
-| `commands/*.js` | Slash commands (backuppanel, close-raid, channelconfig, setchannels, unsetchannels, setregionping, setlockedpingrole, botinfo, announcement, forceshutallraids, raidtest, etc.). |
+| `commands/*.js` | Slash commands (backuppanel, close-raid, setchannels, unsetchannels, setlockedpingrole, botinfo, announcement, forceshutallraids, etc.). |
 
 ## 🗑️ REMOVED COMMANDS (this session)
 
@@ -274,6 +276,20 @@ The following slash commands were removed (files deleted from `commands/`):
    was removed from `events/interactionCreate.js`, and `settings.verificationChannel`
    is now persisted when the backup panel is posted (post_backuppanel handler).
    The `test/link-roblox-command.test.js` test file was deleted with it.
+9. `/setregionping` (`commands/setregionping.js`) — configure region ping roles
+   (`settings.regionPings`). REMOVED — region/country pings are now set from the
+   separate dashboard via shared Postgres. The legacy `settings.regionPings`
+   fallback in `getRaidPingInfo` (and the `regionPings` default in
+   `handlers/raidStateManager.js`) was removed with it; with no DB config there
+   is simply no location ping.
+10. `/rwinner` (`commands/rwinner.js`) — static test result card. REMOVED — the
+    live close-flow result card built by `handlers/raidResultCard.js` is the
+    production path now.
+11. `/channelconfig` (`commands/channelconfig.js`) — show configured channels.
+    REMOVED.
+12. `/raidtest` (`commands/raidtest.js`) — fake raid alert test embed. REMOVED —
+    testing is complete (the `/raidtest` auto-detection reference in the
+    `handlers/raidV2.js` thumbnail resolver was updated too).
 
 > The verification *infrastructure* (handlers/
 > `verificationDb.js`, `verificationHelpers.js`, the unverified-user guard, and the

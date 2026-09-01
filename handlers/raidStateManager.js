@@ -22,8 +22,6 @@ const defaultSettings = {
     verificationAdminRoles: [],
     // Persistent per-guild counter used to generate unique verification IDs
     verificationRequestCounter: 0,
-    // regionPings: mapping of normalized region -> array of role IDs (strings)
-    regionPings: {},
     // Channel where the official /link-roblox verification embed lives. Used to
     // dynamically point unverified users to the correct channel in guard messages.
     verificationChannel: null

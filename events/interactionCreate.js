@@ -28,7 +28,9 @@ const pendingServerIds = new Map();
 const pendingGameThumbnails = new Map();
 const pendingCountryCodes = new Map();
 
-// Region ping IDs are now configured per-guild via settings.regionPings
+// Region/country ping roles are configured per-guild in the shared Postgres
+// database (dashboard-owned). The legacy /setregionping settings.json command
+// was REMOVED — the bot no longer reads settings.regionPings.
 
 function safeGetTextInputValue(fields, customId, fallback) {
   try {
@@ -153,20 +155,6 @@ function normalizeRegion(region) {
     return value;
 }
 
-function getRegionRoleInfo(guildId, region) {
-    const normalized = normalizeRegion(region);
-    try {
-        const settings = raidStateManager.loadSettings(guildId) || {};
-        const mapping = settings.regionPings || {};
-        const roleIds = Array.isArray(mapping[normalized]) ? mapping[normalized].filter(Boolean) : [];
-        const mention = roleIds.length ? roleIds.map(id => `<@&${id}>`).join(' ') : null;
-        const allowedMentions = roleIds.length ? { roles: roleIds } : undefined;
-        return { roleIds, mention, roleId: roleIds.length === 1 ? roleIds[0] : null, allowedMentions };
-    } catch (err) {
-        return { roleIds: [], mention: null, roleId: null, allowedMentions: undefined };
-    }
-}
-
 /**
  * A role id is usable when it is a non-empty string that differs from the
  * "empty role" sentinels (0 / @everyone).
@@ -203,11 +191,10 @@ async function roleExistsInGuild(client, guildId, roleId) {
  *   2. If NO `countryCode` was detected -> ping ONLY the broad region role
  *      (e.g. ASIA / EU / NA / SA). If it is missing -> NO location ping.
  *
- * Config source: dashboard-owned shared PostgreSQL first
- *   (`getGuildPingSettings(guildId)` -> `countryPings` / `regionPings`); when it
- *   is empty/down the LEGACY settings.json `regionPings` fallback runs - but
- *   ONLY in the no-country-detected (region) path, so a detected country with a
- *   missing role still pings nothing.
+ * Config source: dashboard-owned shared PostgreSQL only
+ *   (`getGuildPingSettings(guildId)` -> `countryPings` / `regionPings`). When it
+ *   is empty/down there is simply NO location ping — the legacy settings.json
+ *   `regionPings` (from the removed `/setregionping` command) is no longer read.
  *
  * Never throws. Always returns { roleId, mention, allowedMentions, source }.
  */
@@ -248,26 +235,21 @@ async function getRaidPingInfo(client, guildId, { countryCode, region }) {
             };
         }
     } catch (err) {
-        console.warn('[raid ping] shared Postgres lookup failed - falling back to legacy regionPings:', (err && err.message) || err);
+        console.warn('[raid ping] shared Postgres lookup failed:', (err && err.message) || err);
     }
 
     if (resolvedPing) return resolvedPing;
 
     // With a detected country, a missing country role means NO location ping.
-    // Do not fall back to a broad-region ping (legacy or otherwise).
+    // Do not fall back to a broad-region ping.
     if (useCountryOnly) {
         return { roleId: null, mention: null, allowedMentions: undefined, source: 'none' };
     }
 
-    // Legacy fallback: settings.json regionPings (region-only path - kept until
-    // /setregionping is removed in a later stage).
-    const legacy = getRegionRoleInfo(guildId, region);
-    return {
-        roleId: legacy.roleId || null,
-        mention: legacy.mention,
-        allowedMentions: legacy.allowedMentions,
-        source: 'legacy'
-    };
+    // No country detected and no usable region role configured -> NO location
+    // ping. The legacy settings.json `regionPings` (written by the removed
+    // `/setregionping` command) is intentionally not read anymore.
+    return { roleId: null, mention: null, allowedMentions: undefined, source: 'none' };
 }
 
 function createRaidButtons(raid, member = null) {
@@ -586,7 +568,8 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             endedAtMs: raid.closedAt || Date.now()
         };
         try {
-            // Native Components V2 result card — the same layout as /rwinner.
+            // Native Components V2 result card — the same layout as the
+            // removed /rwinner test card (now built by handlers/raidResultCard.js).
             // V2 messages disable `content`, so the region-role ping goes out
             // as a separate message first (same pattern as the raid alert).
             if (regionRoleInfo.mention) {

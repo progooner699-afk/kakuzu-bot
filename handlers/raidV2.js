@@ -95,8 +95,8 @@ async function resolveRequesterAvatarUrl(raid) {
  *  1. raid.gameThumbnailUrl — the LIVE 512x512 game icon Roblox captured when the
  *     raid was requested (the ACTUAL game the requester was in), so a TSB raid
  *     shows a TSB thumbnail, a JJK raid a JJK one, etc.
- *  2. GAME_THUMBNAILS[raid.targetGame] — static per-game fallback (used by
- *     /raidtest and when live detection didn't capture an icon).
+ *  2. GAME_THUMBNAILS[raid.targetGame] — static per-game fallback (used when
+ *     live detection didn't capture an icon).
  *  3. GAME_THUMBNAIL_FALLBACK — guaranteed default so the accessory never breaks.
  */
 function resolveGameThumbnailUrl(raid) {

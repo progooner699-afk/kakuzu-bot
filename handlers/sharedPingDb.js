@@ -11,8 +11,8 @@
  *     connection string.
  *   o Parameterized SQL only; never logs DATABASE_URL.
  *   o Never crashes a raid: every function degrades to
- *     `{ countryPings: {}, regionPings: {} }` so the bot falls back to the
- *     legacy /setregionping settings.json config.
+ *     `{ countryPings: {}, regionPings: {} }` so the bot simply posts with no
+ *     location ping (the legacy /setregionping settings.json config was removed).
  *
  * NOTHING ELSE is migrated here. raids.json, settings.json, verification.sqlite
  * and leaderboard.sqlite are left completely untouched.
@@ -88,7 +88,7 @@ function getPool() {
     if (pool) return pool;
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) {
-        return null; // shared DB not configured -> legacy /setregionping path
+        return null; // shared DB not configured -> no location ping (legacy /setregionping removed)
     }
     const ssl = resolveSslConfig(connectionString);
     pool = new Pool(ssl ? { connectionString, ssl } : { connectionString });
@@ -151,7 +151,7 @@ async function getGuildPingSettings(guildId) {
         };
     } catch (err) {
         // Database temporarily unavailable - fail safe, never crash the raid.
-        console.warn('[sharedPingDb] getGuildPingSettings failed, using legacy ping config:', sanitizeError(err));
+        console.warn('[sharedPingDb] getGuildPingSettings failed:', sanitizeError(err));
         return { countryPings: {}, regionPings: {} };
     }
 }

@@ -1,7 +1,8 @@
 'use strict';
 
-// Native Components V2 raid RESULT card — the interactive close-flow twin of
-// the static `/rwinner` card (commands/rwinner.js). Same layout language:
+// Native Components V2 raid RESULT card — the interactive close-flow card
+// built by this handler (the standalone /rwinner test command was removed).
+// Same layout language as the retired static card:
 //   - banner MediaGallery rendered FIRST (rally pic or default banner) so the
 //     image sits at the TOP of the card, edge-to-edge full width
 //   - neutral #2b2d31 Container accent -> no visible colored accent bar
@@ -55,9 +56,10 @@ const MVP_EMOJI = '<:mvp:1543994867552882699>';
 // "Won" emoji — the sunglasses-face rendered right after RAID WON.
 const WON_EMOJI = '<:won:1543997297593946162>';
 
-// The 3 result-card types. Win keeps the exact /rwinner look; Whooped and Loss
-// use their own emojis. Swap the emoji strings here to restyle (custom Discord
-// emojis work as soon as you paste their <:name:id> markdown).
+// The 3 result-card types. Win keeps the same look as the original /rwinner
+// card; Whooped and Loss use their own emojis. Swap the emoji strings here to
+// restyle (custom Discord emojis work as soon as you paste their <:name:id>
+// markdown).
 const OUTCOME_STYLES = {
     win: { title: 'RAID WON ' + WON_EMOJI },
     whooped: { title: 'RAID WHOOPED \uD83D\uDC80' },   // 💀 skull
