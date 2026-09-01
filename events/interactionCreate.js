@@ -749,6 +749,25 @@ module.exports = {
             return;
         }
 
+        // ===== ANNOUNCEMENT BUILDER (interactive V2 command) =====
+        // Any button / modal / channel-select with an `annb_` customId belongs
+        // to the /announcement builder. The handler is required lazily to keep
+        // startup light and mirror the backuppanel pattern.
+        if (interaction.customId && typeof interaction.customId === 'string' && interaction.customId.startsWith('annb_')) {
+            const announcementCmd = require('../commands/announcement');
+            const handled = await announcementCmd.handleAnnouncementComponent(interaction).catch((err) => {
+                console.error('[announcement] dispatch error:', err);
+                if (!interaction.replied && !interaction.deferred) {
+                    return interaction.reply({
+                        content: '❌ Announcement builder error: `' + String((err && err.message) || err).slice(0, 300) + '`',
+                        flags: 64
+                    }).catch(() => null);
+                }
+                return true;
+            });
+            if (handled) return;
+        }
+
         // Handle raid request buttons — the backuppanel "Request backup" button
         // (request_backup), plus the legacy request_raid id so panels posted by
         // the old /requestraid command keep working. Auto-detect game/region/server.

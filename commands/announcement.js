@@ -1,53 +1,730 @@
-const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
+'use strict';
+
+/*
+ * /announcement — interactive Components V2 announcement builder.
+ *
+ * Flow:
+ *   1. /announcement opens an EPHEMERAL V2 builder panel with buttons:
+ *      Title, Description, Thumbnail, Ping, Webhook name, Field 1-8,
+ *      Clear Fields, Preview, Publish, Cancel.
+ *   2. Every button (except Thumbnail / Preview / Publish / Cancel) opens a
+ *      modal; the collected values are stored in a per-user session map.
+ *   3. Thumbnail opens an UPLOAD COLLECTOR: the user sends one image (or a
+ *      pasted URL) in the channel within 2 minutes. It is rendered as a WIDE
+ *      full-width MediaGallery banner at the TOP of the final card.
+ *   4. Every field section is separated by a native V2 Separator (type 14).
+ *   5. Publish asks for a target channel (channel-select), then posts the
+ *      final V2 card THROUGH A WEBHOOK whose name the user typed — the ping
+ *      (if any) is sent as a separate message first, because the V2 flag
+ *      disables message `content`.
+ */
+
+const {
+    SlashCommandBuilder,
+    PermissionFlagsBits,
+    ContainerBuilder,
+    TextDisplayBuilder,
+    SeparatorBuilder,
+    SeparatorSpacingSize,
+    MediaGalleryBuilder,
+    MediaGalleryItemBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle,
+    ChannelSelectMenuBuilder,
+    ChannelType,
+    EmbedBuilder
+} = require('discord.js');
+
+// Message flag required to enable native Components V2 (Separator etc).
+// NOTE: with this flag Discord DISABLES content + embeds on the message.
+const ANNOUNCEMENT_V2_FLAGS = 1 << 15;
+// Ephemeral message flag.
+const EPHEMERAL_FLAG = 1 << 6;
+
+// Accent color for the builder panel Container (Kakuzu red).
+const PANEL_ACCENT_COLOR = 0x8B0000;
+// Accent color for the final announcement card Container.
+const ANNOUNCEMENT_ACCENT_COLOR = 0x5865F2;
+
+// Runtime newline used while composing TextDisplay content (avoids escape
+// sequence mangling in the source file itself).
+const NL = String.fromCharCode(10);
+
+// Maximum number of custom fields on the announcement card.
+const MAX_FIELDS = 8;
+// How long the thumbnail upload collector waits for the user's image.
+const THUMB_COLLECTOR_MS = 2 * 60 * 1000;
+// Fallback webhook name when the user did not type one.
+const DEFAULT_WEBHOOK_NAME = 'Announcements';
+
+// In-memory builder sessions, keyed by `${guildId}:${userId}`.
+const sessions = new Map();
+
+function sessionKey(interaction) {
+    return interaction.guild.id + ':' + interaction.user.id;
+}
+
+function getSession(interaction) {
+    return sessions.get(sessionKey(interaction)) || null;
+}
+
+function createSession(interaction) {
+    const state = {
+        title: '',
+        description: '',
+        fields: [],          // { name, value } — max MAX_FIELDS
+        thumbnailUrl: null,  // wide top banner image
+        ping: '',            // sent as a separate webhook message
+        webhookName: '',     // webhook profile name typed by the user
+        panelMessageId: null
+    };
+    sessions.set(sessionKey(interaction), state);
+    return state;
+}
+
+/* ------------------------------------------------------------------ */
+/* Payload builders                                                   */
+/* ------------------------------------------------------------------ */
+
+function text(content) {
+    return new TextDisplayBuilder().setContent(content).toJSON(); // type 10
+}
+
+function separator() {
+    return new SeparatorBuilder() // type 14
+        .setDivider(true)
+        .setSpacing(SeparatorSpacingSize.Small)
+        .toJSON();
+}
+
+/**
+ * Builds the FINAL announcement card as a native Components V2 payload:
+ * optional wide top banner (MediaGallery), title, description, every custom
+ * field — each section separated by a native V2 separator — and a footer.
+ */
+function buildAnnouncementPayload(state) {
+    const container = new ContainerBuilder().setAccentColor(ANNOUNCEMENT_ACCENT_COLOR).toJSON();
+    container.size = 'large';
+
+    const contents = [];
+
+    // --- WIDE TOP BANNER (edge-to-edge MediaGallery, type 12) ---
+    if (state.thumbnailUrl) {
+        contents.push(new MediaGalleryBuilder().addItems(
+            new MediaGalleryItemBuilder().setURL(state.thumbnailUrl)
+        ).toJSON());
+    }
+
+    // --- Title ---
+    contents.push(text('# 📢 ' + (state.title || 'Announcement')));
+    contents.push(separator());
+
+    // --- Description ---
+    if (state.description) {
+        contents.push(text(state.description));
+        contents.push(separator());
+    }
+
+    // --- Custom fields (up to 8), each followed by a V2 separator ---
+    (state.fields || []).forEach(function (field) {
+        contents.push(text('### ' + field.name + NL + NL + field.value));
+        contents.push(separator());
+    });
+
+    // --- Footer ---
+    contents.push(text('-# ✦ Announced <t:' + Math.floor(Date.now() / 1000) + ':F>'));
+
+    container.components = contents;
+
+    return { flags: ANNOUNCEMENT_V2_FLAGS, components: [container] };
+}
+
+function fieldButton(n) {
+    return new ButtonBuilder()
+        .setCustomId('annb_field_' + n)
+        .setLabel('Field ' + n)
+        .setStyle(ButtonStyle.Secondary);
+}
+
+/**
+ * Builds the ephemeral V2 BUILDER PANEL (status text + button rows).
+ */
+function buildBuilderComponents(state) {
+    const container = new ContainerBuilder().setAccentColor(PANEL_ACCENT_COLOR).toJSON();
+    container.size = 'large';
+
+    const filledCount = (state.fields || []).length;
+    const fieldList = filledCount
+        ? state.fields.map(function (f, i) {
+              const shortValue = (f.value || '').length > 60 ? f.value.slice(0, 60) + '…' : (f.value || '—');
+              return '> **' + (i + 1) + '. ' + (f.name || 'Field') + '** — ' + shortValue;
+          }).join(NL)
+        : '> • No fields yet — add up to **' + MAX_FIELDS + '** below.';
+
+    const statusLines = [
+        '# 🛠️ ANNOUNCEMENT BUILDER',
+        '',
+        '> **Title:** ' + (state.title ? '✅ ' + (state.title.length > 40 ? state.title.slice(0, 40) + '…' : state.title) : '❌ not set'),
+        '> **Description:** ' + (state.description ? '✅ set (' + state.description.length + ' chars)' : '❌ not set'),
+        '> **Fields:** `' + filledCount + ' / ' + MAX_FIELDS + '`',
+        '> **Thumbnail (wide top banner):** ' + (state.thumbnailUrl ? '✅ uploaded' : '❌ not set'),
+        '> **Ping:** ' + (state.ping ? '`' + state.ping + '`' : '—'),
+        '> **Webhook name:** `' + (state.webhookName || DEFAULT_WEBHOOK_NAME) + '`',
+        '',
+        '**FIELDS**',
+        fieldList
+    ];
+
+    const contents = [text(statusLines.join(NL)), separator()];
+
+    // Field rows: Field 1-5, then Field 6-8 + Clear Fields.
+    contents.push(new ActionRowBuilder().addComponents(
+        fieldButton(1), fieldButton(2), fieldButton(3), fieldButton(4), fieldButton(5)
+    ).toJSON());
+    contents.push(new ActionRowBuilder().addComponents(
+        fieldButton(6), fieldButton(7), fieldButton(8),
+        new ButtonBuilder().setCustomId('annb_clearfields').setLabel('🗑️ Clear Fields').setStyle(ButtonStyle.Danger)
+    ).toJSON());
+    contents.push(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('annb_title').setLabel('📝 Title').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('annb_desc').setLabel('📄 Description').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('annb_thumb').setLabel('🖼️ Thumbnail').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('annb_ping').setLabel('🔔 Ping').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('annb_webhook').setLabel('🪝 Webhook Name').setStyle(ButtonStyle.Secondary)
+    ).toJSON());
+    contents.push(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('annb_preview').setLabel('👁️ Preview').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('annb_publish').setLabel('🚀 Publish').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('annb_cancel').setLabel('✖️ Cancel').setStyle(ButtonStyle.Danger)
+    ).toJSON());
+
+    container.components = contents;
+
+    return { flags: ANNOUNCEMENT_V2_FLAGS, components: [container] };
+}
+
+/* ------------------------------------------------------------------ */
+/* Modal builders                                                     */
+/* ------------------------------------------------------------------ */
+
+function openTitleModal(interaction, state) {
+    const input = new TextInputBuilder()
+        .setCustomId('annb_title_input')
+        .setLabel('Announcement Title')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Enter the announcement title…')
+        .setRequired(true)
+        .setMaxLength(256);
+    if (state.title) input.setValue(state.title);
+
+    const modal = new ModalBuilder().setCustomId('annb_titlemodal').setTitle('📝 Announcement Title');
+    modal.addComponents(new ActionRowBuilder().addComponents(input));
+    return interaction.showModal(modal);
+}
+
+function openDescriptionModal(interaction, state) {
+    const input = new TextInputBuilder()
+        .setCustomId('annb_desc_input')
+        .setLabel('Description (Full Content)')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('Enter the full announcement content…')
+        .setRequired(true)
+        .setMaxLength(4000);
+    if (state.description) input.setValue(state.description);
+
+    const modal = new ModalBuilder().setCustomId('annb_descmodal').setTitle('📄 Announcement Description');
+    modal.addComponents(new ActionRowBuilder().addComponents(input));
+    return interaction.showModal(modal);
+}
+
+function openFieldModal(interaction, state, index) {
+    const existing = state.fields[index - 1] || null;
+
+    const nameInput = new TextInputBuilder()
+        .setCustomId('annb_field_name')
+        .setLabel('Field ' + index + ' Name (blank = remove)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('e.g. Rules, Rewards, Schedule…')
+        .setRequired(false)
+        .setMaxLength(256);
+    const valueInput = new TextInputBuilder()
+        .setCustomId('annb_field_value')
+        .setLabel('Field ' + index + ' Content')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('Enter the content for this field…')
+        .setRequired(false)
+        .setMaxLength(1024);
+    if (existing) {
+        nameInput.setValue(existing.name);
+        valueInput.setValue(existing.value);
+    }
+
+    const modal = new ModalBuilder()
+        .setCustomId('annb_fieldmodal_' + index)
+        .setTitle('Field ' + index + ' of ' + MAX_FIELDS);
+    modal.addComponents(
+        new ActionRowBuilder().addComponents(nameInput),
+        new ActionRowBuilder().addComponents(valueInput)
+    );
+    return interaction.showModal(modal);
+}
+
+function openPingModal(interaction, state) {
+    const input = new TextInputBuilder()
+        .setCustomId('annb_ping_input')
+        .setLabel('Ping (@everyone / @here / role mention)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('e.g. @everyone, @here or <@&ROLE_ID> (blank = none)')
+        .setRequired(false)
+        .setMaxLength(256);
+    if (state.ping) input.setValue(state.ping);
+
+    const modal = new ModalBuilder().setCustomId('annb_pingmodal').setTitle('🔔 Announcement Ping');
+    modal.addComponents(new ActionRowBuilder().addComponents(input));
+    return interaction.showModal(modal);
+}
+
+function openWebhookModal(interaction, state) {
+    const input = new TextInputBuilder()
+        .setCustomId('annb_webhook_input')
+        .setLabel('Webhook Name (sender profile)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('e.g. Kakuzu News — the message shows this name')
+        .setRequired(false)
+        .setMaxLength(80);
+    if (state.webhookName) input.setValue(state.webhookName);
+
+    const modal = new ModalBuilder().setCustomId('annb_webhookmodal').setTitle('🪝 Webhook Name');
+    modal.addComponents(new ActionRowBuilder().addComponents(input));
+    return interaction.showModal(modal);
+}
+
+/* ------------------------------------------------------------------ */
+/* Helpers                                                            */
+/* ------------------------------------------------------------------ */
+
+async function refreshPanel(interaction, state) {
+    if (!state || !state.panelMessageId || !interaction.channel) return;
+    const msg = await interaction.channel.messages.fetch(state.panelMessageId).catch(() => null);
+    if (msg) {
+        await msg.edit(buildBuilderComponents(state)).catch(() => null);
+    }
+}
+
+function buildAllowedMentions(pingText) {
+    const allowedMentions = { parse: [] };
+    if (/@everyone|@here/i.test(pingText)) allowedMentions.parse.push('everyone');
+    const roleIds = [];
+    const re = /<@&(\d+)>/g;
+    let m;
+    while ((m = re.exec(pingText)) !== null) roleIds.push(m[1]);
+    if (roleIds.length) allowedMentions.roles = [...new Set(roleIds)];
+    return allowedMentions;
+}
+
+/**
+ * Runs the thumbnail UPLOAD COLLECTOR. The user sends one message in the
+ * current channel within 2 minutes; the first image attachment (or a raw
+ * URL) becomes the wide top banner. Typing `remove` clears it.
+ */
+async function startThumbnailCollector(interaction, state) {
+    await interaction.reply({
+        content: '🖼️ **Thumbnail upload:** send **one image** in this channel now' + NL +
+            '(or paste an image URL as a message).' + NL +
+            '> Type `remove` to clear the current thumbnail. You have **2 minutes**.',
+        flags: EPHEMERAL_FLAG
+    }).catch(() => null);
+
+    if (!interaction.channel || typeof interaction.channel.createMessageCollector !== 'function') return;
+
+    const collector = interaction.channel.createMessageCollector({
+        filter: function (m) { return m.author.id === interaction.user.id; },
+        time: THUMB_COLLECTOR_MS,
+        max: 1
+    });
+
+    collector.on('collect', async function (msg) {
+        const content = (msg.content || '').trim();
+        let url = null;
+
+        const image = msg.attachments.find(function (a) {
+            return a.contentType && a.contentType.startsWith('image/');
+        });
+        if (image) {
+            url = image.url;
+        } else if (/^https?:\/\/\S+$/i.test(content)) {
+            url = content;
+        } else if (/^remove$/i.test(content)) {
+            state.thumbnailUrl = null;
+            await interaction.followUp({ content: '🗑️ Thumbnail cleared.', flags: EPHEMERAL_FLAG }).catch(() => null);
+            await refreshPanel(interaction, state);
+            return;
+        }
+
+        if (!url) {
+            await interaction.followUp({
+                content: '❌ That was not an image or a valid URL. Press **🖼️ Thumbnail** on the builder panel to try again.',
+                flags: EPHEMERAL_FLAG
+            }).catch(() => null);
+            return;
+        }
+
+        state.thumbnailUrl = url;
+        await interaction.followUp({
+            content: '✅ Thumbnail set — it will render as the wide top banner of the card.',
+            flags: EPHEMERAL_FLAG
+        }).catch(() => null);
+        await refreshPanel(interaction, state);
+    });
+
+    collector.on('end', async function (collected) {
+        if (collected.size === 0) {
+            await interaction.followUp({
+                content: '⌛ Thumbnail upload window expired — nothing was collected. Press **🖼️ Thumbnail** to try again.',
+                flags: EPHEMERAL_FLAG
+            }).catch(() => null);
+        }
+    });
+}
+
+/**
+ * Publish: validates the session, then asks for the target channel.
+ */
+async function startPublish(interaction, state) {
+    if (!state.title || !state.description) {
+        return interaction.reply({
+            content: '❌ **Title** and **Description** are required before publishing.',
+            flags: EPHEMERAL_FLAG
+        });
+    }
+
+    const channelSelect = new ChannelSelectMenuBuilder()
+        .setCustomId('annb_channel')
+        .setPlaceholder('Select the channel to publish the announcement in')
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement);
+
+    return interaction.reply({
+        content: '📡 **Publish announcement**' + NL +
+            '> Sender profile: `' + (state.webhookName || DEFAULT_WEBHOOK_NAME) + '`' + NL +
+            '> Ping: ' + (state.ping ? '`' + state.ping + '`' : 'none') + NL +
+            '> Pick the target channel below — the card is posted **through a webhook**' + NL +
+            '> so it appears under that profile instead of the bot.',
+        components: [new ActionRowBuilder().addComponents(channelSelect)],
+        flags: EPHEMERAL_FLAG
+    });
+}
+
+/**
+ * Channel-select handler: find or create the webhook with the user's typed
+ * name in the target channel, send the ping as a separate message, then post
+ * the V2 announcement card through that webhook.
+ */
+async function publishToChannel(interaction, state) {
+    const selectedChannel = interaction.channels.first();
+    if (!selectedChannel) {
+        return interaction.reply({ content: '❌ Please select a valid channel.', flags: EPHEMERAL_FLAG }).catch(() => null);
+    }
+
+    await interaction.deferReply({ flags: EPHEMERAL_FLAG }).catch(() => null);
+
+    try {
+        const targetChannel = await interaction.client.channels.fetch(selectedChannel.id);
+        if (!targetChannel || !targetChannel.isTextBased()) {
+            throw new Error('The selected channel is not a text channel.');
+        }
+
+        const webhookName = (state.webhookName || DEFAULT_WEBHOOK_NAME).trim() || DEFAULT_WEBHOOK_NAME;
+
+        // Find or create the webhook with the chosen name in the target channel.
+        const webhooks = await targetChannel.fetchWebhooks();
+        let webhook = webhooks.find(function (w) { return w.name === webhookName; });
+        if (!webhook) {
+            webhook = await targetChannel.createWebhook({
+                name: webhookName,
+                reason: 'Announcement webhook (created by ' + interaction.user.tag + ' via /announcement)'
+            });
+        }
+
+        // Ping first — the V2 flag disables message content on the card itself.
+        if (state.ping) {
+            await webhook.send({
+                content: state.ping,
+                username: webhookName,
+                allowedMentions: buildAllowedMentions(state.ping)
+            });
+        }
+
+        const payload = buildAnnouncementPayload(state);
+        await webhook.send({
+            flags: payload.flags,
+            components: payload.components,
+            username: webhookName
+        });
+
+        // Retire the builder panel and close the session.
+        const panelMsg = state.panelMessageId && interaction.channel
+            ? await interaction.channel.messages.fetch(state.panelMessageId).catch(() => null)
+            : null;
+        sessions.delete(sessionKey(interaction));
+
+        const done = '✅ Announcement published in <#' + targetChannel.id + '> via the **' + webhookName + '** webhook.';
+        if (panelMsg) {
+            const retired = new EmbedBuilder()
+                .setTitle('✅ Announcement Published')
+                .setDescription(done)
+                .setColor(0x57F287);
+            await panelMsg.edit({ components: [], embeds: [retired] }).catch(() => null);
+        }
+        await interaction.editReply({ content: done }).catch(() => null);
+    } catch (err) {
+        console.error('[announcement] publish failed:', err);
+        const errText = '❌ Failed to publish the announcement: `' +
+            String((err && err.message) || err).slice(0, 300) + '`';
+        if (interaction.deferred || interaction.replied) {
+            await interaction.editReply({ content: errText }).catch(() => null);
+        } else {
+            await interaction.reply({ content: errText, flags: EPHEMERAL_FLAG }).catch(() => null);
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Component dispatch (buttons + modals + channel select)             */
+/* ------------------------------------------------------------------ */
+
+function sessionExpiredReply(interaction) {
+    return interaction.reply({
+        content: '⌛ This announcement builder session has expired — run `/announcement` again.',
+        flags: EPHEMERAL_FLAG
+    }).catch(() => null);
+}
+
+/**
+ * Handles every `annb_*` interaction. Returns true when the interaction was
+ * handled (so the caller can stop processing). Never rethrows — errors are
+ * reported to the user as an ephemeral message.
+ */
+async function handleAnnouncementComponent(interaction) {
+    const customId = typeof interaction.customId === 'string' ? interaction.customId : '';
+    if (!customId.startsWith('annb_')) return false;
+
+    try {
+        // ---- Channel select (publish) ----
+        if (customId === 'annb_channel') {
+            const state = getSession(interaction);
+            if (!state) {
+                sessionExpiredReply(interaction);
+                return true;
+            }
+            await publishToChannel(interaction, state);
+            return true;
+        }
+
+        const state = getSession(interaction);
+        if (!state) {
+            sessionExpiredReply(interaction);
+            return true;
+        }
+
+        // ---- Buttons ----
+        if (interaction.isButton()) {
+            switch (customId) {
+                case 'annb_title':
+                    await openTitleModal(interaction, state);
+                    return true;
+                case 'annb_desc':
+                    await openDescriptionModal(interaction, state);
+                    return true;
+                case 'annb_thumb':
+                    await startThumbnailCollector(interaction, state);
+                    return true;
+                case 'annb_ping':
+                    await openPingModal(interaction, state);
+                    return true;
+                case 'annb_webhook':
+                    await openWebhookModal(interaction, state);
+                    return true;
+                case 'annb_clearfields':
+                    state.fields = [];
+                    await interaction.reply({ content: '🗑️ All fields cleared.', flags: EPHEMERAL_FLAG }).catch(() => null);
+                    await refreshPanel(interaction, state);
+                    return true;
+                case 'annb_preview': {
+                    if (!state.title || !state.description) {
+                        await interaction.reply({
+                            content: '❌ Set a **Title** and **Description** first.',
+                            flags: EPHEMERAL_FLAG
+                        }).catch(() => null);
+                        return true;
+                    }
+                    const payload = buildAnnouncementPayload(state);
+                    await interaction.reply({
+                        flags: ANNOUNCEMENT_V2_FLAGS | EPHEMERAL_FLAG,
+                        components: payload.components
+                    });
+                    return true;
+                }
+                case 'annb_publish':
+                    await startPublish(interaction, state);
+                    return true;
+                case 'annb_cancel': {
+                    sessions.delete(sessionKey(interaction));
+                    const cancelled = new EmbedBuilder()
+                        .setTitle('✖️ Announcement Builder Cancelled')
+                        .setDescription('The draft was discarded. Run `/announcement` to start a new one.')
+                        .setColor(0xED4245);
+                    await interaction.update({ components: [], embeds: [cancelled] }).catch(() => null);
+                    return true;
+                }
+                default:
+                    // Field buttons: annb_field_<n>
+                    if (customId.startsWith('annb_field_')) {
+                        const index = parseInt(customId.replace('annb_field_', ''), 10);
+                        if (index >= 1 && index <= MAX_FIELDS) {
+                            await openFieldModal(interaction, state, index);
+                            return true;
+                        }
+                    }
+                    return false;
+            }
+        }
+
+        // ---- Modals ----
+        if (interaction.isModalSubmit()) {
+            if (customId === 'annb_titlemodal') {
+                state.title = interaction.fields.getTextInputValue('annb_title_input').trim();
+                await interaction.reply({ content: '✅ Title saved.', flags: EPHEMERAL_FLAG }).catch(() => null);
+                await refreshPanel(interaction, state);
+                return true;
+            }
+            if (customId === 'annb_descmodal') {
+                state.description = interaction.fields.getTextInputValue('annb_desc_input').trim();
+                await interaction.reply({ content: '✅ Description saved.', flags: EPHEMERAL_FLAG }).catch(() => null);
+                await refreshPanel(interaction, state);
+                return true;
+            }
+            if (customId.startsWith('annb_fieldmodal_')) {
+                const index = parseInt(customId.replace('annb_fieldmodal_', ''), 10);
+                if (index < 1 || index > MAX_FIELDS) return true;
+                let name = '';
+                let value = '';
+                try { name = interaction.fields.getTextInputValue('annb_field_name').trim(); } catch (e) { name = ''; }
+                try { value = interaction.fields.getTextInputValue('annb_field_value').trim(); } catch (e) { value = ''; }
+
+                if (!name) {
+                    // Blank name = remove that field.
+                    if (state.fields[index - 1]) state.fields.splice(index - 1, 1);
+                    await interaction.reply({ content: '🗑️ Field ' + index + ' removed.', flags: EPHEMERAL_FLAG }).catch(() => null);
+                } else {
+                    state.fields[index - 1] = { name: name, value: value || '—' };
+                    await interaction.reply({ content: '✅ Field ' + index + ' saved.', flags: EPHEMERAL_FLAG }).catch(() => null);
+                }
+                await refreshPanel(interaction, state);
+                return true;
+            }
+            if (customId === 'annb_pingmodal') {
+                let ping = '';
+                try { ping = interaction.fields.getTextInputValue('annb_ping_input').trim(); } catch (e) { ping = ''; }
+                state.ping = ping;
+                await interaction.reply({
+                    content: ping ? '✅ Ping saved: `' + ping + '`' : '🔔 Ping cleared.',
+                    flags: EPHEMERAL_FLAG
+                }).catch(() => null);
+                await refreshPanel(interaction, state);
+                return true;
+            }
+            if (customId === 'annb_webhookmodal') {
+                let name = '';
+                try { name = interaction.fields.getTextInputValue('annb_webhook_input').trim(); } catch (e) { name = ''; }
+                state.webhookName = name;
+                await interaction.reply({
+                    content: '✅ Webhook name saved: `' + (name || DEFAULT_WEBHOOK_NAME) + '`',
+                    flags: EPHEMERAL_FLAG
+                }).catch(() => null);
+                await refreshPanel(interaction, state);
+                return true;
+            }
+            return false;
+        }
+
+        return false;
+    } catch (err) {
+        console.error('[announcement] component handler error:', err);
+        const errText = '❌ Announcement builder error: `' + String((err && err.message) || err).slice(0, 300) + '`';
+        try {
+            if (interaction.deferred || interaction.replied) {
+                await interaction.followUp({ content: errText, flags: EPHEMERAL_FLAG });
+            } else {
+                await interaction.reply({ content: errText, flags: EPHEMERAL_FLAG });
+            }
+        } catch (e) { /* swallow — nothing more we can do */ }
+        return true;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Command                                                            */
+/* ------------------------------------------------------------------ */
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('announcement')
-        .setDescription('Create a professional announcement embed'),
+        .setDescription('Open the interactive announcement builder (V2 card, up to 8 fields, webhook sender).')
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+    ANNOUNCEMENT_V2_FLAGS,
+    MAX_FIELDS,
+    buildAnnouncementPayload,
+    buildBuilderComponents,
+    handleAnnouncementComponent,
     async execute(interaction) {
-        const modal = new ModalBuilder()
-            .setCustomId('announcement_modal')
-            .setTitle('📢 Create Announcement');
+        if (!interaction.guild) {
+            return interaction.reply({ content: 'This command can only be used inside a server.', flags: EPHEMERAL_FLAG });
+        }
+        if (!interaction.memberPermissions || !interaction.memberPermissions.has(PermissionFlagsBits.ManageMessages)) {
+            return interaction.reply({
+                content: 'You need the **Manage Messages** permission to use the announcement builder.',
+                flags: EPHEMERAL_FLAG
+            });
+        }
 
-        const titleInput = new TextInputBuilder()
-            .setCustomId('ann_title')
-            .setLabel('Announcement Title')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder('Enter the announcement title here...')
-            .setRequired(true)
-            .setMaxLength(256);
+        const state = createSession(interaction);
+        const reply = await interaction.reply({
+            flags: ANNOUNCEMENT_V2_FLAGS | EPHEMERAL_FLAG,
+            components: buildBuilderComponents(state).components,
+            fetchReply: true
+        }).catch(async function (err) {
+            // The server may not have Components V2 enabled for the bot — fall
+            // back to a classic ephemeral embed panel with the same buttons.
+            console.warn('[announcement] V2 panel send failed, using embed fallback:', (err && err.message) || err);
+            const status =
+                '**Title:** ' + (state.title ? '✅' : '❌') + NL +
+                '**Description:** ' + (state.description ? '✅' : '❌') + NL +
+                '**Fields:** `' + state.fields.length + ' / ' + MAX_FIELDS + '`' + NL +
+                '**Thumbnail:** ' + (state.thumbnailUrl ? '✅' : '❌') + NL +
+                '**Ping:** ' + (state.ping || '—') + NL +
+                '**Webhook name:** `' + (state.webhookName || DEFAULT_WEBHOOK_NAME) + '`';
+            const embed = new EmbedBuilder()
+                .setTitle('🛠️ Announcement Builder')
+                .setDescription(status)
+                .setColor(PANEL_ACCENT_COLOR);
+            return interaction.reply({
+                embeds: [embed],
+                components: buildBuilderComponents(state).components.filter(function (c) { return c.type === 1; }),
+                flags: EPHEMERAL_FLAG,
+                fetchReply: true
+            });
+        });
 
-        const descriptionInput = new TextInputBuilder()
-            .setCustomId('ann_description')
-            .setLabel('Description (Full Content)')
-            .setStyle(TextInputStyle.Paragraph)
-            .setPlaceholder('Enter the full announcement content here...')
-            .setRequired(true)
-            .setMaxLength(4000);
-
-        const pingInput = new TextInputBuilder()
-            .setCustomId('ann_ping')
-            .setLabel('Ping (Optional)')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder('e.g. @everyone, @here, or Role ID/Name')
-            .setRequired(false)
-            .setMaxLength(256);
-
-        const bannerInput = new TextInputBuilder()
-            .setCustomId('ann_banner')
-            .setLabel('Banner/Logo URL (Optional)')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder('Paste an image URL for a banner or logo (optional)')
-            .setRequired(false)
-            .setMaxLength(1024);
-
-        modal.addComponents(
-            new ActionRowBuilder().addComponents(titleInput),
-            new ActionRowBuilder().addComponents(descriptionInput),
-            new ActionRowBuilder().addComponents(pingInput),
-            new ActionRowBuilder().addComponents(bannerInput)
-        );
-
-        await interaction.showModal(modal);
+        if (reply && reply.id) state.panelMessageId = reply.id;
     }
 };
+
+
+
+
+
+
