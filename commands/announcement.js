@@ -406,6 +406,7 @@ async function bufferFromUrl(url) {
         return null;
     }
 }
+ /**
  * Runs the thumbnail UPLOAD COLLECTOR. The user sends one message in the
  * current channel within 2 minutes; the first image attachment (or a raw
  * URL) becomes the wide top banner. Typing `remove` clears it.
