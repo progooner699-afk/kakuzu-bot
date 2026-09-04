@@ -29,6 +29,12 @@ const defaultSettings = {
 
 const defaultRaids = {
     lastRaidId: 0,
+    // Per-Roblox-server raid counter: serverId -> number of raids created on
+    // that Roblox game-server. The DISPLAYED raid number (raid alert / Raid ID /
+    // raid count) counts per server (each server starts at #1) while the internal
+    // unique raidId stays guild-wide for lookups, keys and channel names.
+
+    serverRaidCount: {},
     raids: [],
     activeRaidByOwner: {},
     blacklist: {},
@@ -262,9 +268,17 @@ function createRaid(options) {
     const raids = loadRaids(options.guildId);
     if (!isDraft) resetLeaderboardsIfNeeded(raids);
     const nextId = raids.lastRaidId + 1;
+// Per-server raid index: the DISPLAYED raid number (alert title / Raid ID / count.
+
+    // Each Roblox game-server keeps its own sequence starting at one, so raids in
+    // different Roblox servers don't share one guild-wide counter. When no serverId
+    // is known (no live presence detection) fall back to a shared guild counter.
+    const serverKey = normalizeText(options.serverId) || '__guild__';
+    const serverIndex = (raids.serverRaidCount[serverKey] || 0) + 1;
     const teamersCount = getTeamersCount(options.teamers);
         const raid = {
         raidId: nextId,
+        serverIndex,
         status: isDraft ? 'PENDING' : 'OPEN',
         requesterId: options.requesterId,
         requesterTag: options.requesterTag,
@@ -293,12 +307,28 @@ function createRaid(options) {
         createdAt: Date.now()
     };
     raids.lastRaidId = nextId;
+    raids.serverRaidCount[serverKey]= serverIndex;
     raids.raids.push(raid);
     if (!isDraft && raid.requesterId) {
         raids.activeRaidByOwner[raid.requesterId] = raid.raidId;
     }
     saveRaids(options.guildId, raids);
     return raid;
+}
+
+/**
+ * Returns the raid number that should be DISPLAYED to users.
+ * Raids are numbered per Roblox game-server: raid.serverIndex holds the
+ * per-server sequence (one, two, three, ...), so a raid in server A shows
+ * number one, a raid in server B also number one, instead of the next guild-wide
+ * number. Legacy raids saved before per-server counting fall back to the still
+ * unique internal raidId, so old data keeps displaying the same numbers.
+
+ */
+function getRaidDisplayId(raid) {
+    if (!raid) return 0;
+    return raid.serverIndex ? raid.serverIndex : raid.raidId;
+
 }
 
 function getRaidById(raidId, guildId) {
@@ -468,7 +498,7 @@ function formatRaidMessage(raid, guildId = null) {
             {
                 name: '\u{1F4CB} DETAILS :',
                 value: '> **Game:** ' + gameLabel + '\n' +
-                    '> **Raid ID:** `' + raid.raidId + '`\n' +
+                    '> **Raid ID:** `' + getRaidDisplayId(raid) + '`\n' +
                     '> **Region:** `' + (raid.region || 'Unknown') + '`\n' +
                     '> **Country:** `' + countryName + '`\n' +
                     '> **Status:** `' + statusEmoji + ' ' + statusText + '`\n' +
@@ -489,7 +519,7 @@ function formatRaidMessage(raid, guildId = null) {
                 inline: false
             },
         ])
-        .setFooter({ text: 'Raid #' + raid.raidId + ' \u2022 ' + new Date(createdMs).toLocaleDateString() })
+        .setFooter({ text: 'Raid #' + getRaidDisplayId(raid) + ' \u2022 ' + new Date(createdMs).toLocaleDateString() })
         .setTimestamp();
 
     if (raid.robloxAvatarUrl) {
@@ -512,7 +542,7 @@ function formatRaidMessage(raid, guildId = null) {
 
         const helpersEmbed = new EmbedBuilder()
             .setDescription(helpersDesc)
-            .setFooter({ text: 'Raid #' + raid.raidId + ' \u2022 ' + new Date(createdMs).toLocaleDateString() })
+            .setFooter({ text: 'Raid #' + getRaidDisplayId(raid) + ' \u2022 ' + new Date(createdMs).toLocaleDateString() })
             .setTimestamp();
 
         embeds.push(helpersEmbed);
@@ -943,6 +973,7 @@ module.exports = {
     scheduleRaidAlertChannelDeletion,
     cleanupPendingRaids,
     getRaidById,
+    getRaidDisplayId,
     addHelper,
     removeHelper,
     closeRaid,

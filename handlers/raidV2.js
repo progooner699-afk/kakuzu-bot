@@ -147,7 +147,7 @@ async function buildRaidAlertPayload(raid, buttons) {
     // The role ping (raid.pingMention) is rendered INSIDE the alert as the very
     // first line of the header text (above the RAID ALERT title) instead of
     // being sent as separate message content.
-    const headerTitle = (raid.pingMention ? raid.pingMention + NL10 : '') + '### 🚨 RAID ALERT #' + raid.raidId;
+    const headerTitle = (raid.pingMention ? raid.pingMention + NL10 : '') + '### 🚨 RAID ALERT #' + rsm.getRaidDisplayId(raid);
     const headerSection = new SectionBuilder()
         .addTextDisplayComponents(
             new TextDisplayBuilder().setContent(headerTitle),
@@ -185,7 +185,7 @@ async function buildRaidAlertPayload(raid, buttons) {
             .addTextDisplayComponents(new TextDisplayBuilder().setContent(
                 '### 📋 DETAILS' + NL10 + NL10 +
                 '> **Game:** ' + gameLabel + NL10 +
-                '> **Raid ID:** `' + raid.raidId + '`' + NL10 +
+                '> **Raid ID:** `' + rsm.getRaidDisplayId(raid) + '`' + NL10 +
                 (raid.region ? '> **Region:** `' + raid.region + '`' + NL10 : '') +
                 '> **Country:** `' + rsm.countryCodeToName(raid.countryCode) + '`' + NL10 +
                 '> **Status:** `' + statusEmoji + ' ' + statusText + '`' + NL10 +

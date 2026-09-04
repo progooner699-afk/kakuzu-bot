@@ -156,3 +156,17 @@ test('header with no requester avatar is a TextDisplay (no accessory-less Sectio
     .join('\n');
   assert.ok(textContents.includes('RAID ALERT #7'));
 });
+
+test('alert shows the per-server raid index (serverIndex) when present', async () => {
+  const payload = await raidV2.buildRaidAlertPayload(fakeRaid({ raidId: 7, serverIndex: 3 }));
+  const container = payload.components[0];
+  const contents = container.components
+    .flatMap((c) => {
+      if (c.type === 9) return (c.components || []).map((x) => x.content || '');
+      if (c.type === 10) return [c.content || ''];
+      return [];
+    })
+    .join(String.fromCharCode(10));
+  assert.ok(contents.includes('RAID ALERT #3'));
+  assert.ok(contents.includes('> **Raid ID:** `3`'));
+});

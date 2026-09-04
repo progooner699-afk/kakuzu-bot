@@ -302,6 +302,11 @@ The following slash commands were removed (files deleted from `commands/`):
 
 ## ✅ RECENT KEY DECISIONS (commit `c0685c3`)
 
+* **Per-Roblox-server raid numbering:** the raid alert / Raid ID / raid count now
+  count **per Roblox game-server** (`raid.serverIndex`): each `serverId` gets its own
+  `#1, #2, ...` sequence, so a raid in Roblox server A shows #1 while a raid
+  in server B also starts at #1. The unique internal `raidId` stays guild-wide for
+  lookups, leaderboard keys (raid_accepts）, button customIds and channel names（`raid-alert-<id>`,`raid-uploads-<id>`）。 `getRaidDisplayId(raid)` returns the display number (falls back to raidId for legacy raids保存 before per-server counting（.
 * Removed the moderator "verification gate" — linking **auto-verifies** via
   `directLink`.
 * Auto-verify on raid **accept** (helper modal writes a verification row).

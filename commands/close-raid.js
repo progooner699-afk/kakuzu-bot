@@ -1,4 +1,4 @@
-﻿const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const raidStateManager = require('../handlers/raidStateManager');
 const raidV2 = require('../handlers/raidV2');
 
@@ -64,11 +64,11 @@ module.exports = {
             const resultChannel = await interaction.client.channels.fetch(settings.resultChannel).catch(() => null);
             if (resultChannel && resultChannel.isTextBased()) {
                 await resultChannel.send({
-                    content: `🛑 **Raid Status Updated to Closed** | **Raid ID:** \`${updatedRaid.raidId}\` | **Updated By:** <@${interaction.user.id}> | **Reason:** ${reason}`
+                    content: `🛑 **Raid Status Updated to Closed** | **Raid ID:** \`${raidStateManager.getRaidDisplayId(updatedRaid)}\` | **Updated By:** <@${interaction.user.id}> | **Reason:** ${reason}`
                 });
             }
         }
 
-        return interaction.editReply({ content: `Raid #${raidId} has been closed and logged.`, ephemeral: true });
+        return interaction.editReply({ content: `Raid #${raidStateManager.getRaidDisplayId(updatedRaid)} has been closed and logged.`, ephemeral: true });
     }
 };

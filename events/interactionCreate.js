@@ -682,12 +682,12 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             name: `raid-uploads-${raid.raidId}`,
             type: ChannelType.GuildText,
             parent: parentId || undefined,
-            topic: `Temporary upload channel for raid #${raid.raidId}. Will be removed after collection.`
+            topic: `Temporary upload channel for raid #${raidStateManager.getRaidDisplayId(raid)}. Will be removed after collection.`
         });
 
         await interaction.followUp({ content: `📸 Upload your **rally picture** for this raid result in ${tempChannel} now — after sending it, type \`rally\` to set it as the result card banner. Then upload the remaining raid pictures and reply with \`done\` in that channel to post the result (or wait 2 minutes).`, ephemeral: true }).catch(() => null);
 
-        await tempChannel.send({ content: `📸 **Upload pictures for Raid #${raid.raidId} here.**\n1️⃣ Send your **rally picture**, then type \`rally\` — it becomes the banner at the top of the result card.\n2️⃣ Send the remaining raid result pictures (raid proof).\n3️⃣ Type \`done\` (by <@${closerId}>) to post the result card — or wait 2 minutes and the bot posts whatever was uploaded.` }).catch(() => null);
+        await tempChannel.send({ content: `📸 **Upload pictures for Raid #${raidStateManager.getRaidDisplayId(raid)} here.**\n1️⃣ Send your **rally picture**, then type \`rally\` — it becomes the banner at the top of the result card.\n2️⃣ Send the remaining raid result pictures (raid proof).\n3️⃣ Type \`done\` (by <@${closerId}>) to post the result card — or wait 2 minutes and the bot posts whatever was uploaded.` }).catch(() => null);
 
         const collector = tempChannel.createMessageCollector({
             filter: (msg) => {
@@ -1277,7 +1277,7 @@ module.exports = {
             }
             const serverLink = buildRobloxJoinLink(raid) || (raid.serverLink && /^https?:\/\//i.test(raid.serverLink) ? raid.serverLink : null);
             await interaction.reply({
-                content: `📋 **Raid #${raid.raidId}** | ${serverLink ? '🔗 Server link: ' + serverLink : '🔗 Server link: not available (no place id recorded).'}`,
+                content: `📋 **Raid #${raidStateManager.getRaidDisplayId(raid)}** | ${serverLink ? '🔗 Server link: ' + serverLink : '🔗 Server link: not available (no place id recorded).'}`,
                 flags: 64
             }).catch(() => null);
             return;
@@ -1590,12 +1590,12 @@ module.exports = {
             // Send the helper their deployment info.
             const gameLabel = raidStateManager.GAME_CONFIG[updated.targetGame] || updated.targetGame || 'Unknown';
             const helperEmbed = new EmbedBuilder()
-                .setTitle(`Raid #${updated.raidId} — Join Deployment`)
+                .setTitle(`Raid #${raidStateManager.getRaidDisplayId(updated)} — Join Deployment`)
                 .setDescription('You have been accepted as a helper for this raid.')
                 .addFields([
                     { name: 'Game', value: gameLabel, inline: true },
                     { name: 'Region', value: updated.region || 'Unknown', inline: true },
-                    { name: 'Raid ID', value: `#${updated.raidId}`, inline: true },
+                    { name: 'Raid ID', value: `#${raidStateManager.getRaidDisplayId(updated)}`, inline: true },
                     { name: 'Server Link', value: updated.serverLink ? `[Join Server](${updated.serverLink})` : 'No link provided', inline: false }
                 ])
                 .setColor(0xFFD700)
