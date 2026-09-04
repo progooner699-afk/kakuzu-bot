@@ -20,13 +20,14 @@ function fakeRaid(overrides = {}) {
   };
 }
 
-test('sets the native V2 flag and wraps in a Container with accent color', async () => {
+test('sets the native V2 flag and wraps in a Container with NO accent color (no line)', async () => {
   const payload = await raidV2.buildRaidAlertPayload(fakeRaid());
   assert.strictEqual(payload.flags, 1 << 15); // IS_COMPONENTS_V2
   assert.strictEqual(payload.components.length, 1);
   const container = payload.components[0];
   assert.strictEqual(container.type, 17); // Container
-  assert.strictEqual(container.accent_color, 0xed4245);
+  // The alert must NOT draw a colored accent bar / line on the container.
+  assert.strictEqual(container.accent_color, undefined);
   assert.ok(container.components.length >= 8);
 });
 

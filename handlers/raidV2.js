@@ -131,7 +131,9 @@ async function buildRaidAlertPayload(raid, buttons) {
     // thumbnail/button (IN-GAME HELPERS / DESCRIPTION / LIVE HELPERS, and the
     // header when there is no requester avatar) are emitted as TextDisplay
     // (type 10) via text() instead - no accessory is required.
-    const container = new ContainerBuilder().setAccentColor(ALERT_ACCENT_COLOR).toJSON();
+    // The alert should NOT draw a colored accent bar (no vertical colored line).
+    // Omit setAccentColor so no line renders on the Container.
+    const container = new ContainerBuilder().toJSON();
     // Use large container size — makes the alert ~600px wide instead of ~400px
     container.size = 'large';
 
