@@ -78,6 +78,7 @@ function resolveSslConfig(connectionString) {
 }
 
 let pool = null;
+let warnedNoDatabaseUrl = false;
 
 /**
  * Lazily builds the connection pool. Returns null (no pool) when DATABASE_URL
@@ -88,8 +89,15 @@ function getPool() {
     if (pool) return pool;
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) {
+        // One-time diagnostic so admins immediately see why dashboard pings
+        // never appear instead of silently getting empty config.
+        if (!warnedNoDatabaseUrl) {
+            warnedNoDatabaseUrl = true;
+            console.warn('[sharedPingDb] DATABASE_URL is not set — dashboard raid pings will NOT be loaded. Set DATABASE_URL in your environment (see .env template).');
+        }
         return null; // shared DB not configured -> no location ping (legacy /setregionping removed)
     }
+    warnedNoDatabaseUrl = true; // connection string present — suppress the warning
     const ssl = resolveSslConfig(connectionString);
     pool = new Pool(ssl ? { connectionString, ssl } : { connectionString });
     pool.on('error', (err) => {
@@ -142,13 +150,23 @@ async function getGuildPingSettings(guildId) {
             'SELECT country_pings, region_pings FROM guild_ping_settings WHERE guild_id = $1',
             [String(guildId || '').trim()]
         );
-        if (!rows || rows.length === 0) return { countryPings: {}, regionPings: {} };
+        if (!rows || rows.length === 0) {
+            console.warn('[sharedPingDb] No ping settings row for guild', guildId, '— has the dashboard saved a config for this guild?');
+            return { countryPings: {}, regionPings: {} };
+        }
 
         const row = rows[0];
-        return {
-            countryPings: (row && row.country_pings && typeof row.country_pings === 'object') ? row.country_pings : {},
-            regionPings: (row && row.region_pings && typeof row.region_pings === 'object') ? row.region_pings : {}
-        };
+        const countryPings = (row && row.country_pings && typeof row.country_pings === 'object') ? row.country_pings : {};
+        const regionPings = (row && row.region_pings && typeof row.region_pings === 'object') ? row.region_pings : {};
+
+        // Diagnostic: log the raw keys so case mismatches are immediately visible.
+        console.log(
+            '[sharedPingDb] Loaded ping config for guild', guildId,
+            '| country keys:', Object.keys(countryPings),
+            '| region keys:', Object.keys(regionPings)
+        );
+
+        return { countryPings, regionPings };
     } catch (err) {
         // Database temporarily unavailable - fail safe, never crash the raid.
         console.warn('[sharedPingDb] getGuildPingSettings failed:', sanitizeError(err));

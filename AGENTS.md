@@ -51,18 +51,22 @@
   (`require|no-verify|prefer|allow` → `rejectUnauthorized:false`;
   `verify-full` → `rejectUnauthorized:true`).
 * **Raid ping resolution** (`getRaidPingInfo` in `events/interactionCreate.js`):
-  Country code takes precedence and is used ALONE — never both. If a
-  `countryCode` was detected, only `countryPings[COUNTRY_CODE]` is considered;
-  if that role is missing/deleted/invalid the alert posts with **no** location
-  ping (no broad-region fallback). If no `countryCode` was detected, only
-  `regionPings[BROAD_REGION]` is considered. Config comes **exclusively** from
-  the shared Postgres dashboard (`getGuildPingSettings`); the legacy
-  `settings.regionPings` (from the removed `/setregionping` command) is no
-  longer read — if the DB is unconfigured/down/empty there is simply **no**
-  location ping on either path. `allowedMentions.roles` restricts pings to
-  exactly the chosen role. The alert embed shows the human-readable
-  `Country` name (from `raidStateManager.countryCodeToName`, e.g. `IN` → `India`)
-  directly under `Region`, or `Unknown` when undetected.
+  Country code takes precedence — when a `countryCode` is detected the
+  country role (`countryPings[COUNTRY_CODE]`) is tried first; if it is not
+  configured or the role no longer exists in the guild, the bot **falls
+  back** to the broad region role (`regionPings[BROAD_REGION]`) so that
+  region-only dashboard configs still produce a location ping. If no
+  `countryCode` was detected, only the region role is considered. Lookups
+  are **case-insensitive** (so a dashboard storing "in"/"asia" matches the
+  bot's "IN"/"ASIA"); role IDs from JSONB are coerced to strings. Config
+  comes **exclusively** from the shared Postgres dashboard
+  (`getGuildPingSettings`); the legacy `settings.regionPings` (from the
+  removed `/setregionping` command) is no longer read — if the DB is
+  unconfigured/down/empty there is simply **no** location ping on either
+  path. `allowedMentions.roles` restricts pings to exactly the chosen role.
+  The alert embed shows the human-readable `Country` name (from
+  `raidStateManager.countryCodeToName`, e.g. `IN` → `India`) directly under
+  `Region`, or `Unknown` when undetected.
 * **Detector:** `robloxApi.detectGameAndRegion` now also returns `countryCode`
   (ISO-3166 alpha-2, e.g. `SG`) alongside the broad `region` (e.g. `ASIA`),
   plus `regionLabel` (human-readable "City, Country") and `regionSource`
@@ -98,9 +102,9 @@
   alert re-render.
 * **Removed `/setregionping`:** the legacy settings.json `regionPings` command was
   deleted — the dashboard→Postgres→bot path is now the SOLE source of truth.
-* **Running:** if `DATABASE_URL` is unset or empty, `sharedPingDb` returns empty
-  maps and the bot simply posts with **no** location ping — it needs zero
-  Postgres changes and zero legacy config.
+* **Running:** if `DATABASE_URL` is unset or empty, `sharedPingDb` logs a one-time
+  warning and returns empty maps — the bot simply posts with **no** location ping.
+  Set `DATABASE_URL` in your environment for dashboard pings to work.
 
 ## 🔁 IMPORTANT RECOVERY NOTE (as of latest commit)
 

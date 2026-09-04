@@ -182,57 +182,127 @@ async function roleExistsInGuild(client, guildId, roleId) {
 }
 
 /**
+ * Case-insensitive key lookup into a plain object. Tries an exact match
+ * first (fast path), then falls back to scanning all keys case-insensitively.
+ *
+ * This makes the ping-role resolution robust against dashboards that store
+ * country codes or region names in a different casing than the bot uses
+ * internally (e.g. dashboard stores "in" while the bot looks up "IN", or
+ * "asia" vs "ASIA"). Without this, a single casing mismatch causes the ping
+ * to silently disappear.
+ *
+ * @param {object|null|undefined} obj  the config mapping
+ * @param {string} key                 the key to look up
+ * @returns {*} the value for the first case-insensitive matching key, or undefined
+ */
+function lookupCaseInsensitive(obj, key) {
+    if (!obj || typeof obj !== 'object') return undefined;
+    // Fast path: exact key match (covers the common case where casing already aligns).
+    if (obj[key] !== undefined) return obj[key];
+    const target = String(key || '').trim().toUpperCase();
+    if (!target) return undefined;
+    const keys = Object.keys(obj);
+    for (let i = 0; i < keys.length; i++) {
+        if (String(keys[i]).trim().toUpperCase() === target) {
+            return obj[keys[i]];
+        }
+    }
+    return undefined;
+}
+
+/**
+ * Picks a usable role id from a raw config value returned by Postgres.
+ *
+ * The dashboard JSONB may store:
+ *   - a single role id as a string  -> {"IN": "123456789"}
+ *   - a single role id as a number  -> {"IN": 123456789}   (JSONB numeric)
+ *   - an array of role ids          -> {"IN": ["123", "456"]}
+ *
+ * Discord snowflakes are 19-digit integers. JavaScript Number cannot safely
+ * represent them, so if Postgres returns a numeric value we MUST coerce it
+ * back to a string before `isUsableRoleId` (which rejects non-strings) and
+ * before `roleExistsInGuild` (which does string lookups in the role cache).
+ *
+ * Returns the validated role id string, or null if none is usable.
+ * @param {*} configValue
+ * @returns {string|null}
+ */
+function pickRoleId(configValue) {
+    let candidate = configValue;
+    if (Array.isArray(candidate)) candidate = candidate.length ? candidate[0] : null;
+    if (candidate === null || candidate === undefined) return null;
+    // Coerce numbers (and anything else) to a trimmed string so numeric
+    // role ids from JSONB still pass the string-based validation below.
+    candidate = String(candidate).trim();
+    return isUsableRoleId(candidate) ? candidate : null;
+}
+
+/**
  * Resolves the single role to ping when a raid alert is posted.
  *
- * Ping selection (country code takes precedence, never both):
- *   1. If a `countryCode` was successfully detected -> ping ONLY that country's
- *      configured role. If that role is missing/deleted/invalid -> NO location
- *      ping at all (never fall back to the broad region role).
- *   2. If NO `countryCode` was detected -> ping ONLY the broad region role
- *      (e.g. ASIA / EU / NA / SA). If it is missing -> NO location ping.
+ * Ping selection (country code takes precedence):
+ *   1. If a `countryCode` was detected -> try the country role first.
+ *   2. If no country role is configured -> fall back to the broad region role
+ *      (e.g. ASIA / EU / NA / SA) so admins who only set up region pings still
+ *      get alerted instead of silently dropping the ping.
+ *   3. If NO `countryCode` was detected -> use the broad region role only.
  *
  * Config source: dashboard-owned shared PostgreSQL only
  *   (`getGuildPingSettings(guildId)` -> `countryPings` / `regionPings`). When it
  *   is empty/down there is simply NO location ping — the legacy settings.json
  *   `regionPings` (from the removed `/setregionping` command) is no longer read.
  *
+ * Lookups are case-insensitive so a casing mismatch between the dashboard's
+ * stored keys and the bot's internal codes no longer causes silent ping loss.
+ *
  * Never throws. Always returns { roleId, mention, allowedMentions, source }.
+ * @param {import('discord.js').Client} client
+ * @param {string} guildId
+ * @param {{ countryCode?: string, region?: string }} opts
  */
 async function getRaidPingInfo(client, guildId, { countryCode, region }) {
     const normalizedRegion = normalizeRegion(region);
-    // A truthy country code means we are in "country-only" mode: a missing
-    // country role must yield NO ping rather than bubbling down to a region.
+    // A truthy country code means we are in "country-first" mode: try the
+    // country role first, but fall back to the broad region role if the
+    // country role is not configured or doesn't exist in the guild (so
+    // region-only dashboard configs still produce a location ping).
     const cc = String(countryCode || '').trim().toUpperCase();
-    const useCountryOnly = Boolean(cc);
+    const hasCountryCode = Boolean(cc);
     let resolvedPing = null;
 
     try {
         const cfg = await sharedPingDb.getGuildPingSettings(guildId);
-        const countryPings = cfg.countryPings || {};
-        const regionPings = cfg.regionPings || {};
+        const countryPings = (cfg && cfg.countryPings) || {};
+        const regionPings = (cfg && cfg.regionPings) || {};
 
-        let roleId = null;
-        let source = null;
-        if (useCountryOnly) {
-            // Country detected -> only the country role is ever considered. We do
-            // NOT step down to a broad region role when it is missing/invalid.
-            let candidate = countryPings[cc];
-            if (Array.isArray(candidate)) candidate = candidate.length ? candidate[0] : null;
-            if (isUsableRoleId(candidate)) { roleId = candidate; source = 'country'; }
-        } else if (normalizedRegion) {
-            // No country detected -> only the broad region role is considered.
-            let candidate = regionPings[normalizedRegion];
-            if (Array.isArray(candidate)) candidate = candidate.length ? candidate[0] : null;
-            if (isUsableRoleId(candidate)) { roleId = candidate; source = 'region'; }
+        // Step 1: If a country code was detected, try the country role first.
+        // Case-insensitive lookup so "in" on the dashboard matches "IN".
+        if (hasCountryCode) {
+            const roleId = pickRoleId(lookupCaseInsensitive(countryPings, cc));
+            if (roleId && await roleExistsInGuild(client, guildId, roleId)) {
+                resolvedPing = {
+                    roleId,
+                    mention: `<@&${roleId}>`,
+                    allowedMentions: { roles: [roleId] },
+                    source: 'country'
+                };
+            }
         }
 
-        if (roleId && await roleExistsInGuild(client, guildId, roleId)) {
-            resolvedPing = {
-                roleId,
-                mention: `<@&${roleId}>`,
-                allowedMentions: { roles: [roleId] },
-                source
-            };
+        // Step 2: Region fallback — tried when:
+        //   (a) no country code was detected, or
+        //   (b) a country code was detected but the country role is not
+        //       configured or doesn't exist in the guild (deleted/renamed).
+        if (!resolvedPing && normalizedRegion) {
+            const roleId = pickRoleId(lookupCaseInsensitive(regionPings, normalizedRegion));
+            if (roleId && await roleExistsInGuild(client, guildId, roleId)) {
+                resolvedPing = {
+                    roleId,
+                    mention: `<@&${roleId}>`,
+                    allowedMentions: { roles: [roleId] },
+                    source: 'region'
+                };
+            }
         }
     } catch (err) {
         console.warn('[raid ping] shared Postgres lookup failed:', (err && err.message) || err);
@@ -240,11 +310,14 @@ async function getRaidPingInfo(client, guildId, { countryCode, region }) {
 
     if (resolvedPing) return resolvedPing;
 
-    // With a detected country, a missing country role means NO location ping.
-    // Do not fall back to a broad-region ping.
-    if (useCountryOnly) {
-        return { roleId: null, mention: null, allowedMentions: undefined, source: 'none' };
-    }
+    // No usable role found — log diagnostics so the failure is debuggable
+    // instead of silently posting with no ping.
+    console.warn(
+        '[raid ping] No usable ping role for guild', guildId,
+        '| countryCode:', hasCountryCode ? cc : '(none)',
+        '| region:', normalizedRegion || '(none)',
+        '| source: none. Check the dashboard country/region ping config and DATABASE_URL.'
+    );
 
     // No country detected and no usable region role configured -> NO location
     // ping. The legacy settings.json `regionPings` (written by the removed
@@ -710,6 +783,9 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
 module.exports = {
     name: "interactionCreate",
     createRaidButtons,
+    lookupCaseInsensitive,
+    pickRoleId,
+    getRaidPingInfo,
     async execute(interaction) {
         if (interaction.isChatInputCommand()) {
             const command = interaction.client.commands.get(interaction.commandName);
