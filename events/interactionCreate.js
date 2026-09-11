@@ -1051,12 +1051,30 @@ module.exports = {
             // Check if already verified
             const existing = await verificationDb.getVerificationData(interaction.user.id, guildId);
             if (existing && existing.is_verified) {
+                const linkedName = existing.roblox_display_name || existing.roblox_username || 'your account';
+                const linkedUsername = existing.roblox_username || '';
+                const linkedUserId = existing.roblox_user_id || '';
+                const linkedAvatar = existing.roblox_avatar_url || interaction.client.user.displayAvatarURL({ size: 64 });
+                const linkedProfileLink = linkedUserId ? `https://www.roblox.com/users/${linkedUserId}/profile` : null;
+
                 const alreadyVerifiedEmbed = new EmbedBuilder()
-                    .setTitle('Already Verified')
-                    .setDescription('Your Roblox account is already linked and verified. You are authorized to request raids and accept operations.')
+                    .setTitle('Already Linked')
+                    .setDescription(`You are already linked to the Roblox account **${linkedName}**${linkedUsername ? ` (@${linkedUsername})` : ''}. This account is already authorized to request raids and join backups.`)
                     .setColor(0x9B59B6)
+                    .setThumbnail(linkedAvatar)
                     .setFooter({ text: 'Kakuzu Verification System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
                     .setTimestamp();
+
+                const linkFields = [];
+                if (linkedUsername) linkFields.push({ name: 'Roblox Username', value: `\`${linkedUsername}\``, inline: true });
+                if (linkedUserId) linkFields.push({ name: 'Roblox User ID', value: `\`${linkedUserId}\``, inline: true });
+                if (linkedProfileLink) linkFields.push({ name: 'Roblox Profile', value: `[Open profile](${linkedProfileLink})`, inline: false });
+                linkFields.push({
+                    name: 'Want to switch accounts?',
+                    value: 'Use the **Unlink Roblox account** button on the backup panel to remove this link, then link a new account with the **Link Roblox account** button.',
+                    inline: false
+                });
+                alreadyVerifiedEmbed.addFields(linkFields);
 
                 return interaction.reply({ embeds: [alreadyVerifiedEmbed], flags: 64 });
             }
@@ -1106,6 +1124,45 @@ module.exports = {
                 .setTimestamp();
 
             await interaction.reply({ embeds: [successEmbed], flags: 64 });
+        }
+
+        // Handle unlink roblox button click — remove the linked account so the
+        // user can reset and relink a different Roblox account.
+        if (interaction.customId === "unlink_roblox") {
+            const guildId = interaction.guild?.id;
+            if (!guildId) {
+                return interaction.reply({
+                    content: 'This can only be used inside a server.',
+                    flags: 64
+                }).catch(() => null);
+            }
+
+            const existing = await verificationDb.getVerificationData(interaction.user.id, guildId);
+            if (!existing || !existing.is_verified) {
+                return interaction.reply({
+                    embeds: [new EmbedBuilder()
+                        .setTitle('No Linked Account')
+                        .setDescription('You do not have a linked Roblox account to unlink. Use the **Link Roblox account** button to link one first.')
+                        .setColor(0x9B59B6)
+                        .setFooter({ text: 'Kakuzu Verification System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
+                        .setTimestamp()]
+                , flags: 64 }).catch(() => null);
+            }
+
+            const unlinkedName = existing.roblox_display_name || existing.roblox_username || 'your account';
+            const unlinkedAvatar = existing.roblox_avatar_url || interaction.client.user.displayAvatarURL({ size: 64 });
+
+            await verificationDb.unlinkRoblox(interaction.user.id, guildId);
+
+            return interaction.reply({
+                embeds: [new EmbedBuilder()
+                    .setTitle('Roblox Account Unlinked')
+                    .setDescription(`✅ Successfully unlinked **${unlinkedName}**. You can now link a different Roblox account using the **Link Roblox account** button on the backup panel.`)
+                    .setColor(0x9B59B6)
+                    .setThumbnail(unlinkedAvatar)
+                    .setFooter({ text: 'Kakuzu Verification System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
+                    .setTimestamp()]
+            , flags: 64 }).catch(() => null);
         }
 
         if (interaction.customId === "raid_application_step1") {

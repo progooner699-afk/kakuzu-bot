@@ -183,6 +183,10 @@ function buildBackupPanelPayload() {
             new ButtonBuilder()
                 .setCustomId('link_roblox')
                 .setLabel('Link Roblox account')
+                .setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder()
+                .setCustomId('unlink_roblox')
+                .setLabel('Unlink Roblox account')
                 .setStyle(ButtonStyle.Secondary)
         );
 

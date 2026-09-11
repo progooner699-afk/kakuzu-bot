@@ -277,6 +277,40 @@ async function directLink(userId, robloxData, guildId) {
 }
 
 /**
+ * Removes the Roblox link for a Discord user (sets is_verified = 0 and clears
+ * the linked Roblox fields). Used by the backup panel's "Unlink Roblox account"
+ * button so a user can reset and relink a different account.
+ * @param {string} userId - Discord user ID
+ * @param {string} guildId
+ * @returns {Promise<boolean>} true if a linked row was actually updated.
+ */
+async function unlinkRoblox(userId, guildId) {
+    const db = await getDb(guildId);
+    const stmt = db.prepare(`
+        UPDATE verifications SET
+            is_verified = 0,
+            roblox_username = NULL,
+            roblox_display_name = NULL,
+            roblox_user_id = NULL,
+            roblox_avatar_url = NULL,
+            roblox_ps_link = NULL,
+            kill_count = NULL,
+            friend_list_link = NULL,
+            status = 'pending',
+            rejection_reason = NULL,
+            reviewed_by = NULL,
+            reviewed_at = NULL,
+            verification_id = NULL
+        WHERE userId = ?
+    `);
+    stmt.run([userId]);
+    const changes = db.getRowsModified();
+    stmt.free();
+    saveDb(guildId, db);
+    return changes > 0;
+}
+
+/**
  * Returns every LINKED (verified) user in the guild's verification DB.
  * Used by the presence-based auto-join engine (handlers/autoJoinPresence.js)
  * to know which Roblox accounts to watch. Rows: { userId, roblox_username,
@@ -306,5 +340,6 @@ module.exports = {
     setVerificationLogMessage,
     getPendingVerifications,
     directLink,
+    unlinkRoblox,
     getAllVerifiedUsers
 };

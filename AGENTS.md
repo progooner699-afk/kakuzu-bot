@@ -160,7 +160,19 @@ Refactored the linking → request → join → close loop per the spec:
      modal (`link_roblox_modal`) → username validated via Roblox API
      (`handlers/robloxApi.js`) → `verificationDb.directLink(...)` grants raid
      access **immediately** (no moderator approval round-trip), then replies
-     `✅ Successfully linked as <name>!` (ephemeral).
+     `✅ Successfully linked as <name>!` (ephemeral). If the user is **already
+     linked**, the modal reply is an ephemeral "Already Linked" embed showing
+     their current Roblox profile (avatar thumbnail, display name, username,
+     user ID, profile link) and explains they can switch accounts via the
+     Unlink button.
+   * The panel's **"Unlink Roblox account"** button (`unlink_roblox`) lets a
+     user remove their current link so they can relink a different account.
+     `verificationDb.unlinkRoblox(...)` clears the Roblox fields (sets
+     `is_verified = 0`, nulls username/display/userId/avatar, resets status)
+     so the user is treated as unverified until they link again. The ephemeral
+     confirm shows the account that was unlinked; clicking it while nothing is
+     linked replies an ephemeral "No Linked Account" notice pointing back to
+     the Link button.
 2. **Unverified Request/Accept handling:** If an unverified user clicks
    `request_backup` (or a `Join`), the bot replies **ephemeral** pointing them
    to the backup-panel channel to link their Roblox account. Public buttons are
