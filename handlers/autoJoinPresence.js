@@ -81,14 +81,26 @@ async function pollAutoJoin(client, guildId) {
     for (const user of presences) {
         if (user.userPresenceType !== 2) continue; // 2 = InGame
         const placeId = user.placeId != null ? String(user.placeId) : '';
-        if (!placeId) continue;
+        // gameId = the Roblox server job ID the user is in. Matching on this
+        // (when the raid has a known serverId) pins the helper to the EXACT
+        // server instance, not just the same game/universe (placeId).
+        const gameId = user.gameId != null ? String(user.gameId) : '';
+        if (!placeId && !gameId) continue;
         const info = byRobloxId.get(String(user.userId));
         if (!info) continue;
-        // First non-full OPEN raid for this place.
-        const raid = openRaids.find(r =>
-            String(r.placeId) === placeId &&
-            (r.helpers || []).length < (r.helperLimit || 0));
-        if (!raid) continue;
+
+    // A linked user must be inside THIS raid's Roblox server: either their
+    // current server (gameId) matches the raid's serverId, or — for raids
+    // that still only carry a placeId — the placeId matches AND no more
+    // specific serverId is known so we avoid cross-server false positives.
+    const raid = openRaids.find(r => {
+        const placeMatches = !r.placeId || String(r.placeId) === placeId;
+        const serverMatches = (gameId && r.serverId && String(r.serverId) === gameId);
+        // Prefer an exact server match; only fall back to place match when
+        // the raid has no serverId yet (defensive — normally set at join).
+        return serverMatches || (placeMatches && !r.serverId);
+    });
+    if (!raid) continue;
 
         const result = await raidStateManager.addHelper(raid.raidId, info.userId, {
             username: info.roblox_username,

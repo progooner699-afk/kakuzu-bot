@@ -343,11 +343,14 @@ async function addHelper(raidId, userId, robloxData, guildId) {
     
     raid.helpers.push({
         userId: userId,
+        discordTag: robloxData.discordTag || null,
         robloxUsername: robloxData.username,
         robloxDisplayName: robloxData.displayName,
         robloxUserId: robloxData.userId,
         robloxAvatarUrl: robloxData.avatarUrl || null,
         joinTime: Date.now(),
+        lastSeenTime: Date.now(),    // set so pollHelperPresences InGame tracking fires immediately
+        leaveTime: null,
         timeSpentSeconds: 0
     });
     
@@ -358,6 +361,47 @@ async function addHelper(raidId, userId, robloxData, guildId) {
     return { success: true, raid, totalRaids };
 }
 
+/**
+ * Manually add a helper to a raid by their Discord user ID. Used by the
+ * "Add Helper" button on the raid alert (staff/requester only). Does NOT
+ * require a Roblox link — useful for in-game helpers who don't use Discord.
+ * Returns { success, message, raid }.
+ */
+function addHelperByDiscordId(raidId, discordUserId, discordTag, guildId) {
+    const raids = loadRaids(guildId);
+    const raid = raids.raids.find(item => item.raidId === raidId);
+    if (!raid || raid.status === 'CLOSED') return { success: false, message: 'Raid is closed or not found.' };
+    if (!Array.isArray(raid.helpers)) raid.helpers = [];
+    
+    // Already a helper?
+    const existing = raid.helpers.find(h => typeof h === 'object' && h.userId === discordUserId);
+    if (existing) return { success: false, message: 'This user is already a helper on this raid.' };
+    
+    // Check helper limit
+    const limit = Number(raid.helperLimit) || 0;
+    if (limit > 0 && raid.helpers.length >= limit) {
+        return { success: false, message: 'This raid already has the maximum number of helpers (' + limit + ').' };
+    }
+    
+    const now = Date.now();
+    raid.helpers.push({
+        userId: discordUserId,
+        discordTag: discordTag || null,
+        robloxUsername: null,
+        robloxDisplayName: null,
+        robloxUserId: null,
+        avatarUrl: null,
+        joinTime: now,
+        lastSeenTime: null,
+        leaveTime: null,
+        timeSpentSeconds: 0
+    });
+    
+    updateRaidStatus(raid);
+    saveRaids(guildId, raids);
+    return { success: true, raid };
+}
+
 function removeHelper(raidId, userId, guildId) {
     const raids = loadRaids(guildId);
     const raid = raids.raids.find(item => item.raidId === raidId);
@@ -365,6 +409,20 @@ function removeHelper(raidId, userId, guildId) {
     
     const index = raid.helpers.findIndex(h => typeof h === 'string' ? h === userId : h.userId === userId);
     if (index === -1) return { success: false, message: 'You are not a helper on this raid.' };
+    
+    // Finalize this helper's accumulated in-game time before removing, so their
+    // participation is credited on leave (preserves total time across session).
+    const helper = raid.helpers[index];
+    if (typeof helper === 'object') {
+        if (helper.lastSeenTime) {
+            const elapsed = Math.floor((Date.now() - helper.lastSeenTime) / 1000);
+            if (elapsed > 0) helper.timeSpentSeconds = (helper.timeSpentSeconds || 0) + elapsed;
+            helper.lastSeenTime = null;
+        }
+        // Record the exact leave time so the live helpers display can show
+        // "Joined: <t> | Left: <t>" for helpers who have left.
+        helper.leaveTime = Date.now();
+    }
     
     raid.helpers.splice(index, 1);
     updateRaidStatus(raid);
@@ -465,7 +523,7 @@ function formatRaidMessage(raid, guildId = null) {
     const helperNamesList = helperCount > 0
         ? raid.helpers.map((h) => {
             if (typeof h === 'string') return '<@' + h + '>';
-            return h.robloxDisplayName || h.robloxUsername || '<@' + h.userId + '>';
+            return h.robloxDisplayName || h.robloxUsername || h.discordTag || '<@' + h.userId + '>';
         }).join(', ')
         : 'None';
 
@@ -520,9 +578,12 @@ function formatRaidMessage(raid, guildId = null) {
     if (helperCount > 0) {
         const liveHelpersList = raid.helpers.map((h) => {
             if (typeof h === 'string') return '• <@' + h + '>';
-            const helperName = h.robloxDisplayName || h.robloxUsername || '<@' + h.userId + '>';
+            const helperName = h.robloxDisplayName || h.robloxUsername || h.discordTag || '<@' + h.userId + '>';
             const timeSpent = (h && h.timeSpentSeconds) ? ' \u23F1 ' + formatTimeSpent(h.timeSpentSeconds) : '';
-            return '• <@' + h.userId + '> \u2014 **' + helperName + '**' + timeSpent;
+            const joinTs = h.joinTime ? '<t:' + Math.floor(h.joinTime / 1000) + ':R>' : '';
+            const leaveTs = h.leaveTime ? ' \u2192 Left: <t:' + Math.floor(h.leaveTime / 1000) + ':R>' : '';
+            const timeInfo = joinTs ? ' \u{1F552} ' + joinTs + leaveTs : '';
+            return '• <@' + h.userId + '> \u2014 **' + helperName + '**' + timeSpent + timeInfo;
         }).join('\n');
 
         const helpersDesc = '## LIVE HELPERS\n\n' +
@@ -964,6 +1025,7 @@ module.exports = {
     getRaidById,
     getRaidDisplayId,
     addHelper,
+    addHelperByDiscordId,
     removeHelper,
     closeRaid,
     updateRaidMessageReference,

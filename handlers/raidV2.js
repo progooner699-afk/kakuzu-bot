@@ -59,9 +59,13 @@ function normalizeHelperName(h) {
 
 function formatLiveHelperRow(h) {
     if (typeof h === 'string') return '> • <@' + h + '>';
-    const name = h.robloxDisplayName || h.robloxUsername || (h.userId ? '<@' + h.userId + '>' : 'Unknown');
+    const name = h.robloxDisplayName || h.robloxUsername || h.discordTag || (h.userId ? '<@' + h.userId + '>' : 'Unknown');
     const timeSpent = (h && h.timeSpentSeconds) ? ' ⏱ ' + rsm.formatTimeSpent(h.timeSpentSeconds) : '';
-    return '> • <@' + h.userId + '> — **' + name + '**' + timeSpent;
+    // Show join time (and leave time if they left) so staff can see full participation.
+    const joinTs = h.joinTime ? '<t:' + Math.floor(h.joinTime / 1000) + ':R>' : '';
+    const leaveTs = h.leaveTime ? ' → Left: <t:' + Math.floor(h.leaveTime / 1000) + ':R>' : '';
+    const timeInfo = joinTs ? ' 🕐 ' + joinTs + leaveTs : '';
+    return '> • <@' + h.userId + '> — **' + name + '**' + timeSpent + timeInfo;
 }
 
 /**
