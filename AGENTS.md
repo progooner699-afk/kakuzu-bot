@@ -134,11 +134,11 @@
   (`raid-uploads-<id>` channel), the closer can type `ingame` to get a live
   snapshot of current in-game helpers and their participation time so far.
 * **Helper object now carries `discordTag`, `lastSeenTime`, and `leaveTime`:**
-  `discordTag` is set from the Discord user's tag when joining via the public
-  Help button; `lastSeenTime` is set at join so presence-based time tracking
-  fires immediately; `leaveTime` is recorded when a helper leaves so the live
-  display can show "Joined: <t> → Left: <t>". Both `formatLiveHelperRow` (V2)
-  and `formatRaidMessage` (embed fallback) render these fields consistently.
+  `discordTag` is set from the Discord user's tag when joining; `lastSeenTime`
+  is set at join so presence-based time tracking fires immediately;
+  `leaveTime` is recorded when a helper leaves so the live display can show
+  "Joined: <t> → Left: <t>". Both `formatLiveHelperRow` (V2) and
+  `formatRaidMessage` (embed fallback) render these fields consistently.
 * **Running:** if `DATABASE_URL` is unset or empty, `sharedPingDb` logs a one-time
   warning and returns empty maps — the bot simply posts with **no** location ping,
   and `/pingsetup` saves fail with an explicit "DATABASE_URL is not configured"
@@ -258,11 +258,22 @@ Refactored the linking → request → join → close loop per the spec:
      (`https://www.roblox.com/games/start?placeId=...` — Discord Link buttons
      reject `roblox://` schemes, which would fail the whole alert), built by
      `buildRobloxJoinLink`.
-   * `[ Help ]` — `ButtonStyle.Success` (green, PUBLIC). Opens the join modal
-     (`raid_joinmodal_<id>`) so any Discord user can join as a helper — no Roblox
-     link required. The helper is added to the LIVE HELPERS list with full
-     join/leave time tracking, and receives an ephemeral Discord **Link** button
-     (`ButtonStyle.Link`) to the Roblox join URL.
+   * `[ Help ]` — `ButtonStyle.Success` (green, PUBLIC). The user asks to join a
+     raid. Flow:
+     1. Must have a linked Roblox account (checked via verificationDb). If not
+        linked → ephemeral reject with link instructions. No server link given.
+     2. If linked → give the requester's Roblox server join link (ephemeral
+        Link button) and start a **temporary presence monitor** (NOT a helper).
+     3. The 15s presence loop (`processHelpMonitors`) checks the user's Roblox
+        presence. Only when `userPresenceType === 2` AND `placeId` matches the
+        raid AND `gameId` matches the raid's exact `serverId` are they added to
+        Live Helpers, the count increased, `joinedAt` recorded, and the alert
+        updated. A confirmation DM is sent.
+     4. If Roblox cannot expose placeId/gameId (privacy settings) → the user is
+        NOT added. After the 10-minute TTL expires, they receive a DM asking them
+        to enable Roblox joins for Everyone.
+     5. There is **no** "Pending Helpers" section, pending count, or visible
+        pending status. The monitor is a temporary internal record only.
    * `[ 🔒 CLOSE RAID ]` — `ButtonStyle.Secondary` (`close_raid_<id>`,
      handled alongside the legacy `raid_close_<id>`). Executable **only** by the
      raid requester or an authorized staff role (see `canCloseRaid`).

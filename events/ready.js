@@ -1,6 +1,7 @@
 const { registerGuildCommands, clearGlobalCommands } = require('../commands/deploy-commands');
 const raidStateManager = require('../handlers/raidStateManager');
 const autoJoinPresence = require('../handlers/autoJoinPresence');
+const { processHelpMonitors } = require('./interactionCreate');
 
 /** How often (ms) to poll Roblox presence for active raid helpers. */
 const PRESENCE_POLL_INTERVAL = 15 * 1000; // 15 seconds
@@ -92,6 +93,10 @@ module.exports = {
                     // open raid's experience are added to the LIVE HELPERS list.
                     autoJoinPresence.pollAutoJoin(client, g.id)
                 ]));
+                // Help-button presence monitoring: users who pressed Help are
+                // checked separately; only added to Live Helpers when Roblox
+                // confirms they are inside the exact raid server.
+                await processHelpMonitors(client);
             } catch (error) {
                 console.warn('Presence polling loop error:', error?.message || error);
             }
