@@ -4,7 +4,9 @@ const assert = require('assert');
 const {
     COUNTRIES,
     COUNTRIES_SORTED,
+    COUNTRIES_POPULAR_FIRST,
     COUNTRIES_BY_CODE,
+    POPULAR_COUNTRY_CODES,
     REGIONS,
     COUNTRY_CODE_TO_REGION,
     COUNTRY_NAME_TO_REGION,
@@ -12,7 +14,8 @@ const {
     getCountry,
     getCountryName,
     getRegionForCountryCode,
-    getRegionForCountryName
+    getRegionForCountryName,
+    isPopularCountry
 } = require('../handlers/countryCatalog');
 
 const CANONICAL_REGIONS = new Set(REGIONS.map((r) => r.key));
@@ -44,6 +47,30 @@ test('countries are sorted alphabetically by English name', () => {
   const names = COUNTRIES_SORTED.map((c) => c.name);
   const sorted = [...names].sort((a, b) => a.localeCompare(b));
   assert.deepStrictEqual(names, sorted);
+});
+
+test('selector order puts popular raid countries FIRST, then everything else alphabetically', () => {
+  // Page 1 must START with the explicitly requested popular order:
+  // Singapore, India, US, Philippines, Japan, Australia (then the rest).
+  assert.deepStrictEqual(
+    COUNTRIES_POPULAR_FIRST.slice(0, 6).map((c) => c.code),
+    ['SG', 'IN', 'US', 'PH', 'JP', 'AU'],
+    'popular raid countries must lead the selector'
+  );
+
+  // It is a permutation of the same catalog: same size, no dupes, no loss.
+  assert.strictEqual(COUNTRIES_POPULAR_FIRST.length, COUNTRIES_SORTED.length);
+  const codes = new Set(COUNTRIES_POPULAR_FIRST.map((c) => c.code));
+  assert.strictEqual(codes.size, COUNTRIES_SORTED.length, 'no duplicate codes');
+
+  // After the popular block the remaining countries stay alphabetical.
+  const rest = COUNTRIES_POPULAR_FIRST.slice(POPULAR_COUNTRY_CODES.length).map((c) => c.name);
+  assert.deepStrictEqual(rest, [...rest].sort((a, b) => a.localeCompare(b)),
+    'non-popular countries must remain alphabetical');
+
+  // Popular flags agree with the helper.
+  assert.ok(isPopularCountry('SG') && isPopularCountry('IN') && isPopularCountry('AU'));
+  assert.ok(!isPopularCountry('ZW') && !isPopularCountry(''));
 });
 
 test('every supported country is reachable through the 25-per-page selector', () => {

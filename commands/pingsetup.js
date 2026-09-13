@@ -42,10 +42,11 @@ const {
 } = require('discord.js');
 const sharedPingDb = require('../handlers/sharedPingDb');
 const {
-    COUNTRIES_SORTED,
+    COUNTRIES_POPULAR_FIRST,
     REGIONS,
     flagEmoji,
     getCountry,
+    isPopularCountry,
     regionLabel
 } = require('../handlers/countryCatalog');
 
@@ -209,9 +210,9 @@ function buildRoleMap(roles) {
     return map;
 }
 
-/** Sorted (by English name) list of catalog countries as { code, name, region }. */
+/** Display list for the selector: popular raid countries first, then all remaining countries alphabetically. */
 function sortedCountries() {
-    return COUNTRIES_SORTED;
+    return COUNTRIES_POPULAR_FIRST;
 }
 
 /**
@@ -239,7 +240,7 @@ function paginate(items, page, pageSize) {
 function buildCountrySelectOptions(page) {
     const paged = paginate(sortedCountries(), page, COUNTRY_PAGE_SIZE);
     const options = paged.slice.map((country) => new StringSelectMenuOptionBuilder()
-        .setLabel(`${flagEmoji(country.code)} ${country.name} (${country.code})`)
+        .setLabel(`${isPopularCountry(country.code) ? '⭐ ' : ''}${flagEmoji(country.code)} ${country.name} (${country.code})`)
         .setValue(country.code));
     return { options, page: paged.page, pageCount: paged.pageCount, hasPrev: paged.hasPrev, hasNext: paged.hasNext };
 }
@@ -368,7 +369,7 @@ function buildMainEmbed(session, roleMap) {
 }
 
 function countriesCount() {
-    return COUNTRIES_SORTED.length;
+    return sortedCountries().length;
 }
 
 function buildCountryAddEmbed(session) {
@@ -376,7 +377,8 @@ function buildCountryAddEmbed(session) {
     return new EmbedBuilder()
         .setTitle(`🌍 Add Country Ping — Page ${session.countryPage}/${pageCount}`)
         .setDescription('Pick a country. After that you will choose which **role** Kakuzu pings for it.' + NL +
-            '> Use **Prev / Next** to browse every supported country (alphabetical).')
+            '> ⭐ Popular raid countries (Singapore, India, US, Philippines, Japan, Australia, …) are listed FIRST.' + NL +
+            '> Use **Prev / Next** to browse every supported country.') 
         .setColor(PANEL_ACCENT_COLOR);
 }
 

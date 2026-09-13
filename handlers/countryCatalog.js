@@ -304,6 +304,58 @@ const COUNTRIES_SORTED = [...COUNTRIES_BY_CODE.values()].sort((a, b) =>
 );
 
 /**
+ * Popular raid countries shown FIRST in the /pingsetup country selector.
+ * The first six are the explicitly requested order (Singapore, India, US,
+ * Philippines, Japan, Australia); the rest are other very common raid
+ * countries. Every one of these must exist in COUNTRIES.
+ */
+const POPULAR_COUNTRY_CODES = Object.freeze([
+  'SG', // Singapore
+  'IN', // India
+  'US', // United States
+  'PH', // Philippines
+  'JP', // Japan
+  'AU', // Australia
+  'GB', // United Kingdom
+  'CA', // Canada
+  'BR', // Brazil
+  'ID', // Indonesia
+  'MY', // Malaysia
+  'DE'  // Germany
+]);
+
+/**
+ * Display order for the /pingsetup selector: popular countries (in
+ * POPULAR_COUNTRY_CODES order) first, then every remaining country
+ * alphabetically. Same 250 entries as COUNTRIES_SORTED — just re-ordered,
+ * so paginating this list still reaches every country.
+ */
+const COUNTRIES_POPULAR_FIRST = (() => {
+  const seen = new Set();
+  const out = [];
+  for (const code of POPULAR_COUNTRY_CODES) {
+    const entry = COUNTRIES_BY_CODE.get(String(code).trim().toUpperCase());
+    if (entry && !seen.has(entry.code)) {
+      out.push(entry);
+      seen.add(entry.code);
+    }
+  }
+  for (const entry of COUNTRIES_SORTED) {
+    if (!seen.has(entry.code)) {
+      out.push(entry);
+      seen.add(entry.code);
+    }
+  }
+  return Object.freeze(out);
+})();
+
+/** True when the code is one of the popular countries flagged in the picker. */
+function isPopularCountry(code) {
+  const cc = String(code || '').trim().toUpperCase();
+  return POPULAR_COUNTRY_CODES.includes(cc);
+}
+
+/**
  * Returns the regional-indicator flag emoji for an ISO-3166 alpha-2 code
  * (e.g. 'IN' -> 🇮🇳). Returns a plain flag for unknown/non-renderable codes.
  * @param {string} code
@@ -363,6 +415,8 @@ module.exports = {
   REGIONS,
   COUNTRIES_BY_CODE,
   COUNTRIES_SORTED,
+  COUNTRIES_POPULAR_FIRST,
+  POPULAR_COUNTRY_CODES,
   COUNTRY_CODE_TO_REGION,
   COUNTRY_NAME_TO_REGION,
   flagEmoji,
@@ -373,5 +427,6 @@ module.exports = {
   },
   getRegionForCountryCode,
   getRegionForCountryName,
+  isPopularCountry,
   regionLabel
 };
