@@ -67,21 +67,10 @@ const GAME_CONFIG = {
 
 // ISO-3166 alpha-2 -> human-readable country name used to render the "Country"
 // field on raid alert embeds (V2 payload AND the plain embed fallback).
+// Source of truth: handlers/countryCatalog.js (shared with /pingsetup and the
+// region detector) — this keeps embeds, builder and detector in exact sync.
 // Lookup stays on the standardized uppercase alpha-2 code internally.
-const COUNTRY_NAMES = {
-    US: 'United States', CA: 'Canada', MX: 'Mexico', BR: 'Brazil', AR: 'Argentina',
-    CL: 'Chile', CO: 'Colombia', PE: 'Peru', VE: 'Venezuela', UY: 'Uruguay',
-    GB: 'United Kingdom', DE: 'Germany', FR: 'France', IT: 'Italy', ES: 'Spain',
-    PT: 'Portugal', NL: 'Netherlands', BE: 'Belgium', CH: 'Switzerland', AT: 'Austria',
-    SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', PL: 'Poland',
-    CZ: 'Czechia', HU: 'Hungary', RO: 'Romania', GR: 'Greece', IE: 'Ireland',
-    RU: 'Russia', UA: 'Ukraine', TR: 'Turkey', IN: 'India', CN: 'China',
-    JP: 'Japan', KR: 'South Korea', SG: 'Singapore', MY: 'Malaysia', ID: 'Indonesia',
-    TH: 'Thailand', VN: 'Vietnam', PH: 'Philippines', PK: 'Pakistan', BD: 'Bangladesh',
-    AE: 'United Arab Emirates', SA: 'Saudi Arabia', IL: 'Israel', QA: 'Qatar', KW: 'Kuwait',
-    AU: 'Australia', NZ: 'New Zealand', ZA: 'South Africa', NG: 'Nigeria', KE: 'Kenya',
-    EG: 'Egypt', MA: 'Morocco', GH: 'Ghana'
-};
+const { getCountryName } = require('./countryCatalog');
 
 /**
  * Converts an ISO-3166 alpha-2 country code (e.g. 'IN') into a human-readable
@@ -91,7 +80,7 @@ const COUNTRY_NAMES = {
 function countryCodeToName(countryCode) {
     const cc = String(countryCode || '').trim().toUpperCase();
     if (!cc) return 'Unknown';
-    return COUNTRY_NAMES[cc] || cc;
+    return getCountryName(cc) || cc;
 }
 
 /**

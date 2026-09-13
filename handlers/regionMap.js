@@ -10,9 +10,9 @@
  * live third-party geolocation lookup, so results always reflect the server's
  * actual geographic location.
  *
- * The region codes returned here match the bot's normalized region set used
- * throughout the codebase (see normalizeRegionInput / normalizeRegion):
- *   NA, SA, EU, ASIA, AUST, OCEANIA, MIDDLE_EAST, AFRICA
+ * The region codes returned here match the bot's canonical region set used
+ * throughout the codebase (see countryCatalog REGIONS / normalizeRegion):
+ *   ASIA, EU, NA, SA, OCEANIA, AFRICA, MIDDLE_EAST
  */
 /**
  * Asynchronous fallback that queries ip-api.com for the geographic location
@@ -52,80 +52,32 @@ async function geolocateIp(ip) {
 }
 
 // ---- Country → normalized region code -------------------------------------
-// Translates a country name returned by RoValra into the bot's normalized
-// region set (NA, SA, EU, ASIA, AUST, OCEANIA, MIDDLE_EAST, AFRICA).
-// Only well-established mappings are included; an unknown country resolves to
-// null so the caller falls through to the next source instead of guessing.
-const COUNTRY_TO_REGION = {
-  // Asia
+// Derived from handlers/countryCatalog.js — the SINGLE source of truth shared
+// with the /pingsetup builder — so the detector can never disagree with what
+// the builder offers. Every ISO-3166 alpha-2 country (including territories)
+// maps to one canonical region; legacy/non-ISO aliases (RoValra quirks like
+// the 'SINGAPORE' typo, 'USA', 'UK', ...) are appended on top.
+const countryCatalogDb = require('./countryCatalog');
+
+const COUNTRY_TO_REGION = {};
+for (const [name, region] of countryCatalogDb.COUNTRY_NAME_TO_REGION) {
+  COUNTRY_TO_REGION[name] = region;
+}
+Object.assign(COUNTRY_TO_REGION, {
+  // Legacy aliases that are NOT exact catalog English names.
   'SINGAPORE': 'ASIA',
-  'JAPAN': 'ASIA',
-  'INDIA': 'ASIA',
-  'CHINA': 'ASIA',
-  'SOUTH KOREA': 'ASIA',
   'KOREA': 'ASIA',
-  'TAIWAN': 'ASIA',
-  'HONG KONG': 'ASIA',
-  'THAILAND': 'ASIA',
-  'MALAYSIA': 'ASIA',
-  'INDONESIA': 'ASIA',
-  'PHILIPPINES': 'ASIA',
-  'VIETNAM': 'ASIA',
-  'PAKISTAN': 'ASIA',
-  'BANGLADESH': 'ASIA',
-  'SRI LANKA': 'ASIA',
-  // North America
-  'UNITED STATES': 'NA',
   'USA': 'NA',
   'US': 'NA',
-  'CANADA': 'NA',
-  'MEXICO': 'NA',
-  // Europe
-  'UNITED KINGDOM': 'EU',
   'UK': 'EU',
-  'GERMANY': 'EU',
-  'FRANCE': 'EU',
-  'NETHERLANDS': 'EU',
-  'ITALY': 'EU',
-  'SPAIN': 'EU',
-  'POLAND': 'EU',
-  'SWEDEN': 'EU',
-  'FINLAND': 'EU',
-  'DENMARK': 'EU',
-  'NORWAY': 'EU',
-  'IRELAND': 'EU',
-  'BELGIUM': 'EU',
-  'PORTUGAL': 'EU',
-  'SWITZERLAND': 'EU',
-  'AUSTRIA': 'EU',
-  'CZECHIA': 'EU',
-  'ROMANIA': 'EU',
-  'GREECE': 'EU',
-  // South America
-  'BRAZIL': 'SA',
-  'ARGENTINA': 'SA',
-  'CHILE': 'SA',
-  'PERU': 'SA',
-  'COLOMBIA': 'SA',
-  'VENEZUELA': 'SA',
-  // Australia / Oceania
-  'AUSTRALIA': 'AUST',
-  'NEW ZEALAND': 'OCEANIA',
-  // Middle East
-  'SAUDI ARABIA': 'MIDDLE_EAST',
-  'EMIRATES': 'MIDDLE_EAST',
   'UAE': 'MIDDLE_EAST',
-  'QATAR': 'MIDDLE_EAST',
-  'KUWAIT': 'MIDDLE_EAST',
-  'ISRAEL': 'MIDDLE_EAST',
-  'TURKEY': 'MIDDLE_EAST',
-  // Africa
-  'SOUTH AFRICA': 'AFRICA',
-  'NIGERIA': 'AFRICA',
-  'KENYA': 'AFRICA',
-  'EGYPT': 'AFRICA',
-  'MOROCCO': 'AFRICA'
-};
+  'EMIRATES': 'MIDDLE_EAST',
+  'CZECH REPUBLIC': 'EU',
+  'RUSSIA': 'EU',
+  'IVORY COAST': 'AFRICA',
+  'DEMOCRATIC REPUBLIC OF THE CONGO': 'AFRICA',
+  'THE NETHERLANDS': 'EU'
+});
 
 /**
  * Translates a country name (as returned by the RoValra service) into a
@@ -142,28 +94,16 @@ function normalizeCountryToRegion(country) {
 
 // ---- ISO-3166 alpha-2 country CODE → normalized region --------------------
 // RoValra's datacenter list returns short ISO codes ('IN', 'US', ...) while the
-// name map above uses full country names — this covers both.
-const COUNTRY_CODE_TO_REGION = {
-  // Asia
-  SG: 'ASIA', JP: 'ASIA', IN: 'ASIA', CN: 'ASIA', KR: 'ASIA', TW: 'ASIA',
-  HK: 'ASIA', TH: 'ASIA', MY: 'ASIA', ID: 'ASIA', PH: 'ASIA', VN: 'ASIA',
-  PK: 'ASIA', BD: 'ASIA', LK: 'ASIA',
-  // North America
-  US: 'NA', CA: 'NA', MX: 'NA',
-  // Europe
-  GB: 'EU', UK: 'EU', DE: 'EU', FR: 'EU', NL: 'EU', IT: 'EU', ES: 'EU',
-  PL: 'EU', SE: 'EU', FI: 'EU', DK: 'EU', NO: 'EU', IE: 'EU', BE: 'EU',
-  PT: 'EU', CH: 'EU', AT: 'EU', CZ: 'EU', RO: 'EU', GR: 'EU',
-  // South America
-  BR: 'SA', AR: 'SA', CL: 'SA', PE: 'SA', CO: 'SA', VE: 'SA',
-  // Australia / Oceania
-  AU: 'AUST', NZ: 'OCEANIA',
-  // Middle East
-  SA: 'MIDDLE_EAST', AE: 'MIDDLE_EAST', QA: 'MIDDLE_EAST', KW: 'MIDDLE_EAST',
-  IL: 'MIDDLE_EAST', TR: 'MIDDLE_EAST',
-  // Africa
-  ZA: 'AFRICA', NG: 'AFRICA', KE: 'AFRICA', EG: 'AFRICA', MA: 'AFRICA'
-};
+// name map above uses full country names — this covers both. Derived from the
+// shared country catalog so the builder/detector can never disagree.
+const COUNTRY_CODE_TO_REGION = {};
+for (const [code, region] of countryCatalogDb.COUNTRY_CODE_TO_REGION) {
+  COUNTRY_CODE_TO_REGION[code] = region;
+}
+// Legacy non-ISO aliases the detector may still produce (UK for GB, ...).
+Object.assign(COUNTRY_CODE_TO_REGION, {
+  UK: 'EU'
+});
 
 /**
  * Translates an ISO-3166 alpha-2 country code (e.g. 'IN') into a

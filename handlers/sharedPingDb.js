@@ -1,29 +1,34 @@
 'use strict';
 
 /**
- * sharedPingDb.js - Tier-0 shared PostgreSQL access for the
- * dashboard -> bot raid ping configuration.
+ * sharedPingDb.js — Tier-0 PostgreSQL access for guild country/region ping
+ * settings (the `guild_ping_settings` table).
  *
- * Scope (intentionally tiny and isolated):
- *   o Reads ONLY the country + region role-ping mappings that the separately
- *     deployed dashboard writes to PostgreSQL.
- *   o Uses only the DATABASE_URL environment variable - never a hard-coded
- *     connection string.
- *   o Parameterized SQL only; never logs DATABASE_URL.
- *   o Never crashes a raid: every function degrades to
- *     `{ countryPings: {}, regionPings: {} }` so the bot simply posts with no
- *     location ping (the legacy /setregionping settings.json config was removed).
- *
- * NOTHING ELSE is migrated here. raids.json, settings.json, verification.sqlite
- * and leaderboard.sqlite are left completely untouched.
+ * BEHAVIOUR CONTRACT
+ * ------------------------------------------------------------------
+ * 1. PostgreSQL is the PERMANENT source of truth; the in-memory cache
+ *    (`pingCache`) is a performance layer ONLY. Settings survive bot
+ *    restarts, Render redeploys and cache clears because they live in
+ *    Supabase PostgreSQL, never in a JS Map / JSON file / env var /
+ *    Render filesystem.
+ * 2. One reusable Pool, created lazily from DATABASE_URL, NEVER ended
+ *    after queries, never hard-coded.
+ * 3. The table is created idempotently (CREATE TABLE IF NOT EXISTS).
+ *    Startup / deploy / command registration never DROPs or resets it,
+ *    and never creates an empty row over an existing one.
+ * 4. A temporary database failure never erases valid cached settings:
+ *    cached config is returned until a write SUCCEEDS; a failed refresh
+ *    keeps the previous cache entry instead of replacing it with empty.
+ * 5. Errors are logged via sanitizeError() — the DATABASE_URL and
+ *    password are NEVER printed.
+ * 6. Saves are an UPSERT keyed on guild_id; updated_at is set to NOW().
  */
 
 const { Pool } = require('pg');
 
 /**
- * The single table dedicated to dashboard-owned guild ping settings.
- * Idempotent (CREATE TABLE IF NOT EXISTS) - the bot never DROPs or resets
- * production data.
+ * The single dedicated settings table. Idempotent — never DROPs or
+ * resets production data.
  */
 const CREATE_TABLE_SQL = `\nCREATE TABLE IF NOT EXISTS guild_ping_settings (\n    guild_id TEXT PRIMARY KEY,\n    country_pings JSONB NOT NULL DEFAULT '{}'::jsonb,\n    region_pings JSONB NOT NULL DEFAULT '{}'::jsonb,\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n)\n`;
 
@@ -37,21 +42,13 @@ function sanitizeError(error) {
     const raw = (error && error.message) || String(error);
     return raw
         .replace(/postgres(ql)?:\/\/[^\s"']*/gi, '[REDACTED_DATABASE_URL]')
-        .replace(/password=[^\s"']*/gi, 'password=[REDACTED]');
+        .replace(/password=[^\s"']*/gi, 'password=[REDACTED]')
+        .replace(/(postgres(ql)?:\/\/)[^@]+@/gi, '$1[REDACTED_CREDENTIALS]@');
 }
 
 /**
- * Resolves the node-postgres `ssl` option.
- *
- * Order of precedence:
- *   1. PGSSL env var override (require | no-verify | prefer | allow |
- *      verify-full | disable/false/none).
- *   2. `sslmode=` query parameter on DATABASE_URL (typical for hosted
- *      providers - they append `?sslmode=require` or `?sslmode=no-verify`).
- *
- * Hosted providers almost always require TLS; `rejectUnauthorized:false` is
- * used for the common require / no-verify / prefer modes (self-signed certs).
- * Use `sslmode=verify-full` for certified endpoints.
+ * Resolves the node-postgres `ssl` option from PGSSL or `?sslmode=` on the
+ * connection URL (see AGENTS.md). Supabase requires TLS.
  * @param {string} [connectionString]
  * @returns {{rejectUnauthorized: boolean}|undefined}
  */
@@ -73,36 +70,39 @@ function resolveSslConfig(connectionString) {
         if (sslmode === 'verify-full') return { rejectUnauthorized: true };
         if (sslmode === 'disable') return undefined;
     }
-
     return undefined;
 }
 
 let pool = null;
 let warnedNoDatabaseUrl = false;
 
+function isDatabaseConfigured() {
+    const value = process.env.DATABASE_URL;
+    return Boolean(value && String(value).trim().length > 0);
+}
+
 /**
- * Lazily builds the connection pool. Returns null (no pool) when DATABASE_URL
- * is not configured, so the bot runs fine entirely offline from Postgres.
+ * Lazily builds the SINGLE connection pool. Returns null (no pool) when
+ * DATABASE_URL is not configured, so the bot runs without a location ping.
+ * Never calls pool.end() — one reusable pool for the process lifetime.
  * @returns {import('pg').Pool|null}
  */
 function getPool() {
     if (pool) return pool;
-    const connectionString = process.env.DATABASE_URL;
-    if (!connectionString) {
-        // One-time diagnostic so admins immediately see why dashboard pings
-        // never appear instead of silently getting empty config.
+    if (!isDatabaseConfigured()) {
         if (!warnedNoDatabaseUrl) {
             warnedNoDatabaseUrl = true;
-            console.warn('[sharedPingDb] DATABASE_URL is not set — dashboard raid pings will NOT be loaded. Set DATABASE_URL in your environment (see .env template).');
+            console.warn('[pingDb] DATABASE_URL is not set — guild ping settings will NOT be loaded. Set DATABASE_URL in the Render environment (never commit it).');
         }
-        return null; // shared DB not configured -> no location ping (legacy /setregionping removed)
+        return null;
     }
-    warnedNoDatabaseUrl = true; // connection string present — suppress the warning
+    warnedNoDatabaseUrl = true;
+    const connectionString = process.env.DATABASE_URL;
     const ssl = resolveSslConfig(connectionString);
     pool = new Pool(ssl ? { connectionString, ssl } : { connectionString });
     pool.on('error', (err) => {
         // Idle-client errors must never crash the bot process.
-        console.warn('[sharedPingDb] idle client error:', sanitizeError(err));
+        console.warn('[pingDb] idle client error:', sanitizeError(err));
     });
     return pool;
 }
@@ -112,66 +112,289 @@ let tableReadyPromise = null;
 /**
  * Safe, one-time idempotent initialization. Retried lazily on failure without
  * ever DROPping or resetting the table.
- * @returns {Promise<boolean>}
+ * @returns {Promise<boolean>} resolves true when the table is ready
  */
 function ensureTableOnce() {
     if (!tableReadyPromise) {
         const currentPool = getPool();
         if (!currentPool) {
             tableReadyPromise = Promise.resolve(false);
-            return tableReadyPromise;
+        } else {
+            tableReadyPromise = currentPool
+                .query(CREATE_TABLE_SQL)
+                .then(() => true)
+                .catch((err) => {
+                    console.warn('[pingDb] table init failed (will retry lazily):', sanitizeError(err));
+                    tableReadyPromise = null; // allow a lazy retry on next call
+                    return false;
+                });
         }
-        tableReadyPromise = currentPool
-            .query(CREATE_TABLE_SQL)
-            .then(() => true)
-            .catch((err) => {
-                console.warn('[sharedPingDb] table init failed (will retry lazily):', sanitizeError(err));
-                tableReadyPromise = null; // allow a lazy retry on next call
-                return false;
-            });
     }
     return tableReadyPromise;
 }
 
-/**
- * Fetches a guild's ping settings from the shared PostgreSQL database.
- * @param {string} guildId - Discord guild ID (kept as text)
- * @returns {Promise<{countryPings: object, regionPings: object}>}
- *   Always resolves. Never throws. Empty mappings when there is no record,
- *   when DATABASE_URL is unset, or when the database is temporarily down.
- */
-async function getGuildPingSettings(guildId) {
-    const currentPool = getPool();
-    if (!currentPool) return { countryPings: {}, regionPings: {} };
+/* ---------------- in-memory cache (performance layer only) --------------- */
 
+const pingCache = new Map(); // guildId -> { countryPings, regionPings }
+
+function getCacheEntry(guildId) {
+    const entry = pingCache.get(String(guildId || '').trim());
+    return entry || null;
+}
+
+function setCacheEntry(guildId, countryPings, regionPings) {
+    pingCache.set(String(guildId || '').trim(), {
+        countryPings: { ...(countryPings || {}) },
+        regionPings: { ...(regionPings || {}) }
+    });
+}
+
+/** Number of guilds currently held in the in-memory cache (stats/health UI). */
+function getCacheSize() {
+    return pingCache.size;
+}
+
+/**
+ * Normalizes an arbitrary JSONB value into a plain object of
+ * `{ UPPERCASE_KEY: string }` entries. Filters unusable role ids
+ * (empty / 0 / @everyone) so garbage can never reach the DB.
+ * @param {*} value
+ * @returns {object}
+ */
+function normalizeMap(value) {
+    const out = {};
+    if (!value || typeof value !== 'object') return out;
+    for (const [key, raw] of Object.entries(value)) {
+        const code = String(key || '').trim().toUpperCase();
+        if (!code) continue;
+        const roleId = String(raw === null || raw === undefined ? '' : raw).trim();
+        if (!roleId || roleId === '0' || roleId === '@everyone') continue;
+        out[code] = roleId;
+    }
+    return out;
+}
+
+/**
+ * Coerces a JSONB cell (object or stringified JSON) into a plain object.
+ * @param {*} value
+ * @returns {object}
+ */
+function sanitizeJsonMap(value) {
+    let parsed = value;
+    if (typeof parsed === 'string') {
+        try { parsed = JSON.parse(parsed); } catch { parsed = null; }
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed;
+}
+
+/* ---------------- low-level database access ----------------------------- */
+
+/**
+ * Reads ONE guild's config from PostgreSQL. Returns null when the guild has
+ * no row yet. Throws on real database errors (callers handle/cache safely).
+ * @param {string} guildId
+ * @returns {Promise<{countryPings: object, regionPings: object}|null>}
+ */
+async function readFromDatabase(guildId) {
+    const currentPool = getPool();
+    if (!currentPool) return null;
+    await ensureTableOnce();
+    const { rows } = await currentPool.query(
+        'SELECT country_pings, region_pings FROM guild_ping_settings WHERE guild_id = $1',
+        [String(guildId || '').trim()]
+    );
+    if (!rows || rows.length === 0) return null;
+    const row = rows[0];
+    return {
+        countryPings: sanitizeJsonMap(row && row.country_pings),
+        regionPings: sanitizeJsonMap(row && row.region_pings)
+    };
+}
+
+/**
+ * UPSERTs a guild's complete ping config. Never deletes the row first and
+ * never touches other columns — `updated_at` is refreshed by PostgreSQL.
+ * On success the in-memory cache is updated; on failure it is NOT touched
+ * and the error is rethrown so the caller can show a truthful failure.
+ * @param {string} guildId
+ * @param {object} countryPings
+ * @param {object} regionPings
+ * @returns {Promise<{guildId: string, countryPings: object, regionPings: object}>}
+ */
+async function saveGuildPingSettings(guildId, countryPings, regionPings) {
+    const gid = String(guildId || '').trim();
+    const cp = normalizeMap(countryPings);
+    const rp = normalizeMap(regionPings);
+    const currentPool = getPool();
+    if (!currentPool) {
+        throw new Error('DATABASE_URL is not configured — ping settings cannot be saved.');
+    }
+    await ensureTableOnce();
+    if (!tableReadyPromise) {
+        throw new Error('Ping settings table is not available right now.');
+    }
+    await currentPool.query(
+        `INSERT INTO guild_ping_settings (guild_id, country_pings, region_pings, updated_at)
+         VALUES ($1, $2::jsonb, $3::jsonb, NOW())
+         ON CONFLICT (guild_id)
+         DO UPDATE SET country_pings = EXCLUDED.country_pings,
+                       region_pings  = EXCLUDED.region_pings,
+                       updated_at    = NOW()`,
+        [gid, JSON.stringify(cp), JSON.stringify(rp)]
+    );
+    setCacheEntry(gid, cp, rp);
+    return { guildId: gid, countryPings: cp, regionPings: rp };
+}
+
+/**
+ * Loads EVERY guild config from PostgreSQL into the cache. Never clears the
+ * existing cache on failure and never inserts empty rows over existing ones.
+ * @returns {Promise<number>} number of configs loaded
+ */
+async function loadAllSettingsIntoCache() {
+    if (!isDatabaseConfigured()) {
+        console.warn('[pingDb] startup preload skipped — DATABASE_URL is not set.');
+        return 0;
+    }
+    const currentPool = getPool();
+    if (!currentPool) return 0;
     try {
         await ensureTableOnce();
         const { rows } = await currentPool.query(
-            'SELECT country_pings, region_pings FROM guild_ping_settings WHERE guild_id = $1',
-            [String(guildId || '').trim()]
+            'SELECT guild_id, country_pings, region_pings FROM guild_ping_settings'
         );
-        if (!rows || rows.length === 0) {
-            console.warn('[sharedPingDb] No ping settings row for guild', guildId, '— has the dashboard saved a config for this guild?');
-            return { countryPings: {}, regionPings: {} };
+        let loaded = 0;
+        for (const row of rows || []) {
+            if (!row || !row.guild_id) continue;
+            setCacheEntry(row.guild_id, sanitizeJsonMap(row.country_pings), sanitizeJsonMap(row.region_pings));
+            loaded += 1;
         }
-
-        const row = rows[0];
-        const countryPings = (row && row.country_pings && typeof row.country_pings === 'object') ? row.country_pings : {};
-        const regionPings = (row && row.region_pings && typeof row.region_pings === 'object') ? row.region_pings : {};
-
-        // Diagnostic: log the raw keys so case mismatches are immediately visible.
-        console.log(
-            '[sharedPingDb] Loaded ping config for guild', guildId,
-            '| country keys:', Object.keys(countryPings),
-            '| region keys:', Object.keys(regionPings)
-        );
-
-        return { countryPings, regionPings };
+        return loaded;
     } catch (err) {
-        // Database temporarily unavailable - fail safe, never crash the raid.
-        console.warn('[sharedPingDb] getGuildPingSettings failed:', sanitizeError(err));
+        console.warn('[pingDb] startup preload failed:', sanitizeError(err));
+        return 0;
+    }
+}
+
+/* ---------------- public API (cache-first) ------------------------------- */
+
+/**
+ * Returns a guild's ping settings: cache first, database on a cache miss.
+ * NEVER throws. NEVER replaces a valid cache entry with an empty config
+ * when a query fails — on failure the last known cache entry wins.
+ *
+ * @param {string} guildId - Discord guild ID
+ * @returns {Promise<{countryPings: object, regionPings: object}>}
+ */
+async function getGuildPingSettings(guildId) {
+    const gid = String(guildId || '').trim();
+    const cached = getCacheEntry(gid);
+    if (cached) return { countryPings: cached.countryPings, regionPings: cached.regionPings };
+    if (!gid) return { countryPings: {}, regionPings: {} };
+
+    try {
+        const config = await readFromDatabase(gid);
+        if (config) {
+            // Cache ONLY a successful read of an existing row — never an
+            // empty/failed result, so a DB blip can't poison the cache.
+            setCacheEntry(gid, config.countryPings, config.regionPings);
+            return { countryPings: config.countryPings, regionPings: config.regionPings };
+        }
+        return { countryPings: {}, regionPings: {} };
+    } catch (err) {
+        console.warn('[pingDb] getGuildPingSettings failed (cache NOT cleared):', sanitizeError(err));
         return { countryPings: {}, regionPings: {} };
     }
 }
 
-module.exports = { getGuildPingSettings };
+/**
+ * Forces a fresh database read for one guild into the cache (used when an
+ * admin opens the /pingsetup builder so the newest saved state is shown).
+ * If the database is unavailable the previous cache entry is retained.
+ * @param {string} guildId
+ * @returns {Promise<{countryPings: object, regionPings: object}>}
+ */
+async function refreshGuildSettingsCache(guildId) {
+    const gid = String(guildId || '').trim();
+    try {
+        const config = await readFromDatabase(gid);
+        if (config) {
+            setCacheEntry(gid, config.countryPings, config.regionPings);
+            return { countryPings: config.countryPings, regionPings: config.regionPings };
+        }
+        return { countryPings: {}, regionPings: {} };
+    } catch (err) {
+        console.warn('[pingDb] refresh failed (keeping cached settings):', sanitizeError(err));
+        const cached = getCacheEntry(gid);
+        return cached
+            ? { countryPings: cached.countryPings, regionPings: cached.regionPings }
+            : { countryPings: {}, regionPings: {} };
+    }
+}
+
+const HEALTH_TIMEOUT_MS = 8000;
+
+async function withTimeout(promise, ms) {
+    const timeout = new Promise((_, reject) => {
+        const timer = setTimeout(() => reject(new Error(`Database health check timed out after ${ms}ms`)), ms);
+        timer.unref && timer.unref();
+    });
+    return Promise.race([promise, timeout]);
+}
+
+/**
+ * Database health check used at startup and by the builder status line.
+ * Never throws; logs the real SANITIZED error on failure.
+ * @returns {Promise<{ok: boolean, configured: boolean, detail?: string}>}
+ */
+async function checkDatabaseHealth() {
+    if (!isDatabaseConfigured()) {
+        return { ok: false, configured: false, detail: 'DATABASE_URL is not set in the environment.' };
+    }
+    const currentPool = getPool();
+    if (!currentPool) return { ok: false, configured: true, detail: 'Pool could not be created.' };
+    try {
+        await withTimeout(currentPool.query('SELECT 1 AS ok'), HEALTH_TIMEOUT_MS);
+        await ensureTableOnce();
+        return { ok: true, configured: true, detail: undefined };
+    } catch (err) {
+        const detail = sanitizeError(err);
+        console.warn('[pingDb] health check FAILED:', detail);
+        return { ok: false, configured: true, detail };
+    }
+}
+
+/**
+ * Startup hook: connect, run a real health check, then preload every saved
+ * guild config into the cache. Non-blocking design (fire-and-forget) so a
+ * slow or down database never delays Discord login.
+ * @returns {Promise<{ok: boolean, loaded: number, ms: number}>}
+ */
+async function initializeAtStartup() {
+    const started = Date.now();
+    const health = await checkDatabaseHealth();
+    if (!health.ok) {
+        if (health.configured) {
+            console.error('[pingDb] ❌ Database health check FAILED at startup —', health.detail);
+        } else {
+            console.warn('[pingDb] ⚠️', health.detail, 'Ping settings will load as soon as DATABASE_URL is set (Render env).');
+        }
+        return { ok: false, loaded: 0, ms: Date.now() - started };
+    }
+    const loaded = await loadAllSettingsIntoCache();
+    console.log(`[pingDb] ✅ Database connected. Loaded ${loaded} guild ping configuration(s) into cache in ${Date.now() - started}ms.`);
+    return { ok: true, loaded, ms: Date.now() - started };
+}
+
+module.exports = {
+    getGuildPingSettings,
+    refreshGuildSettingsCache,
+    saveGuildPingSettings,
+    loadAllSettingsIntoCache,
+    checkDatabaseHealth,
+    initializeAtStartup,
+    isDatabaseConfigured,
+    sanitizeError,
+    _getCacheSize: getCacheSize
+};

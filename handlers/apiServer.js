@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * apiServer.js - Express app factory for the bot's HTTP dashboard API.
+ * apiServer.js — Express app factory for the bot's HTTP dashboard API.
  *
  * A SINGLE Express app is created via createApiServer(client) and started
  * exactly once in index.js (no extra port / second HTTP server). Splitting the
@@ -9,23 +9,20 @@
  * logging the bot into Discord or binding a fixed port.
  *
  * Routes:
- *   GET  /                          health check
- *   GET  /api/stats                 live bot statistics (public dashboard)
- *   POST /api/action/restart        reconnect the Discord client (dashboard)
- *   GET  /api/guilds/:guildId/roles protected: selectable guild roles
- *                                   (server-to-server; requires
- *                                    `Authorization: Bearer BOT_API_TOKEN`)
+ *   GET  /                       health check (Render badge)
+ *   GET  /api/stats              live bot statistics (public dashboard)
+ *   POST /api/action/restart     reconnect the Discord client (dashboard)
+ *   GET  /api/health/discord     real gateway diagnostics (distinct from the
+ *                                Render badge "Live" badge)
+ *   GET  /api/guilds/:guildId/roles  bearer-protected selectable role list for
+ *                                the dashboard's role pickers (45s response
+ *                                cache + single-flight, never 429s)
  *
- * Security notes:
- *   - BOT_API_TOKEN is read from the environment at request time and compared
- *     with a constant-time comparison. It is never logged, never returned in a
- *     response, and never sent to Discord.
- *   - The roles endpoint is deliberately NOT exposed to arbitrary browser
- *     origins: it uses bearer auth only. The dashboard FRONTEND must call its
- *     own backend, which calls this endpoint server-to-server.
- *   - Authenticated role requests are never 429'd: a short TTL response cache +
- *     per-guild single-flight deduplication means repeated and concurrent
- *     dashboard loads never hit Discord more than once per guild per TTL.
+ * PING-MANAGEMENT REMOVAL: the dashboard's ping-settings page / endpoints
+ * (country + region ping role CRUD against `guild_ping_settings`) were removed
+ * — /pingsetup in Discord is the sole configuration path now. The generic
+ * roles list endpoint above is NOT ping-management and was kept, along with
+ * OAuth, server list, stats and every other dashboard feature.
  */
 
 const express = require('express');
@@ -34,21 +31,8 @@ const crypto = require('crypto');
 const { reconnectDiscord, getGatewayDiagnostics } = require('./gatewayGuard');
 
 // Rolling-window rate limit helper (per client IP), 300/min.
-//
-// 429 ROOT CAUSE FIX: this limiter USED to gate every response-cache miss on
-// /api/guilds/:guildId/roles. That produced the observed "first request -> 429,
-// Retry works": the dashboard calls this endpoint server-to-server through its
-// backend, so ALL end users share ONE egress IP and therefore ONE bucket. Under
-// normal multi-user/multi-guild dashboard usage that shared 300/min budget
-// exhausts and legitimate requests are rejected with 429 until tokens roll off
-// the window. Every request on this route must already present BOT_API_TOKEN
-// (constant-time checked in authenticateApiToken), so bearer auth - not an IP
-// counter - is the real access control. Authenticated server-to-server role
-// requests are therefore NO LONGER rate limited; Discord itself stays protected
-// by the 45s response cache + per-guild single-flight + unknown-guild negative
-// cache, which guarantee at most one bot-side Discord read per guild per TTL.
-// The limiter helpers are kept exported for compatibility and possible future
-// use on genuinely public endpoints; nothing public is weakened either way.
+// NOTE: not wired into any current route — kept as a reusable helper for any
+// future PUBLIC endpoint where per-IP limiting makes sense.
 const RATE_LIMIT_MAX = 300;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const rateLimitBuckets = new Map();
@@ -64,10 +48,9 @@ const roleResponseCache = new Map(); // guildId -> { roles, expiresAt } | { notF
 const GUILD_NOT_FOUND_TTL_MS = 10 * 1000;
 
 // Single-flight map: concurrent cache-miss requests for the SAME guild share ONE
-// guild/Discord read, ONE rate-limit token and ONE serialized result. This stops
-// bursty dashboard traffic (StrictMode double-fetch, parallel Netlify warm
-// instances, user double-clicks) from ever reaching Discord more than once at a
-// time or exhausting the per-IP budget on duplicate work.
+// guild/Discord read. This stops bursty dashboard traffic (StrictMode
+// double-fetch, parallel warm instances, user double-clicks) from ever reaching
+// Discord more than once at a time.
 const roleFetchInflight = new Map(); // guildId -> Promise<{roles}|{statusCode,error}>
 
 // Temporary, safe breadcrumb to detect dashboard request spam. Counts only a
@@ -88,41 +71,8 @@ function countRoleApiRequest() {
 }
 
 /**
- * Constant-time comparison of the received bearer token against BOT_API_TOKEN.
- * Returns false when the env var is unset or the token is wrong/empty.
- * Never throws and never logs either value.
- * @param {string} received
- * @returns {boolean}
- */
-function verifyApiToken(received) {
-    const expected = process.env.BOT_API_TOKEN;
-    if (!expected || !received) return false;
-    const a = Buffer.from(String(expected));
-    const b = Buffer.from(String(received));
-    return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
-
-/**
- * Express middleware: requires `Authorization: Bearer <BOT_API_TOKEN>`.
- * Missing or incorrect token -> 401 UNAUTHORIZED.
- */
-function authenticateApiToken(req, res, next) {
-    const header = req.get('authorization') || '';
-    const match = /^Bearer\s+(.+)$/i.exec(header.trim());
-    const received = match ? match[1].trim() : '';
-    if (!verifyApiToken(received)) {
-        return res.status(401).json({ error: 'UNAUTHORIZED' });
-    }
-    next();
-}
-
-/**
  * Rolling-window check for a client IP. Returns true when the request is within
  * budget, false when it should be rejected with 429.
- *
- * NOTE: this is no longer wired into the roles endpoint - see the comment above
- * RATE_LIMIT_MAX. It is kept as a reusable helper for any future PUBLIC route
- * where per-IP limiting makes sense without bearer authentication.
  */
 function consumeRateLimit(ip) {
     const now = Date.now();
@@ -150,8 +100,8 @@ function consumeRateLimit(ip) {
 }
 
 /**
- * Express middleware form of the limiter (kept for API compatibility and any
- * future protected routes). Rejects with 429 when the IP is over budget.
+ * Express middleware form of the limiter (kept as a reusable helper).
+ * Rejects with 429 when the IP is over budget.
  */
 function rateLimit(req, res, next) {
     if (!consumeRateLimit(req.ip || 'unknown')) {
@@ -171,6 +121,35 @@ const SNOWFLAKE_RE = /^\d{17,20}$/;
  */
 function isValidSnowflake(guildId) {
     return SNOWFLAKE_RE.test(String(guildId || ''));
+}
+
+/**
+ * Constant-time comparison of a received bearer token against BOT_API_TOKEN.
+ * Returns false when the env var is unset or the token is wrong/empty.
+ * Never throws and never logs either value.
+ * @param {string} received
+ * @returns {boolean}
+ */
+function verifyApiToken(received) {
+    const expected = process.env.BOT_API_TOKEN;
+    if (!expected || !received) return false;
+    const a = Buffer.from(String(expected));
+    const b = Buffer.from(String(received));
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * Express middleware: requires `Authorization: Bearer <BOT_API_TOKEN>`.
+ * Missing or incorrect token -> 401 UNAUTHORIZED.
+ */
+function authenticateApiToken(req, res, next) {
+    const header = req.get('authorization') || '';
+    const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+    const received = match ? match[1].trim() : '';
+    if (!verifyApiToken(received)) {
+        return res.status(401).json({ error: 'UNAUTHORIZED' });
+    }
+    next();
 }
 
 /**
@@ -247,11 +226,11 @@ async function resolveGuildRoles(client, guildId) {
     }
 
     const selectableRoles = allRoles
-        // The @everyone role shares the guild ID and can never be a raid-ping
+        // The @everyone role shares the guild ID and can never be a selectable
         // target - exclude it entirely.
         .filter((role) => role.id !== guildId)
         // Managed/integration roles (owned by bots / connections) cannot
-        // reasonably be assigned as raid pings - exclude them.
+        // reasonably be assigned by the dashboard - exclude them.
         .filter((role) => !Boolean(role.managed))
         // Highest position first (Discord hierarchy order).
         .sort((a, b) => (b.position || 0) - (a.position || 0))
@@ -314,7 +293,7 @@ function createApiServer(client) {
     app.use(cors());
     app.use(express.json());
 
-    // Health check
+    // Health check (kept — Render badge + browser "is the HTTP server up").
     app.get('/', (req, res) => res.send('Kakuzu is Online!'));
 
     // Bot statistics endpoint (consumed by the React dashboard). Only aggregate
@@ -333,7 +312,7 @@ function createApiServer(client) {
         });
     });
 
-    // Restart/reconnect endpoint (consumed by the React dashboard)
+    // Restart/reconnect endpoint (consumed by the React dashboard).
     app.post('/api/action/restart', async (req, res) => {
         res.json({ success: true, message: 'Bot restarting...' });
         console.log('[API] Restart requested - reconnecting Discord client...');
@@ -341,19 +320,22 @@ function createApiServer(client) {
         console.log(ok ? '[API] Bot reconnected successfully.' : '[API] Reconnect attempt finished but failed (see [gateway] logs).');
     });
 
-    // Real Discord-connection diagnostics - distinct fromthe Render health
-    // check: GET / returns 200 wheneverthe HTTP server is up, which is what
-    // makes Render show "Live" even when the bot is offlinein Discord. This
+    // Real Discord-connection diagnostics - distinct from the Render health
+    // check: GET / returns 200 whenever the HTTP server is up, which is what
+    // makes Render show "Live" even when the bot is offline in Discord. This
     // endpoint reports the ACTUAL gateway state so a browser can confirm real
-    // connectivity instead of trusting the Render badge..
+    // connectivity instead of trusting the Render badge.
     app.get('/api/health/discord', (req, res) => {
         res.json(getGatewayDiagnostics(client));
     });
 
     // -------------------------------------------------------------------
-    // Protected: selectable guild roles for the dashboard ping setup.
+    // Protected: selectable guild roles for the dashboard's role pickers.
     // Server-to-server ONLY. The dashboard FRONTEND must go through its own
-    // backend (Netlify function) which authenticates with BOT_API_TOKEN.
+    // backend which authenticates with BOT_API_TOKEN. (Ping-role configuration
+    // itself moved to the /pingsetup Discord command, but this endpoint stays
+    // for the dashboard's other guild settings — it is generic, not
+    // ping-management.)
     //
     // 429 policy: requests are NEVER rejected with 429 here. Bearer-token auth
     // gates access; a 45s response cache, per-guild single-flight dedupe and an
@@ -376,9 +358,7 @@ function createApiServer(client) {
 
             // Fast path: a still-fresh normalized response (or a briefly cached
             // unknown guild) is served immediately without touching discord.js
-            // or the Discord REST API. Cache hits are cheap in-memory reads and
-            // never consume the rate-limit budget, so normal dashboard reloads
-            // can never be 429'd.
+            // or the Discord REST API.
             const cachedResponse = roleResponseCache.get(guildId);
             if (cachedResponse && cachedResponse.expiresAt > Date.now()) {
                 if (cachedResponse.notFound) {
@@ -389,8 +369,7 @@ function createApiServer(client) {
 
             // Cache miss: single-flighted (at most one Discord read per
             // concurrent miss group for the same guild) and NOT rate limited -
-            // bearer auth already gates access, so normal authenticated loads
-            // can never be 429'd by this API.
+            // bearer auth already gates access.
             const outcome = await getRolesOutcome(client, guildId);
             if (outcome.statusCode) {
                 return res.status(outcome.statusCode).json({ error: outcome.error });

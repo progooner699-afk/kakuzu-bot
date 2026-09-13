@@ -6,6 +6,7 @@ const { Client, Collection, GatewayIntentBits } = require('discord.js');
 const config = require('./config.json');
 const commandHandler = require('./handlers/commandHandler');
 const raidStateManager = require('./handlers/raidStateManager');
+const sharedPingDb = require('./handlers/sharedPingDb');
 const { checkRobloxCookieAuth } = require('./handlers/robloxAuth');
 const { attachGatewayGuard, reconnectDiscord, markShuttingDown } = require('./handlers/gatewayGuard');
 
@@ -58,6 +59,15 @@ for (const file of eventFiles) {
 }
 
 raidStateManager.ensureDataFiles();
+
+// Startup database health check + cache preload for guild ping settings.
+// PostgreSQL is the PERMANENT source of truth — this ONLY warms the in-memory
+// cache so raid alerts never block on a cold DB. Fire-and-forget: a slow or
+// down database can never delay or crash Discord login, and it never deletes
+// or resets the saved settings (no row is ever created over an existing one).
+sharedPingDb.initializeAtStartup().catch((err) => {
+    console.error('[pingDb] startup init error:', (err && err.message) ? err.message : err);
+});
 
 // Express API server for the React dashboard (keep-alive + stats/actions).
 // The app is built here so the same single HTTP server serves the dashboard

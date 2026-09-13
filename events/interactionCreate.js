@@ -148,10 +148,9 @@ function normalizeRegion(region) {
     if (value === 'EUROPE') return 'EU';
     if (value === 'US' || value === 'USA' || value === 'NORTH AMERICA') return 'NA';
     if (value === 'SOUTH AMERICA') return 'SA';
-    if (value === 'AUS' || value === 'AUSTRALIA') return 'AUST';
+    if (value === 'AUS' || value === 'AUSTRALIA' || value === 'OC' || value === 'OCE') return 'OCEANIA';
     if (value === 'MIDDLE' || value === 'MIDDLE EAST' || value === 'MIDDLE_EAST') return 'MIDDLE_EAST';
     if (value === 'AFRICA') return 'AFRICA';
-    if (value === 'OCEANIA' || value === 'OC' || value === 'OCE') return 'OCEANIA';
     return value;
 }
 
@@ -316,7 +315,7 @@ async function getRaidPingInfo(client, guildId, { countryCode, region }) {
         '[raid ping] No usable ping role for guild', guildId,
         '| countryCode:', hasCountryCode ? cc : '(none)',
         '| region:', normalizedRegion || '(none)',
-        '| source: none. Check the dashboard country/region ping config and DATABASE_URL.'
+        '| source: none. Check /pingsetup country/region ping config and DATABASE_URL.'
     );
 
     // No country detected and no usable region role configured -> NO location
@@ -842,6 +841,29 @@ module.exports = {
                         flags: 64
                     }).catch(() => null);
                 }
+                return true;
+            });
+            if (handled) return;
+        }
+
+        // ===== PING SETUP BUILDER (/pingsetup) =====
+        // Any button / select menu / role select with a `pingsetup_` customId
+        // belongs to the /pingsetup builder (admin-managed country/region ping
+        // roles, stored permanently in the shared Postgres table). Routed
+        // through the SAME interaction system — no second listener. Required
+        // lazily to keep startup light (mirrors the announcement pattern).
+        if (interaction.customId && typeof interaction.customId === 'string' && interaction.customId.startsWith('pingsetup_')) {
+            const pingSetupCmd = require('../commands/pingsetup');
+            const handled = await pingSetupCmd.handlePingSetupComponent(interaction).catch((err) => {
+                console.error('[pingsetup] dispatch error:', err);
+                const errText = '❌ Ping setup error: `' + String((err && err.message) || err).slice(0, 300) + '`';
+                try {
+                    if (interaction.deferred || interaction.replied) {
+                        interaction.followUp({ content: errText, flags: 64 }).catch(() => null);
+                    } else {
+                        interaction.reply({ content: errText, flags: 64 }).catch(() => null);
+                    }
+                } catch (e) { /* swallow */ }
                 return true;
             });
             if (handled) return;

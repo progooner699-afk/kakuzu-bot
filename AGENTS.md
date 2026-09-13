@@ -33,17 +33,36 @@
   optional `DATABASE_URL` for the shared Postgres ping config below).
   `.env` is git-ignored; `config.json` is committed.
 
-## 🐘 SHARED POSTGRES — RAID PING CONFIGURATION (dashboard <-> bot)
+## 🐘 SHARED POSTGRES — RAID PING CONFIGURATION (`/pingsetup` <-> bot)
 
-> Only the **country/region raid ping** settings are shared with the separately
-> deployed dashboard via one hosted PostgreSQL database. **Nothing else** was
-> migrated: `raids.json`, `settings.json`, `verification.sqlite` and
-> `leaderboard.sqlite` remain the bot's local source of truth.
+> The **country/region raid ping** settings live in one hosted (Supabase)
+> PostgreSQL database. They are configured **exclusively inside Discord** via
+> the `/pingsetup` interactive builder — the dashboard's ping-management pages,
+> endpoints and save buttons were REMOVED. **Nothing else** is stored there:
+> `raids.json`, `settings.json`, `verification.sqlite` and `leaderboard.sqlite`
+> remain the bot's local source of truth.
 
-* **Helper:** `handlers/sharedPingDb.js` — `pg` Pool built from `DATABASE_URL`
-  (env var; never hard-coded, never logged). One async read:
-  `getGuildPingSettings(guildId)` → `{ countryPings, regionPings }`; always
-  resolves, never throws, returns empty maps when the DB is absent/down.
+* **Helper:** `handlers/sharedPingDb.js` — single reusable `pg` Pool built from
+  `DATABASE_URL` (env var; never hard-coded, never logged). Cache-first API:
+  `getGuildPingSettings(guildId)` → `{ countryPings, regionPings }` (never
+  throws; a failed read never poisons the cache),
+  `saveGuildPingSettings(guildId, countryPings, regionPings)` (UPSERT on
+  `guild_id`, cache updated ONLY after the write succeeds, errors rethrown),
+  `loadAllSettingsIntoCache()` (startup preload, returns count loaded),
+  `refreshGuildSettingsCache(guildId)`, `checkDatabaseHealth()` (sanitized
+  startup health check), `sanitizeError()`.
+* **Builder:** `/pingsetup` (`commands/pingsetup.js`) — ephemeral interactive
+  Components-V2-era builder (Manage Guild / Administrator, guild-only). Loads
+  the guild's existing row into a DRAFT, paginated ISO-3166 country selector
+  (`handlers/countryCatalog.js` — full local catalog + `countryToRegion`
+  mapping shared with the region detector), region selector (7 regions),
+  native Role Select for role assignment, Remove Mapping (country/region
+  mode), View All (paginated, shows role validity), Reset All with
+  confirmation, Save Changes (validates roles against the guild, drops
+  deleted ones with warnings, then UPSERTs). ONE active session per guild;
+  sessions expire after 15 minutes. CustomIds are namespaced
+  `pingsetup_<sessionId>_<action>`; component interactions are `deferUpdate`d
+  first and routed through the SAME interaction hub (no second listener).
 * **Table:** `guild_ping_settings (guild_id TEXT PK, country_pings JSONB,
   region_pings JSONB, updated_at TIMESTAMPTZ)` — created idempotently with
   `CREATE TABLE IF NOT EXISTS` on first use; the bot never DROPs/resets it.
@@ -57,13 +76,14 @@
   back** to the broad region role (`regionPings[BROAD_REGION]`) so that
   region-only dashboard configs still produce a location ping. If no
   `countryCode` was detected, only the region role is considered. Lookups
-  are **case-insensitive** (so a dashboard storing "in"/"asia" matches the
+  are **case-insensitive** (so old dashboard-stored "in"/"asia" keys match the
   bot's "IN"/"ASIA"); role IDs from JSONB are coerced to strings. Config
-  comes **exclusively** from the shared Postgres dashboard
-  (`getGuildPingSettings`); the legacy `settings.regionPings` (from the
-  removed `/setregionping` command) is no longer read — if the DB is
-  unconfigured/down/empty there is simply **no** location ping on either
-  path. `allowedMentions.roles` restricts pings to exactly the chosen role.
+  comes **exclusively** from the shared Postgres table (written by
+  `/pingsetup`, read via `getGuildPingSettings`); the legacy
+  `settings.regionPings` (from the removed `/setregionping` command) is no
+  longer read — if the DB is unconfigured/down/empty there is simply **no**
+  location ping on either path. `allowedMentions.roles` restricts pings to
+  exactly the chosen role.
   The alert embed shows the human-readable `Country` name (from
   `raidStateManager.countryCodeToName`, e.g. `IN` → `India`) directly under
   `Region`, or `Unknown` when undetected.
@@ -100,11 +120,21 @@
   ephemeral error, and uses `editReply` throughout. `createRaidButtons` is
   exported from `events/interactionCreate.js` for reuse by the auto-join
   alert re-render.
+* **Dashboard ping management REMOVED:** `handlers/apiServer.js` no longer
+  contains the ping settings page, country/region ping controls, save-ping
+  buttons or the `GET/POST /api/guilds/:guildId/ping-settings` endpoints —
+  `/pingsetup` is the sole configuration path. Unrelated dashboard features
+  (Discord OAuth, server list, stats, roles API) are untouched, and the
+  `guild_ping_settings` table is still the permanent store.
 * **Removed `/setregionping`:** the legacy settings.json `regionPings` command was
-  deleted — the dashboard→Postgres→bot path is now the SOLE source of truth.
+  deleted — the `/pingsetup`→Postgres→bot path is now the SOLE source of truth.
 * **Running:** if `DATABASE_URL` is unset or empty, `sharedPingDb` logs a one-time
-  warning and returns empty maps — the bot simply posts with **no** location ping.
-  Set `DATABASE_URL` in your environment for dashboard pings to work.
+  warning and returns empty maps — the bot simply posts with **no** location ping,
+  and `/pingsetup` saves fail with an explicit "DATABASE_URL is not configured"
+  error (never a fake success). Set `DATABASE_URL` in your environment (local
+  `.env` AND the Render environment) for pings to work. Startup runs
+  `checkDatabaseHealth()` + `loadAllSettingsIntoCache()` and logs how many guild
+  configs were loaded (sanitized error on failure — never credentials).
 
 ## 🔁 IMPORTANT RECOVERY NOTE (as of latest commit)
 
@@ -266,7 +296,9 @@ Refactored the linking → request → join → close loop per the spec:
 | `handlers/robloxAuth.js` | `.ROBLOSECURITY` handling: safe cookie-auth diagnostic that runs once at startup (`index.js`, `force`) and before each gamejoin (`getServerIp`); logs ONLY `cookieConfigured/cookieLength/authCheck/httpStatus/replacementCookieReceived` — never the value. In-memory rotation adoption on authenticated requests. |
 | `handlers/verificationDb.js` | sql.js persistence for verification records. |
 | `handlers/verificationHelpers.js` | `formatRobloxProfileValue` and friends. |
-| `handlers/sharedPingDb.js` | Read-only shared PostgreSQL helper for dashboard-owned country/region ping settings (`getGuildPingSettings`). |
+| `handlers/sharedPingDb.js` | Permanent shared-Postgres store for country/region ping settings + in-memory cache. |
+| `handlers/countryCatalog.js` | Local ISO-3166-1 alpha-2 country catalog (names, flag emojis, sort) + the shared country→region mapping used by BOTH `/pingsetup` and `handlers/regionMap.js`. |
+| `commands/pingsetup.js` | Ephemeral interactive `/pingsetup` builder (country/region ping roles, draft → UPSERT). |
 | `handlers/commandHandler.js` | Loads commands from `commands/` into `client.commands`. |
 | `commands/deploy-commands.js` | `registerGuildCommands(guildId)` — used by `ready.js`; also a standalone CLI (`npm run deploy-commands`). |
 | `commands/announcement.js` | **Interactive Components V2 announcement builder** (`/announcement`, Manage Messages): ephemeral builder panel (Title / Description / **Thumbnail upload collector** / **Webhook Icon upload collector** / **Color** / Ping / **Webhook name** / **Field 1-8** / Clear Fields / Preview / Publish / Cancel). Up to **8 fields**, each separated by a native V2 `Separator` (`type: 14`). The thumbnail is a **wide full-width MediaGallery (`type: 12`) TOP banner**. The **Color** modal (hex) sets the Container accent bar — the vertical "embed line". The **Icon** collector stores the image bytes and applies them as the webhook avatar on publish; when no icon is chosen, a bundled `assets/transparent-avatar.png` (a 1x1 fully-transparent PNG) is applied so Discord's grey default icon stays **invisible**. Publishing asks for a target channel, then finds/creates a **webhook with the user-typed name** in that channel and posts the V2 card through it (the ping, if set, is sent as a separate message first because the V2 flag disables `content`). Exposes `buildAnnouncementPayload`, `buildBuilderComponents`, `handleAnnouncementComponent`, `getInvisibleAvatarBuffer`, `ANNOUNCEMENT_V2_FLAGS`, `MAX_FIELDS`, `DEFAULT_ACCENT_COLOR`; wired into `events/interactionCreate.js` via an early `annb_` customId dispatch. |
@@ -293,8 +325,8 @@ The following slash commands were removed (files deleted from `commands/`):
    is now persisted when the backup panel is posted (post_backuppanel handler).
    The `test/link-roblox-command.test.js` test file was deleted with it.
 9. `/setregionping` (`commands/setregionping.js`) — configure region ping roles
-   (`settings.regionPings`). REMOVED — region/country pings are now set from the
-   separate dashboard via shared Postgres. The legacy `settings.regionPings`
+   (`settings.regionPings`). REMOVED — region/country pings are now set via the
+   `/pingsetup` Discord builder (shared Postgres). The legacy `settings.regionPings`
    fallback in `getRaidPingInfo` (and the `regionPings` default in
    `handlers/raidStateManager.js`) was removed with it; with no DB config there
    is simply no location ping.
