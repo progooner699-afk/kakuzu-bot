@@ -157,8 +157,13 @@ function parsePingSetupCustomId(raw) {
 function canManagePings(interaction) {
     const perms = interaction.memberPermissions;
     if (!perms) return false;
-    return perms.has(PermissionsBitField.Flags.ManageGuild) ||
-        perms.has(PermissionsBitField.Flags.Administrator);
+    // Defensive: some interaction shapes expose memberPermissions as a raw
+    // bitfield (number/BigInt) instead of a PermissionsBitField instance.
+    const bitfield = (typeof perms.has === 'function')
+        ? perms
+        : new PermissionsBitField(perms);
+    return bitfield.has(PermissionsBitField.Flags.ManageGuild) ||
+        bitfield.has(PermissionsBitField.Flags.Administrator);
 }
 
 /**
@@ -688,11 +693,15 @@ function buildPayloadForView(session, roleMap) {
     return { embeds: [embed], components: rows };
 }
 
-/** editReply helper used by every view transition. */
+/** editReply helper used by every view transition. Returns true (handled). */
 async function renderView(interaction, session, roleMap) {
     const payload = buildPayloadForView(session, roleMap);
     payload.flags = EPHEMERAL_FLAG;
     await interaction.editReply(payload).catch(() => null);
+    // MUST return true: the interaction hub treats a falsy return as
+    // "not handled" and keeps running OTHER handlers on the same
+    // interaction (double-acks / falls through to unrelated code).
+    return true;
 }
 
 /* ================================================================== */
@@ -1007,6 +1016,11 @@ module.exports = {
     buildPayloadForView,
     isRoleValid,
     buildRoleMap,
+    // Component entry point — REQUIRED by the pingsetup_ dispatch block in
+    // events/interactionCreate.js (a missing export here threw a TypeError
+    // before any ack, which made every button press show "The application
+    // did not respond").
+    handlePingSetupComponent,
     SESSION_TTL_MS,
     COUNTRY_PAGE_SIZE,
     VIEW_ALL_PAGE_SIZE,
