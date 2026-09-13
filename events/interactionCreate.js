@@ -327,9 +327,10 @@ async function getRaidPingInfo(client, guildId, { countryCode, region }) {
 function createRaidButtons(raid, member = null) {
     const components = [];
 
-    // [ Help ] — green public button. Anyone can click; the bot replies with an
-    // EPHEMERAL message containing the raid id and the server (deep) link so the
-    // user can join the raid server themselves.
+    // [ Help ] — green PUBLIC button. Opens the join modal so the user is added
+    // to the LIVE HELPERS list (no Roblox link required). They get full
+    // join/leave time tracking and receive an ephemeral Link button to the
+    // Roblox join URL after submitting.
     components.push(
         new ButtonBuilder()
             .setCustomId(`raid_help_${raid.raidId}`)
@@ -337,30 +338,6 @@ function createRaidButtons(raid, member = null) {
             .setStyle(ButtonStyle.Success)
             .setDisabled(raid.status === "CLOSED")
     );
-
-    // [ Join Raid ] — grey PUBLIC button. Opens the accept modal so the user is
-    // added to the LIVE HELPERS list on the alert (with full join/leave time
-    // tracking). This is how helpers appear on the live helpers section.
-    components.push(
-        new ButtonBuilder()
-            .setCustomId(`raid_join_${raid.raidId}`)
-            .setLabel('Join Raid')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(raid.status === "CLOSED")
-    );
-
-    // [ Add Helper ] — grey, restricted to requester/staff. Opens a modal to
-    // manually add an in-game helper (by Discord user) to the raid. Useful for
-    // helpers who are in-game but don't use Discord.
-    if (canCloseRaid(member, raid)) {
-        components.push(
-            new ButtonBuilder()
-                .setCustomId(`raid_addhelper_${raid.raidId}`)
-                .setLabel('Add Helper')
-                .setStyle(ButtonStyle.Secondary)
-                .setDisabled(raid.status === "CLOSED")
-        );
-    }
 
     // [ Edit ] — grey, restricted to requester/staff (same gate as Close). Opens a
     // modal to edit raid fields (Target, Enemy Clan, Description), then edits the
@@ -1407,9 +1384,11 @@ module.exports = {
         }
         // ===== RAID OPERATIONS: help / edit / accept / leave / close / outcome / mvp =====
         
-        // [ Join Raid ] — grey PUBLIC button: opens the accept modal so the user
-        // is added to the LIVE HELPERS list. They get full join/leave time tracking.
-        if (interaction.isButton() && typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_join_')) {
+        // [ Help ] — green PUBLIC button: opens the join modal so the user is added
+        // to the LIVE HELPERS list (no Roblox link required). They get full
+        // join/leave time tracking and receive an ephemeral Link button to the
+        // Roblox join URL after submitting.
+        if (typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_help_')) {
             const raidId = Number(interaction.customId.split('_')[2]);
             if (Number.isNaN(raidId)) return;
             const raid = raidStateManager.getRaidById(raidId, interaction.guild?.id);
@@ -1433,8 +1412,7 @@ module.exports = {
                 await interaction.reply({ content: '⚠️ This raid is already full (' + limit + '/' + limit + ' helpers).', flags: 64 }).catch(() => null);
                 return;
             }
-            
-            // Open the join modal (reuse the existing accept modal pattern)
+            // Open the join modal
             const modal = new ModalBuilder()
                 .setCustomId(`raid_joinmodal_${raidId}`)
                 .setTitle(`Join Raid #${raidStateManager.getRaidDisplayId(raid)}`);
@@ -1450,57 +1428,6 @@ module.exports = {
                 )
             );
             await interaction.showModal(modal).catch(() => null);
-            return;
-        }
-
-        // [ Add Helper ] — grey staff/requester button: opens a modal to manually
-        // add an in-game helper by Discord user.
-        if (interaction.isButton() && typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_addhelper_')) {
-            const raidId = Number(interaction.customId.split('_')[2]);
-            if (Number.isNaN(raidId)) return;
-            const raid = raidStateManager.getRaidById(raidId, interaction.guild?.id);
-            if (!raid) {
-                await interaction.reply({ content: 'Raid not found.', flags: 64 }).catch(() => null);
-                return;
-            }
-            if (!canCloseRaid(interaction.member, raid)) {
-                await interaction.reply({ content: 'Only the raid requester or an authorized staff member can add helpers.', flags: 64 }).catch(() => null);
-                return;
-            }
-            // Open the add helper modal
-            const modal = new ModalBuilder()
-                .setCustomId(`raid_addhelper_modal_${raidId}`)
-                .setTitle(`Add Helper to Raid #${raidStateManager.getRaidDisplayId(raid)}`);
-            modal.addComponents(
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId('helper_user_id')
-                        .setLabel('Discord User ID or @mention')
-                        .setStyle(TextInputStyle.Short)
-                        .setPlaceholder('123456789012345678 or @username')
-                        .setRequired(true)
-                        .setMaxLength(100)
-                )
-            );
-            await interaction.showModal(modal).catch(() => null);
-            return;
-        }
-
-        // [ Help ] — green public button: replies with an EPHEMERAL message that
-        // contains the raid id and the server (Roblox deep) link.
-        if (typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_help_')) {
-            const raidId = Number(interaction.customId.split('_')[2]);
-            if (Number.isNaN(raidId)) return;
-            const raid = raidStateManager.getRaidById(raidId, interaction.guild?.id);
-            if (!raid) {
-                await interaction.reply({ content: 'Raid not found.', flags: 64 }).catch(() => null);
-                return;
-            }
-            const serverLink = buildRobloxJoinLink(raid) || (raid.serverLink && /^https?:\/\//i.test(raid.serverLink) ? raid.serverLink : null);
-            await interaction.reply({
-                content: `📋 **Raid #${raidStateManager.getRaidDisplayId(raid)}** | ${serverLink ? '🔗 Server link: ' + serverLink : '🔗 Server link: not available (no place id recorded).'}`,
-                flags: 64
-            }).catch(() => null);
             return;
         }
 
@@ -1918,59 +1845,6 @@ module.exports = {
             return;
         }
 
-        // [ Add Helper Modal Submit ] — staff/requester submitted the "Add Helper"
-        // modal with a Discord user ID. Adds that user to the live helpers list.
-        if (interaction.isModalSubmit() && typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_addhelper_modal_')) {
-            const raidId = Number(interaction.customId.split('_')[2]);
-            if (Number.isNaN(raidId)) return;
-            const guildId = interaction.guild?.id;
-            const raid = raidStateManager.getRaidById(raidId, guildId);
-            if (!raid || raid.status === 'CLOSED') {
-                await interaction.reply({ content: 'This raid is no longer active or has been closed.', flags: 64 }).catch(() => null);
-                return;
-            }
-            if (!canCloseRaid(interaction.member, raid)) {
-                await interaction.reply({ content: 'Only the raid requester or an authorized staff member can add helpers.', flags: 64 }).catch(() => null);
-                return;
-            }
-            const rawInput = (interaction.fields.getTextInputValue('helper_user_id') || '').trim();
-            let targetUserId = null;
-            const mentionMatch = rawInput.match(/^<@!?(\d+)>$/);
-            if (mentionMatch) {
-                targetUserId = mentionMatch[1];
-            } else if (/^\d{17,20}$/.test(rawInput)) {
-                targetUserId = rawInput;
-            }
-            if (!targetUserId) {
-                await interaction.reply({ content: '❌ Invalid input. Please provide a valid Discord user ID or @mention (e.g., `123456789012345678` or `@username`).', flags: 64 }).catch(() => null);
-                return;
-            }
-            let targetTag = 'Unknown';
-            try {
-                const member = await interaction.guild.members.fetch(targetUserId).catch(() => null);
-                if (member) targetTag = member.user.tag;
-            } catch (e) { /* ignore */ }
-            const result = raidStateManager.addHelperByDiscordId(raidId, targetUserId, targetTag, guildId);
-            if (!result.success) {
-                await interaction.reply({ content: '❌ ' + result.message, flags: 64 }).catch(() => null);
-                return;
-            }
-            const updated = result.raid;
-            const row = createRaidButtons(updated, interaction.member);
-            if (updated.alertFormat === 'v2') {
-                const updatedPayload = await raidV2.buildRaidAlertPayload(updated, row);
-                await raidStateManager.editRaidAlertMessage(interaction.client, updated, { flags: raidV2.RAID_ALERT_V2_FLAGS, components: updatedPayload.components })
-                    .catch((err) => console.warn('[raid alert] V2 addhelper edit failed:', (err && err.message) || err));
-            } else {
-                const embeds = raidStateManager.formatRaidMessage(updated, guildId);
-                await raidStateManager.editRaidAlertMessage(interaction.client, updated, { embeds: embeds, components: [row] });
-            }
-            await interaction.reply({
-                content: `✅ <@${targetUserId}> (${targetTag}) has been added as a helper to Raid #${raidStateManager.getRaidDisplayId(updated)}!`,
-                flags: 64
-            }).catch(() => null);
-            return;
-        }
     }
     }
 ;

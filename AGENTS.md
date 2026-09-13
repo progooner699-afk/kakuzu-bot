@@ -130,22 +130,15 @@
   `guild_ping_settings` table is still the permanent store.
 * **Removed `/setregionping`:** the legacy settings.json `regionPings` command was
   deleted — the `/pingsetup`→Postgres→bot path is now the SOLE source of truth.
-* **`addHelperByDiscordId(raidId, discordUserId, discordTag, guildId)`** — new
-  function in `handlers/raidStateManager.js` to manually add a helper by Discord
-  user ID (no Roblox link required). Used by the `[ Add Helper ]` button on the
-  raid alert (staff/requester only). Helpers added this way have `discordTag`
-  set but null Roblox fields, and are tracked in the live helpers display with
-  a "added as helper" label instead of in-game time.
 * **`ingame` command in upload channel:** during the rally-picture upload flow
   (`raid-uploads-<id>` channel), the closer can type `ingame` to get a live
   snapshot of current in-game helpers and their participation time so far.
 * **Helper object now carries `discordTag`, `lastSeenTime`, and `leaveTime`:**
   `discordTag` is set from the Discord user's tag when joining via the public
-  Join Raid button or Add Helper button; `lastSeenTime` is set at join so
-  presence-based time tracking fires immediately; `leaveTime` is recorded when
-  a helper leaves so the live display can show "Joined: <t> → Left: <t>".
-  Both `formatLiveHelperRow` (V2) and `formatRaidMessage` (embed fallback)
-  render these fields consistently.
+  Help button; `lastSeenTime` is set at join so presence-based time tracking
+  fires immediately; `leaveTime` is recorded when a helper leaves so the live
+  display can show "Joined: <t> → Left: <t>". Both `formatLiveHelperRow` (V2)
+  and `formatRaidMessage` (embed fallback) render these fields consistently.
 * **Running:** if `DATABASE_URL` is unset or empty, `sharedPingDb` logs a one-time
   warning and returns empty maps — the bot simply posts with **no** location ping,
   and `/pingsetup` saves fail with an explicit "DATABASE_URL is not configured"
@@ -265,15 +258,11 @@ Refactored the linking → request → join → close loop per the spec:
      (`https://www.roblox.com/games/start?placeId=...` — Discord Link buttons
      reject `roblox://` schemes, which would fail the whole alert), built by
      `buildRobloxJoinLink`.
-   * `[ Join Raid ]` — `ButtonStyle.Secondary` (grey, PUBLIC). Opens a modal
+   * `[ Help ]` — `ButtonStyle.Success` (green, PUBLIC). Opens the join modal
      (`raid_joinmodal_<id>`) so any Discord user can join as a helper — no Roblox
      link required. The helper is added to the LIVE HELPERS list with full
      join/leave time tracking, and receives an ephemeral Discord **Link** button
      (`ButtonStyle.Link`) to the Roblox join URL.
-   * `[ Add Helper ]` — `ButtonStyle.Secondary` (grey, restricted to
-     requester/staff via `canCloseRaid`). Opens a modal (`raid_addhelper_modal_<id>`)
-     to manually add an in-game helper by Discord user ID or @mention. Useful for
-     helpers who are in-game but don't use Discord. Uses `addHelperByDiscordId`.
    * `[ 🔒 CLOSE RAID ]` — `ButtonStyle.Secondary` (`close_raid_<id>`,
      handled alongside the legacy `raid_close_<id>`). Executable **only** by the
      raid requester or an authorized staff role (see `canCloseRaid`).

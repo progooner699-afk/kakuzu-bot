@@ -361,47 +361,6 @@ async function addHelper(raidId, userId, robloxData, guildId) {
     return { success: true, raid, totalRaids };
 }
 
-/**
- * Manually add a helper to a raid by their Discord user ID. Used by the
- * "Add Helper" button on the raid alert (staff/requester only). Does NOT
- * require a Roblox link — useful for in-game helpers who don't use Discord.
- * Returns { success, message, raid }.
- */
-function addHelperByDiscordId(raidId, discordUserId, discordTag, guildId) {
-    const raids = loadRaids(guildId);
-    const raid = raids.raids.find(item => item.raidId === raidId);
-    if (!raid || raid.status === 'CLOSED') return { success: false, message: 'Raid is closed or not found.' };
-    if (!Array.isArray(raid.helpers)) raid.helpers = [];
-    
-    // Already a helper?
-    const existing = raid.helpers.find(h => typeof h === 'object' && h.userId === discordUserId);
-    if (existing) return { success: false, message: 'This user is already a helper on this raid.' };
-    
-    // Check helper limit
-    const limit = Number(raid.helperLimit) || 0;
-    if (limit > 0 && raid.helpers.length >= limit) {
-        return { success: false, message: 'This raid already has the maximum number of helpers (' + limit + ').' };
-    }
-    
-    const now = Date.now();
-    raid.helpers.push({
-        userId: discordUserId,
-        discordTag: discordTag || null,
-        robloxUsername: null,
-        robloxDisplayName: null,
-        robloxUserId: null,
-        avatarUrl: null,
-        joinTime: now,
-        lastSeenTime: null,
-        leaveTime: null,
-        timeSpentSeconds: 0
-    });
-    
-    updateRaidStatus(raid);
-    saveRaids(guildId, raids);
-    return { success: true, raid };
-}
-
 function removeHelper(raidId, userId, guildId) {
     const raids = loadRaids(guildId);
     const raid = raids.raids.find(item => item.raidId === raidId);
@@ -1025,7 +984,6 @@ module.exports = {
     getRaidById,
     getRaidDisplayId,
     addHelper,
-    addHelperByDiscordId,
     removeHelper,
     closeRaid,
     updateRaidMessageReference,
