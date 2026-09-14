@@ -7,6 +7,7 @@ const config = require('./config.json');
 const commandHandler = require('./handlers/commandHandler');
 const raidStateManager = require('./handlers/raidStateManager');
 const sharedPingDb = require('./handlers/sharedPingDb');
+const dbKeepAlive = require('./handlers/dbKeepAlive');
 const { checkRobloxCookieAuth } = require('./handlers/robloxAuth');
 const { attachGatewayGuard, reconnectDiscord, markShuttingDown } = require('./handlers/gatewayGuard');
 
@@ -69,6 +70,12 @@ sharedPingDb.initializeAtStartup().catch((err) => {
     console.error('[pingDb] startup init error:', (err && err.message) ? err.message : err);
 });
 
+// Periodic database keep-alive: pings Supabase through the SAME pool the
+// feature read/write paths use (`SELECT 1;`) once at startup, then every 72h,
+// to stop free-tier databases from pausing idle connections. Fire-and-forget —
+// a network hiccup can never delay/crash Discord login (see handlers/dbKeepAlive.js).
+dbKeepAlive.start();
+
 // Express API server for the React dashboard (keep-alive + stats/actions).
 // The app is built here so the same single HTTP server serves the dashboard
 // endpoints and the protected guild-roles endpoint.
@@ -107,6 +114,10 @@ function shutdownGracefully(reason) {
     isShuttingDown = true;
     console.log('SIGTERM received - shutting down cleanly...');
     markShuttingDown(client);
+
+    // Stop the database keep-alive timer so a pending check can't fire during
+    // or after shutdown.
+    try { dbKeepAlive.stop(); } catch (_) { /* ignore */ }
 
     if (server) {
         server.close(() => {

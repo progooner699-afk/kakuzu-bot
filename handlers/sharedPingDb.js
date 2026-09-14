@@ -344,6 +344,26 @@ async function withTimeout(promise, ms) {
 }
 
 /**
+ * Runs a query on the SHARED connection pool (the same one used by
+ * readFromDatabase / saveGuildPingSettings) with a timeout. Returns the pg
+ * query result on success, or null when no pool is available (DATABASE_URL not
+ * set) so callers can no-op. Throws on a real query error or timeout.
+ *
+ * Because this uses the very same pool as the feature read/write paths, a
+ * successful round-trip here is proof that normal Kakuzu features are actually
+ * reading and writing Supabase instead of silently using in-memory data.
+ * @param {string} sql
+ * @param {array} [params]
+ * @param {number} [timeoutMs]
+ * @returns {Promise<object|null>}
+ */
+async function runPoolQuery(sql, params = [], timeoutMs = 10000) {
+    const currentPool = getPool();
+    if (!currentPool) return null;
+    return withTimeout(currentPool.query(sql, params), timeoutMs);
+}
+
+/**
  * Database health check used at startup and by the builder status line.
  * Never throws; logs the real SANITIZED error on failure.
  * @returns {Promise<{ok: boolean, configured: boolean, detail?: string}>}
@@ -391,6 +411,7 @@ module.exports = {
     getGuildPingSettings,
     refreshGuildSettingsCache,
     saveGuildPingSettings,
+    runPoolQuery,
     loadAllSettingsIntoCache,
     checkDatabaseHealth,
     initializeAtStartup,

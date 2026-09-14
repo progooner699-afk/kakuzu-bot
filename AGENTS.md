@@ -50,7 +50,15 @@
   `guild_id`, cache updated ONLY after the write succeeds, errors rethrown),
   `loadAllSettingsIntoCache()` (startup preload, returns count loaded),
   `refreshGuildSettingsCache(guildId)`, `checkDatabaseHealth()` (sanitized
-  startup health check), `sanitizeError()`.
+  startup health check), `sanitizeError()`, `runPoolQuery(sql, params, timeoutMs)`
+  (runs any query on the shared pool with a timeout — used by the keep-alive).
+* **Keep-alive:** `handlers/dbKeepAlive.js` — runs `SELECT 1;` through the SAME
+  pool the feature read/write paths use, once at startup then every 72h, to stop
+  free-tier Supabase from pausing idle connections. 10s query timeout; on failure
+  it logs a SANITIZED error (never the URL/credentials) and retries after 30 min
+  without crashing the bot. `start()` is idempotent and concurrency-guarded;
+  `stop()` clears the timer (wired into the SIGTERM/SIGINT shutdown in
+  `index.js`). No dummy records/tables/fake activity are ever created.
 * **Builder:** `/pingsetup` (`commands/pingsetup.js`) — ephemeral interactive
   Components-V2-era builder (Manage Guild / Administrator, guild-only). Loads
   the guild's existing row into a DRAFT, paginated ISO-3166 country selector
@@ -321,6 +329,7 @@ Refactored the linking → request → join → close loop per the spec:
 | `handlers/verificationDb.js` | sql.js persistence for verification records. |
 | `handlers/verificationHelpers.js` | `formatRobloxProfileValue` and friends. |
 | `handlers/sharedPingDb.js` | Permanent shared-Postgres store for country/region ping settings + in-memory cache. |
+| `handlers/dbKeepAlive.js` | Periodic `SELECT 1;` keep-alive on the shared pool (startup + every 72h, 30-min retry on failure) to stop idle Supabase databases from pausing. |
 | `handlers/countryCatalog.js` | Local ISO-3166-1 alpha-2 country catalog (names, flag emojis, sort) + the shared country→region mapping used by BOTH `/pingsetup` and `handlers/regionMap.js`. |
 | `commands/pingsetup.js` | Ephemeral interactive `/pingsetup` builder (country/region ping roles, draft → UPSERT). |
 | `handlers/commandHandler.js` | Loads commands from `commands/` into `client.commands`. |
