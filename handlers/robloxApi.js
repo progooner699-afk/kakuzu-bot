@@ -3,6 +3,12 @@
  * Handles validation and data fetching from Roblox APIs
  */
 
+// Every Roblox HTTP call is deadline-bounded: an unbounded fetch that hangs
+// inside request_backup / Help / the 15s presence loop blows Discord's 3s ack
+// window (the "suddenly stops responding" symptom) and piles up stuck ticks.
+const { fetchWithTimeout } = require('./fetchTimeout');
+const ROBLOX_FETCH_TIMEOUT_MS = 8000;
+
 /**
  * Validates a Roblox username using the more reliable username resolution endpoint
  * @param {string} username - The Roblox username to validate
@@ -11,7 +17,7 @@
 async function validateRobloxUser(username) {
     try {
         // Use the dedicated username resolution endpoint for exact matches
-        const response = await fetch(
+        const response = await fetchWithTimeout(
             `https://users.roblox.com/v1/usernames/users`,
             {
                 method: 'POST',
@@ -22,7 +28,8 @@ async function validateRobloxUser(username) {
                     usernames: [username.trim()],
                     excludeBannedUsers: true
                 })
-            }
+            },
+            ROBLOX_FETCH_TIMEOUT_MS
         );
 
         if (!response.ok) {
@@ -59,8 +66,10 @@ async function validateRobloxUser(username) {
  */
 async function getRobloxAvatarUrl(userId) {
     try {
-        const response = await fetch(
-            `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png`
+        const response = await fetchWithTimeout(
+            `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png`,
+            {},
+            ROBLOX_FETCH_TIMEOUT_MS
         );
 
         if (!response.ok) {
@@ -119,13 +128,14 @@ async function validateAndGetAvatar(username) {
  */
 async function getUserPresence(userId) {
     try {
-        const response = await fetch(
+        const response = await fetchWithTimeout(
             `https://presence.roblox.com/v1/presence/users`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ userIds: [userId] })
-            }
+            },
+            ROBLOX_FETCH_TIMEOUT_MS
         );
 
         if (!response.ok) {
@@ -154,8 +164,10 @@ async function getUserPresence(userId) {
         }
 
         // Get game details
-        const universeResponse = await fetch(
-            `https://games.roblox.com/v1/games?universeIds=${presence.universeId}`
+        const universeResponse = await fetchWithTimeout(
+            `https://games.roblox.com/v1/games?universeIds=${presence.universeId}`,
+            {},
+            ROBLOX_FETCH_TIMEOUT_MS
         );
         
         let gameName = 'Unknown Game';
@@ -169,8 +181,10 @@ async function getUserPresence(userId) {
         // Get server join script
         let joinScript = '';
         if (gameId) {
-            const serverResponse = await fetch(
-                `https://games.roblox.com/v1/games/${placeId}/servers/${gameId}`
+            const serverResponse = await fetchWithTimeout(
+                `https://games.roblox.com/v1/games/${placeId}/servers/${gameId}`,
+                {},
+                ROBLOX_FETCH_TIMEOUT_MS
             );
             
             if (serverResponse.ok) {
@@ -295,8 +309,10 @@ async function detectGameAndRegion(userId) {
     let gameIconUrl = '';
     if (presence.universeId) {
         try {
-            const thumbResponse = await fetch(
-                `https://thumbnails.roblox.com/v1/games/icons?universeIds=${presence.universeId}&size=512x512&format=Png&isCircular=false`
+            const thumbResponse = await fetchWithTimeout(
+                `https://thumbnails.roblox.com/v1/games/icons?universeIds=${presence.universeId}&size=512x512&format=Png&isCircular=false`,
+                {},
+                ROBLOX_FETCH_TIMEOUT_MS
             );
             if (thumbResponse.ok) {
                 const thumbData = await thumbResponse.json();

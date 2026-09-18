@@ -52,6 +52,9 @@
   `refreshGuildSettingsCache(guildId)`, `checkDatabaseHealth()` (sanitized
   startup health check), `sanitizeError()`, `runPoolQuery(sql, params, timeoutMs)`
   (runs any query on the shared pool with a timeout — used by the keep-alive).
+  Every Supabase round-trip is deadline-bounded (8s via
+  `handlers/fetchTimeout.js` `withTimeout`); a stalled/paused Supabase resolves
+  as a logged error instead of a never-settling promise piling up in the 15s loop.
 * **Keep-alive:** `handlers/dbKeepAlive.js` — runs `SELECT 1;` through the SAME
   pool the feature read/write paths use, once at startup then every 72h, to stop
   free-tier Supabase from pausing idle connections. 10s query timeout; on failure
@@ -90,11 +93,22 @@
   `/pingsetup`, read via `getGuildPingSettings`); the legacy
   `settings.regionPings` (from the removed `/setregionping` command) is no
   longer read — if the DB is unconfigured/down/empty there is simply **no**
-  location ping on either path. `allowedMentions.roles` restricts pings to
+  location ping on either path. The raid-path read is additionally wrapped in
+  a 3.5s `withTimeout` so a slow/down DB degrades to "no ping" instead of
+  stalling past Discord's 3s ack window. `allowedMentions.roles` restricts pings to
   exactly the chosen role.
   The alert embed shows the human-readable `Country` name (from
   `raidStateManager.countryCodeToName`, e.g. `IN` → `India`) directly under
   `Region`, or `Unknown` when undetected.
+* **Network hardening (`handlers/fetchTimeout.js`):** every Roblox HTTP call
+  (`handlers/robloxApi.js`, `handlers/robloxAuth.js` gamejoin + cookie probes,
+  the `pollHelperPresences` / `pollAutoJoin` / help-monitor presence chunks, and
+  the announcement icon fetch) runs through `fetchWithTimeout` (8s Roblox /
+  presence, 10s gamejoin). Hanging upstream calls abort instead of blowing
+  Discord's 3s ack window or piling up stuck 15s-loop ticks. Interaction
+  handling is wrapped in a top-level safe-reply guard plus
+  in/start/done logging (ids only, never secrets) so no button/modal/slash
+  interaction can die silently as "The application did not respond".
 * **Detector:** `robloxApi.detectGameAndRegion` now also returns `countryCode`
   (ISO-3166 alpha-2, e.g. `SG`) alongside the broad `region` (e.g. `ASIA`),
   plus `regionLabel` (human-readable "City, Country") and `regionSource`

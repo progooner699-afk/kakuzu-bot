@@ -1,5 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const { fetchWithTimeout } = require('./fetchTimeout');
+// Same 8s deadline as the sibling presence pollers: an unbounded fetch here
+// stalls the 15s loop tick that also drives auto-join + help monitors.
+const PRESENCE_FETCH_TIMEOUT_MS = 8000;
 const { EmbedBuilder, ChannelType } = require('discord.js');
 const leaderboardDb = require('./leaderboardDb');
 const robloxApi = require('./robloxApi');
@@ -588,11 +592,11 @@ async function pollHelperPresences(client, guildId) {
     }
     if (helperUserIds.length === 0) return;
     try {
-        const response = await fetch('https://presence.roblox.com/v1/presence/users', {
+        const response = await fetchWithTimeout('https://presence.roblox.com/v1/presence/users', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
             body: JSON.stringify({ userIds: helperUserIds })
-        });
+        }, PRESENCE_FETCH_TIMEOUT_MS);
         if (!response.ok) return;
         const data = await response.json();
         for (const user of (data.userPresences || data.data || [])) {

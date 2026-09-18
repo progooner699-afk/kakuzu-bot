@@ -395,8 +395,12 @@ function getInvisibleAvatarBuffer() {
  */
 async function bufferFromUrl(url) {
     if (!/^https?:\/\/\S+$/i.test(String(url || ''))) return null;
+    let fetchWithTimeout = null;
+    try { ({ fetchWithTimeout } = require('../handlers/fetchTimeout')); } catch (_) { /* fallback to raw fetch */ }
     try {
-        const res = await fetch(url);
+        const res = fetchWithTimeout
+            ? await fetchWithTimeout(url, {}, 8000)
+            : await fetch(url);
         if (!res.ok) return null;
         const arr = await res.arrayBuffer();
         if (!arr || !arr.byteLength) return null;

@@ -25,6 +25,13 @@
  */
 
 const { Pool } = require('pg');
+const { withTimeout } = require('./fetchTimeout');
+
+// Every Supabase round-trip is deadline-bounded: pg has no built-in query
+// timeout here, so a stalled Supabase (paused project, network blackhole)
+// resolves as a logged error instead of a promise that never settles and
+// piles up inside the 15s presence loop.
+const PING_QUERY_TIMEOUT_MS = 8000;
 
 /**
  * The single dedicated settings table. Idempotent — never DROPs or
@@ -200,9 +207,13 @@ async function readFromDatabase(guildId) {
     const currentPool = getPool();
     if (!currentPool) return null;
     await ensureTableOnce();
-    const { rows } = await currentPool.query(
-        'SELECT country_pings, region_pings FROM guild_ping_settings WHERE guild_id = $1',
-        [String(guildId || '').trim()]
+    const { rows } = await withTimeout(
+        currentPool.query(
+            'SELECT country_pings, region_pings FROM guild_ping_settings WHERE guild_id = $1',
+            [String(guildId || '').trim()]
+        ),
+        PING_QUERY_TIMEOUT_MS,
+        'ping settings read'
     );
     if (!rows || rows.length === 0) return null;
     const row = rows[0];
@@ -234,14 +245,18 @@ async function saveGuildPingSettings(guildId, countryPings, regionPings) {
     if (!tableReadyPromise) {
         throw new Error('Ping settings table is not available right now.');
     }
-    await currentPool.query(
-        `INSERT INTO guild_ping_settings (guild_id, country_pings, region_pings, updated_at)
-         VALUES ($1, $2::jsonb, $3::jsonb, NOW())
-         ON CONFLICT (guild_id)
-         DO UPDATE SET country_pings = EXCLUDED.country_pings,
-                       region_pings  = EXCLUDED.region_pings,
-                       updated_at    = NOW()`,
-        [gid, JSON.stringify(cp), JSON.stringify(rp)]
+    await withTimeout(
+        currentPool.query(
+            `INSERT INTO guild_ping_settings (guild_id, country_pings, region_pings, updated_at)
+             VALUES ($1, $2::jsonb, $3::jsonb, NOW())
+             ON CONFLICT (guild_id)
+             DO UPDATE SET country_pings = EXCLUDED.country_pings,
+                           region_pings  = EXCLUDED.region_pings,
+                           updated_at    = NOW()`,
+            [gid, JSON.stringify(cp), JSON.stringify(rp)]
+        ),
+        PING_QUERY_TIMEOUT_MS,
+        'ping settings save'
     );
     setCacheEntry(gid, cp, rp);
     return { guildId: gid, countryPings: cp, regionPings: rp };
@@ -261,8 +276,12 @@ async function loadAllSettingsIntoCache() {
     if (!currentPool) return 0;
     try {
         await ensureTableOnce();
-        const { rows } = await currentPool.query(
-            'SELECT guild_id, country_pings, region_pings FROM guild_ping_settings'
+        const { rows } = await withTimeout(
+            currentPool.query(
+                'SELECT guild_id, country_pings, region_pings FROM guild_ping_settings'
+            ),
+            PING_QUERY_TIMEOUT_MS,
+            'ping settings preload'
         );
         let loaded = 0;
         for (const row of rows || []) {
@@ -335,7 +354,7 @@ async function refreshGuildSettingsCache(guildId) {
 
 const HEALTH_TIMEOUT_MS = 8000;
 
-async function withTimeout(promise, ms) {
+function dbHealthCheckTimeout(promise, ms) {
     const timeout = new Promise((_, reject) => {
         const timer = setTimeout(() => reject(new Error(`Database health check timed out after ${ms}ms`)), ms);
         timer.unref && timer.unref();
@@ -360,7 +379,7 @@ async function withTimeout(promise, ms) {
 async function runPoolQuery(sql, params = [], timeoutMs = 10000) {
     const currentPool = getPool();
     if (!currentPool) return null;
-    return withTimeout(currentPool.query(sql, params), timeoutMs);
+    return dbHealthCheckTimeout(currentPool.query(sql, params), timeoutMs);
 }
 
 /**
@@ -375,7 +394,7 @@ async function checkDatabaseHealth() {
     const currentPool = getPool();
     if (!currentPool) return { ok: false, configured: true, detail: 'Pool could not be created.' };
     try {
-        await withTimeout(currentPool.query('SELECT 1 AS ok'), HEALTH_TIMEOUT_MS);
+        await dbHealthCheckTimeout(currentPool.query('SELECT 1 AS ok'), HEALTH_TIMEOUT_MS);
         await ensureTableOnce();
         return { ok: true, configured: true, detail: undefined };
     } catch (err) {

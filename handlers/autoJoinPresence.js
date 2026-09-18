@@ -20,6 +20,11 @@ const raidV2 = require('./raidV2');
 
 // Roblox presence API caps the userIds array; stay safely under the limit.
 const PRESENCE_CHUNK_SIZE = 200;
+// Hard deadline per presence chunk: an unbounded fetch here stalls the 15s
+// loop tick and piles up overlapping polls (the "process running but dead"
+// symptom) when Roblox hangs instead of answering.
+const { fetchWithTimeout } = require('./fetchTimeout');
+const PRESENCE_FETCH_TIMEOUT_MS = 8000;
 
 async function pollAutoJoin(client, guildId) {
     const apiKey = process.env.ROBLOX_API_KEY;
@@ -60,11 +65,11 @@ async function pollAutoJoin(client, guildId) {
         const chunk = candidates.slice(i, i + PRESENCE_CHUNK_SIZE)
             .map(u => String(u.roblox_user_id));
         try {
-            const response = await fetch('https://presence.roblox.com/v1/presence/users', {
+            const response = await fetchWithTimeout('https://presence.roblox.com/v1/presence/users', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
                 body: JSON.stringify({ userIds: chunk })
-            });
+            }, PRESENCE_FETCH_TIMEOUT_MS);
             if (!response.ok) {
                 console.warn('[auto-join] presence API HTTP', response.status);
                 continue;

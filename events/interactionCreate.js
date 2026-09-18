@@ -18,6 +18,10 @@ const robloxApi = require("../handlers/robloxApi");
 const verificationDb = require("../handlers/verificationDb");
 const { formatRobloxProfileValue } = require("../handlers/verificationHelpers");
 const sharedPingDb = require("../handlers/sharedPingDb");
+const { withTimeout, fetchWithTimeout } = require("../handlers/fetchTimeout");
+// Bound for Supabase ping-config reads on the raid path: a slow/down DB must
+// degrade to "no ping", never stall the raid past Discord's 3s ack window.
+const PING_DB_TIMEOUT_MS = 3500;
 const pendingRaidApplications = new Map();
 const pendingRegionSelections = new Map();
 const pendingGameSelections = new Map();
@@ -285,9 +289,13 @@ async function getRaidPingInfo(client, guildId, { countryCode, region }) {
     let resolvedPing = null;
 
     try {
-        const cfg = await sharedPingDb.getGuildPingSettings(guildId);
-        const countryPings = (cfg && cfg.countryPings) || {};
-        const regionPings = (cfg && cfg.regionPings) || {};
+        const fetched = await withTimeout(
+            sharedPingDb.getGuildPingSettings(guildId),
+            PING_DB_TIMEOUT_MS,
+            'ping settings lookup'
+        );
+        const countryPings = (fetched && fetched.countryPings) || {};
+        const regionPings = (fetched && fetched.regionPings) || {};
 
         // Step 1: If a country code was detected, try the country role first.
         // Case-insensitive lookup so "in" on the dashboard matches "IN".
@@ -850,11 +858,11 @@ async function processHelpMonitors(client) {
         for (let i = 0; i < robloxIds.length; i += 100) {
             const chunk = robloxIds.slice(i, i + 100);
             try {
-                const response = await fetch('https://presence.roblox.com/v1/presence/users', {
+                const response = await fetchWithTimeout('https://presence.roblox.com/v1/presence/users', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
                     body: JSON.stringify({ userIds: chunk })
-                });
+                }, 8000);
                 if (!response.ok) continue;
                 const data = await response.json();
                 presences.push(...(data.userPresences || data.data || []));
@@ -924,6 +932,35 @@ module.exports = {
     cleanupExpiredMonitors,
     processHelpMonitors,
     async execute(interaction) {
+        // --- Interaction diagnostics (safe: ids + names only, never secrets).
+        // Logged FIRST so a hung handler still leaves a breadcrumb in Render.
+        try {
+            const kind = interaction.isChatInputCommand() ? `slash:/${interaction.commandName}`
+                : interaction.isButton() ? `button:${interaction.customId}`
+                : interaction.isModalSubmit() ? `modal:${interaction.customId}`
+                : interaction.isStringSelectMenu() ? `select:${interaction.customId}`
+                : interaction.isRoleSelectMenu ? (interaction.isRoleSelectMenu() ? `roleselect:${interaction.customId}` : 'unknown')
+                : (interaction.type != null ? `type:${interaction.type}` : 'unknown');
+            console.log(`[interaction] in ${kind} guild=${(interaction.guild && interaction.guild.id) || 'dm'} user=${(interaction.user && interaction.user.id) || '?'}`);
+        } catch (_) { /* logging must never break routing */ }
+        // Top-level guard: no interaction may ever die silently ("The
+        // application did not respond"). Anything thrown below gets a safe
+        // ephemeral reply instead of a Discord timeout.
+        const startedAt = Date.now();
+        const cmdLabel = interaction.isChatInputCommand() ? `/${interaction.commandName}`
+            : (interaction.customId || interaction.type);
+        const safeReplyError = async (text) => {
+            const msg = String(text || 'Something went wrong. Please try again.').slice(0, 1500);
+            try {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.followUp({ content: msg, flags: 64 }).catch(() => null);
+                } else {
+                    await interaction.reply({ content: msg, flags: 64 }).catch(() => null);
+                }
+            } catch (_) { /* last-resort path: swallow */ }
+        };
+        console.log(`[interaction] start ${cmdLabel} guild=${(interaction.guild && interaction.guild.id) || 'dm'} user=${(interaction.user && interaction.user.id) || '?'}`);
+        try {
         if (interaction.isChatInputCommand()) {
             const command = interaction.client.commands.get(interaction.commandName);
             // Never silently swallow a command: a bare `return` here makes Discord
@@ -1881,7 +1918,17 @@ module.exports = {
             return;
         }
 
+    } catch (topErr) {
+        // Last-resort catch for the WHOLE interaction: button/modal/select
+        // handlers that throw (or hit an unexpected ack state) must still get
+        // a visible safe reply, never "The application did not respond".
+        console.error(`[interaction] FAILED ${cmdLabel}:`, (topErr && topErr.stack) || topErr);
+        await safeReplyError('❌ Something went wrong handling that interaction. Please try again.');
+    } finally {
+        try {
+            console.log(`[interaction] done ${cmdLabel} in ${Date.now() - startedAt}ms`);
+        } catch (_) { /* ignore */ }
     }
-    }
-;
+    } // end execute
+};
 

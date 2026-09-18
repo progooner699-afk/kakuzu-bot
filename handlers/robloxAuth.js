@@ -14,6 +14,12 @@
 //     this process. It is never persisted and never logged.
 // ---------------------------------------------------------------------------
 
+const { fetchWithTimeout } = require('./fetchTimeout');
+// Hard deadline for gamejoin / auth-cookie probes: an unbounded fetch here is
+// the slowest call on the request_backup path (cookie probe + gamejoin +
+// presence + RoValra + ip-api) and would blow the 3s Discord ack window.
+const GAMEJOIN_FETCH_TIMEOUT_MS = 10000;
+
 let botCookie = process.env.BOT_ROBLOSECURITY || '';
 
 /**
@@ -88,12 +94,12 @@ async function checkRobloxCookieAuth(context, force) {
     let replacementCookieReceived = false;
     let success = false;
     try {
-        const res = await fetch('https://users.roblox.com/v1/users/authenticated', {
+        const res = await fetchWithTimeout('https://users.roblox.com/v1/users/authenticated', {
             headers: {
                 'Cookie': `.ROBLOSECURITY=${botCookie}`,
                 'User-Agent': 'Roblox/WinInet'
             }
-        });
+        }, GAMEJOIN_FETCH_TIMEOUT_MS);
         httpStatus = res.status;
         const replacement = extractReplacementSecurityCookie(res);
         replacementCookieReceived = replacement.received;
@@ -115,10 +121,10 @@ async function checkRobloxCookieAuth(context, force) {
 }
 
 async function getCsrfToken() {
-  const res = await fetch('https://auth.roblox.com/v2/logout', {
+  const res = await fetchWithTimeout('https://auth.roblox.com/v2/logout', {
     method: 'POST',
     headers: { Cookie: `.ROBLOSECURITY=${botCookie}` }
-  });
+  }, GAMEJOIN_FETCH_TIMEOUT_MS);
   return res.headers.get('x-csrf-token');
 }
 
@@ -145,7 +151,7 @@ async function getServerIp(placeId, serverId) {
   async function attemptJoin(attempt) {
     const csrfToken = await getCsrfToken();
     const csrfPresent = Boolean(csrfToken); // token value is NEVER logged
-    const res = await fetch('https://gamejoin.roblox.com/v1/join-game-instance', {
+    const res = await fetchWithTimeout('https://gamejoin.roblox.com/v1/join-game-instance', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -160,7 +166,7 @@ async function getServerIp(placeId, serverId) {
         gameId: serverId,
         gameJoinAttemptId: serverId
       })
-    });
+    }, GAMEJOIN_FETCH_TIMEOUT_MS);
     // Respect cookie rotation: capture any replacement .ROBLOSECURITY offered
     // via Set-Cookie. It is adopted ONLY when this join authenticated (a
     // joinScript came back); the value itself is never logged.
