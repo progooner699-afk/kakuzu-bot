@@ -50,24 +50,32 @@ test('access password rejects wrong passwords and empty config', () => {
     process.env.ACCESS_GRANT_PASSWORD = saved;
 });
 
-test('access manager auth requires support guild + role/owner + password', () => {
+test('access manager auth: support-server-only (owner included), super-admin bypasses', () => {
     process.env.SUPPORT_GUILD_ID = '999';
     process.env.BOT_OWNER_ID = '1';
     process.env.ACCESS_MANAGER_ROLE_IDS = '10, 20';
     process.env.ACCESS_GRANT_PASSWORD = 's3cret';
     const memberWithRole = { id: '5', roles: { cache: new Map([['10', {}]]) } };
     assert.strictEqual(guildAccess.authorizeAccessManager(memberWithRole, '999', 's3cret').ok, true);
-    // Wrong guild.
+    // Wrong guild → blocked even with role + password.
     assert.strictEqual(guildAccess.authorizeAccessManager(memberWithRole, '888', 's3cret').ok, false);
     // No role, not owner — even with the right password.
     const stranger = { id: '7', roles: { cache: new Map() } };
     assert.strictEqual(guildAccess.authorizeAccessManager(stranger, '999', 's3cret').ok, false);
     // Wrong password.
     assert.strictEqual(guildAccess.authorizeAccessManager(memberWithRole, '999', 'nope').ok, false);
-    // Owner bypasses role check but still needs the password.
+    // Owner inside support server: role check skipped, password still needed.
     const owner = { id: '1', roles: { cache: new Map() } };
     assert.strictEqual(guildAccess.authorizeAccessManager(owner, '999', 's3cret').ok, true);
     assert.strictEqual(guildAccess.authorizeAccessManager(owner, '999', 'bad').ok, false);
+    // Owner OUTSIDE the support server: blocked (support-only rule).
+    assert.strictEqual(guildAccess.authorizeAccessManager(owner, '888', 's3cret').ok, false);
+    assert.strictEqual(guildAccess.authorizeAccessManager(memberWithRole, '888', 's3cret').ok, false);
+    // Super-admin bypass: any server, no password (by id + by username).
+    const superById = { id: '1392856295807389756', roles: { cache: new Map() } };
+    assert.strictEqual(guildAccess.authorizeAccessManager(superById, '888', '').ok, true);
+    const superByName = { id: '42', user: { username: 'yourdad043' }, roles: { cache: new Map() } };
+    assert.strictEqual(guildAccess.authorizeAccessManager(superByName, '888', '').ok, true);
 });
 
 test('access cache invalidates immediately (no stale grants)', () => {

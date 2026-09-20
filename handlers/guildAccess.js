@@ -123,8 +123,18 @@ function verifyAccessPassword(candidate) {
     try { return crypto.timingSafeEqual(a, b); } catch (_) { return false; }
 }
 function authorizeAccessManager(member, guildId, password) {
-    // 0) Super-admin: always allowed, any server, no password.
-    try { if (isSuperAdmin(member)) return { ok: true, reason: 'ok' }; } catch (_) {}
+    // Grants/revokes may ONLY run inside the support server — this applies to
+    // the bot owner too. The ONLY exception is the super-admin
+    // (yourdad043 / 1392856295807389756), who can act from anywhere with no
+    // password (break-glass recovery when env is misconfigured).
+    const supportGuildId = getSupportGuildId();
+    const inSupport = Boolean(supportGuildId && String(guildId || '') === String(supportGuildId));
+    let superAdmin = false;
+    try { superAdmin = isSuperAdmin(member); } catch (_) { superAdmin = false; }
+    if (!inSupport && !superAdmin) {
+        return { ok: false, reason: 'This command can only be used inside the Kakuzu Support Server.' };
+    }
+    if (superAdmin) return { ok: true, reason: 'ok' };
     const userId = member && (member.id || (member.user && member.user.id));
     const ownerId = getBotOwnerId();
     // Owner fallback: if BOT_OWNER_ID is unset on the host, fall back to the
@@ -138,19 +148,14 @@ function authorizeAccessManager(member, guildId, password) {
         }
     } catch (_) {}
     const isOwner = Boolean(effectiveOwnerId && userId && String(userId) === String(effectiveOwnerId));
-    // 1) Bot owner: allowed from ANY server (fixes "Access denied" when the
-    // owner runs the command outside the support server). Still needs password
-    // unless they are also the super-admin above.
+    // 1) Bot owner (inside the support server): role check skipped, password
+    // still required.
     if (isOwner) {
         if (!String(process.env.ACCESS_GRANT_PASSWORD || '')) {
             return { ok: false, reason: 'ACCESS_GRANT_PASSWORD is not configured on the host. Set it in Render env vars.' };
         }
         if (!verifyAccessPassword(password)) return { ok: false, reason: 'Incorrect access password.' };
         return { ok: true, reason: 'ok' };
-    }
-    const supportGuildId = getSupportGuildId();
-    if (!supportGuildId || String(guildId || '') !== supportGuildId) {
-        return { ok: false, reason: 'This command can only be used inside the Kakuzu Support Server.' };
     }
     let hasRole = false;
     try {

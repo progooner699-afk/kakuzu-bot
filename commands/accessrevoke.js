@@ -1,6 +1,7 @@
 'use strict';
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const guildAccess = require('../handlers/guildAccess');
+const accessLog = require('../handlers/accessLog');
 const sharedPingDb = require('../handlers/sharedPingDb');
 
 module.exports = {
@@ -32,7 +33,22 @@ module.exports = {
                 await guildAccess.editOnboardingMessage(interaction.client, gid, 'revoked', { guildId: gid, revokedAt: new Date() });
             } catch (e) { console.warn('[accessrevoke] onboarding edit failed:', (e && e.message) || e); }
             const extra = reason ? ' Reason: ' + String(reason).slice(0, 300) : '';
-            return interaction.editReply({ content: 'Access revoked for `' + gid + '`. The server is now locked.' + extra }).catch(() => null);
+            let gName = gid;
+            let ownerId = row && row.ownerId ? row.ownerId : null;
+            try {
+                const full = await interaction.client.guilds.fetch(gid).catch(() => null);
+                if (full) {
+                    if (full.name) gName = full.name;
+                    if (!ownerId) { try { const o = await full.fetchOwner(); if (o && o.id) ownerId = o.id; } catch (_) {} }
+                }
+            } catch (_) {}
+            let joinLink = '';
+            try { joinLink = await accessLog.createTargetServerInvite(interaction.client, gid); } catch (_) { joinLink = ''; }
+            await accessLog.postAccessLog(interaction.client, 'revoked', {
+                guildName: gName, guildId: gid, joinLink, ownerId,
+                performedById: interaction.user.id, at: new Date(), reason,
+            });
+            return interaction.editReply({ content: 'Access revoked for `' + gid + '`. The server is now locked.' + extra + ' Logged in #kakuzu-access-logs.' }).catch(() => null);
         } catch (err) {
             console.warn('[accessrevoke] failed:', sharedPingDb.sanitizeError(err));
             return interaction.editReply({ content: 'Revoke failed. Check the logs and try again.' }).catch(() => null);

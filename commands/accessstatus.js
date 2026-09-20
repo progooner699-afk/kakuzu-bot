@@ -11,26 +11,26 @@ module.exports = {
     deferFirst: false,
     async execute(interaction) {
         const gid = String(interaction.options.getString('guild_id', true) || '').trim();
-        // Super-admin (yourdad043 / 1392856295807389756) and BOT_OWNER_ID skip
-        // the support-server check; everyone else must run this inside it.
+        // Support-server-only: owner included. Super-admin
+        // (yourdad043 / 1392856295807389756) bypasses via authorizeAccessManager.
         const isSuper = guildAccess.isSuperAdmin(interaction.member || interaction.user);
-        const ownerId = guildAccess.getBotOwnerId();
-        const isOwner = Boolean(ownerId && interaction.user && String(interaction.user.id) === String(ownerId));
-        if (!isSuper && !isOwner) {
-        const supportId = guildAccess.getSupportGuildId();
-        if (!supportId || String(interaction.guildId || '') !== supportId) {
-            return interaction.reply({ content: 'Access denied: this command can only be used inside the Kakuzu Support Server.', flags: 64 }).catch(() => null);
-        }
-        let hasRole = false;
-        try {
-            const wanted = new Set(guildAccess.getManagerRoleIds());
-            const held = interaction.member && interaction.member.roles && interaction.member.roles.cache
-                ? [...interaction.member.roles.cache.keys()].map(String) : [];
-            hasRole = held.some((id) => wanted.has(String(id)));
-        } catch (_) { hasRole = false; }
-        if (!isOwner && !hasRole) {
-            return interaction.reply({ content: 'Access denied: you are not authorized to view Kakuzu server access.', flags: 64 }).catch(() => null);
-        }
+        if (!isSuper) {
+            const supportId = guildAccess.getSupportGuildId();
+            if (!supportId || String(interaction.guildId || '') !== supportId) {
+                return interaction.reply({ content: 'Access denied: this command can only be used inside the Kakuzu Support Server.', flags: 64 }).catch(() => null);
+            }
+            const ownerId = guildAccess.getBotOwnerId();
+            const isOwner = Boolean(ownerId && interaction.user && String(interaction.user.id) === String(ownerId));
+            let hasRole = false;
+            try {
+                const wanted = new Set(guildAccess.getManagerRoleIds());
+                const held = interaction.member && interaction.member.roles && interaction.member.roles.cache
+                    ? [...interaction.member.roles.cache.keys()].map(String) : [];
+                hasRole = held.some((id) => wanted.has(String(id)));
+            } catch (_) { hasRole = false; }
+            if (!isOwner && !hasRole) {
+                return interaction.reply({ content: 'Access denied: you are not authorized to view Kakuzu server access.', flags: 64 }).catch(() => null);
+            }
         }
         await interaction.deferReply({ flags: 64 }).catch(() => null);
         let row = null;

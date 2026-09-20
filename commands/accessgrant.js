@@ -1,6 +1,7 @@
 'use strict';
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const guildAccess = require('../handlers/guildAccess');
+const accessLog = require('../handlers/accessLog');
 const sharedPingDb = require('../handlers/sharedPingDb');
 
 module.exports = {
@@ -40,18 +41,18 @@ module.exports = {
                 await guildAccess.editOnboardingMessage(interaction.client, gid, () =>
                     guildAccess.buildGrantedEmbed({ guildName: gName, guildId: gid, grantedAt: row.grantedAt || new Date() }));
             } catch (e) { console.warn('[accessgrant] onboarding edit failed:', (e && e.message) || e); }
+            let ownerId = row.ownerId;
+            let gName = targetGuild.name;
+            try {
+                const full = await interaction.client.guilds.fetch(gid).catch(() => null);
+                if (full) {
+                    if (full.name) gName = full.name;
+                    try { const o = await full.fetchOwner(); if (o && o.id) ownerId = o.id; } catch (_) {}
+                }
+            } catch (_) {}
             let dmNote = '';
             if (!granted.alreadyGranted) {
                 try {
-                    let ownerId = row.ownerId;
-                    let gName = targetGuild.name;
-                    try {
-                        const full = await interaction.client.guilds.fetch(gid);
-                        if (full) {
-                            if (full.name) gName = full.name;
-                            try { const o = await full.fetchOwner(); if (o && o.id) ownerId = o.id; } catch (_) {}
-                        }
-                    } catch (_) {}
                     const ownerUser = ownerId ? await interaction.client.users.fetch(String(ownerId)).catch(() => null) : null;
                     if (ownerUser) {
                         await ownerUser.send(guildAccess.buildOwnerDmPayload({
@@ -70,7 +71,14 @@ module.exports = {
             } else {
                 dmNote = ' Already granted — no duplicate owner DM sent.';
             }
-            return interaction.editReply({ content: 'Access granted for **' + targetGuild.name + '** (`' + gid + '`).' + dmNote }).catch(() => null);
+            // Public audit log in #kakuzu-access-logs (never ephemeral).
+            let joinLink = '';
+            try { joinLink = await accessLog.createTargetServerInvite(interaction.client, gid); } catch (_) { joinLink = ''; }
+            await accessLog.postAccessLog(interaction.client, 'granted', {
+                guildName: gName, guildId: gid, joinLink, ownerId,
+                performedById: interaction.user.id, at: row.grantedAt || new Date(),
+            });
+            return interaction.editReply({ content: 'Access granted for **' + targetGuild.name + '** (`' + gid + '`).' + dmNote + ' Logged in #kakuzu-access-logs.' }).catch(() => null);
         } catch (err) {
             console.warn('[accessgrant] failed:', sharedPingDb.sanitizeError(err));
             return interaction.editReply({ content: 'Grant failed. Check the logs and try again.' }).catch(() => null);
