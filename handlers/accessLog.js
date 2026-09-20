@@ -18,7 +18,7 @@ const ACCESS_LOG_V2_FLAGS = MessageFlags.IsComponentsV2;
 
 function getAccessLogChannelId() { return String(process.env.ACCESS_LOG_CHANNEL_ID || '').trim(); }
 function v2Text(c) { return new TextDisplayBuilder().setContent(String(c).slice(0, 4000)).toJSON(); }
-function v2Sep() { return new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small).toJSON(); }
+function v2Sep() { return new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large).toJSON(); }
 function fmtStamp(d) {
     try {
         const dt = d instanceof Date ? d : new Date(d || Date.now());
@@ -26,12 +26,23 @@ function fmtStamp(d) {
         return '<t:' + s + ':F> • <t:' + s + ':R>';
     } catch (_) { return String(d || 'Unknown'); }
 }
+function fmtStampFull(d) {
+    try {
+        const dt = d instanceof Date ? d : new Date(d || Date.now());
+        return '<t:' + Math.floor(dt.getTime() / 1000) + ':F>';
+    } catch (_) { return String(d || 'Unknown'); }
+}
+function fmtStampRel(d) {
+    try {
+        const dt = d instanceof Date ? d : new Date(d || Date.now());
+        return '<t:' + Math.floor(dt.getTime() / 1000) + ':R>';
+    } catch (_) { return String(d || 'Unknown'); }
+}
 
 function buildAccessLogV2Payload(kind, o) {
     const data = o || {};
     const revoked = String(kind || '') === 'revoked';
-    const dot = revoked ? '🔴' : '🟢';
-    const title = revoked ? '# 🔴 KAKUZU ACCESS REVOKED' : '# 🟢 KAKUZU ACCESS GRANTED';
+    const title = revoked ? '## 🔴 KAKUZU ACCESS REVOKED' : '## 🟢 KAKUZU ACCESS GRANTED';
     const gName = String(data.guildName || 'Unknown server');
     const gid = String(data.guildId || 'unknown');
     const link = String(data.joinLink || '');
@@ -40,18 +51,21 @@ function buildAccessLogV2Payload(kind, o) {
     const ownLine = own ? '<@' + own + '>' : '`Unknown`';
     const by = String(data.performedById || '');
     const byLine = by ? '<@' + by + '>' : '`Unknown`';
+    const verb = revoked ? 'lost' : 'granted';
     const head = revoked
-        ? title + '\n\n❌ **' + gName + '** has lost **Kakuzu Premium**'
-        : title + '\n\n✅ **' + gName + '** has unlocked **Kakuzu Premium**';
-    const actionWord = revoked ? 'Revoked' : 'Activated';
-    const statusLine = revoked ? '🔴 **Status:** Inactive' : '🟢 **Status:** Active';
-    const reason = (!revoked || !data.reason) ? '' : '\n📝 **Reason:** ' + String(data.reason).slice(0, 300);
+        ? title + '\n\n**❌ Premium authorization revoked**\n\n> **' + gName + '** has lost **Kakuzu Premium**.\n> Premium systems are now disabled inside that server.'
+        : title + '\n\n**✅ Premium authorization completed successfully**\n\n> **' + gName + '** has been verified and approved to use **Kakuzu Premium**.\n> Premium systems are now available inside the authorized server.';
+    const stampFull = fmtStampFull(data.at);
+    const stampRel = fmtStampRel(data.at);
+    const reason = (!revoked || !data.reason) ? '' : '\n> 📝 **Reason:** ' + String(data.reason).slice(0, 300);
     const sections = [
         head,
-        '## 🏰 SERVER DETAILS\n\n🏷️ **Server:** ' + gName + '\n🆔 **Server ID:** `' + gid + '`\n🔗 **Join:** ' + joinLine,
-        '## 👑 OWNERSHIP\n\n👤 **Owner:** ' + ownLine,
-        '## 🛡️ ACCESS RECORD\n\n📅 **' + actionWord + ':** ' + fmtStamp(data.at) + '\n🛡️ **' + (revoked ? 'Revoked' : 'Granted') + ' by:** ' + byLine + '\n💎 **Plan:** Kakuzu Premium\n' + statusLine + reason,
-        '-# 🔒 Premium access is authorized only for this server.',
+        '### 🏰 SERVER DETAILS\n\n> 🏷️ **Server Name:** ' + gName + '\n> 🆔 **Server ID:** `' + gid + '`\n> 🔗 **Server Invite:** ' + joinLine,
+        '### 👑 SERVER OWNERSHIP\n\n> 👤 **Server Owner:** ' + ownLine + '\n> 🛡️ **Ownership Status:** Confirmed\n> 🔒 **Authorization Scope:** This server only',
+        '### 💎 PREMIUM ACCESS\n\n> 💠 **Access Plan:** Kakuzu Premium\n> ' + (revoked ? '🔴 **Current Status:** Inactive' : '🟢 **Current Status:** Active') + '\n> ♾️ **Access Duration:** Active until revoked\n> ⚙️ **Premium Systems:** ' + (revoked ? 'Disabled' : 'Fully enabled') + '\n> 🔐 **Guild Protection:** Bound to the authorized Server ID',
+        '### 🛡️ ACCESS RECORD\n\n> 👮 **' + (revoked ? 'Revoked' : 'Granted') + ' By:** ' + byLine + '\n> 📅 **' + (revoked ? 'Revocation' : 'Activation') + ' Date:** ' + stampFull + '\n> ⏱️ **' + (revoked ? 'Revoked' : 'Activated') + ':** ' + stampRel + '\n> ✅ **Authorization Check:** Verified' + reason,
+        '### 📜 ACCESS INFORMATION\n\n> Kakuzu Premium access is permanently linked to the Server ID shown above.\n> It cannot be used in another server without separate authorization.\n> Revoking access will immediately disable all premium systems.',
+        '-# 🔒 Secured by Kakuzu Guild Access Control\n-# Unauthorized servers cannot access Kakuzu Premium.',
     ];
     const content = [];
     sections.forEach((b) => { content.push(v2Text(b)); content.push(v2Sep()); });
@@ -71,14 +85,18 @@ function buildAccessLogFallbackEmbed(kind, o) {
     const by = String(data.performedById || '');
     const e = new EmbedBuilder()
         .setTitle(revoked ? '🔴 KAKUZU ACCESS REVOKED' : '🟢 KAKUZU ACCESS GRANTED')
-        .setDescription((revoked ? '❌ **' : '✅ **') + gName + '** has ' + (revoked ? 'lost' : 'unlocked') + ' **Kakuzu Premium**');
+        .setDescription(revoked ? '**❌ Premium authorization revoked**' : '**✅ Premium authorization completed successfully**');
+    const stampFull = fmtStampFull(data.at);
+    const stampRel = fmtStampRel(data.at);
     e.addFields(
-        { name: '🏰 SERVER DETAILS', value: '🏷️ **Server:** ' + gName + '\n🆔 **Server ID:** `' + gid + '`\n🔗 **Join:** ' + (link ? '[Join ' + gName + '](' + link + ')' : '`No invite available`'), inline: false },
-        { name: '👑 OWNERSHIP', value: '👤 **Owner:** ' + (own ? '<@' + own + '>' : '`Unknown`'), inline: false },
-        { name: '🛡️ ACCESS RECORD', value: '📅 **' + (revoked ? 'Revoked' : 'Activated') + ':** ' + fmtStamp(data.at) + '\n🛡️ **' + (revoked ? 'Revoked' : 'Granted') + ' by:** ' + (by ? '<@' + by + '>' : '`Unknown`') + '\n💎 **Plan:** Kakuzu Premium\n' + (revoked ? '🔴 **Status:** Inactive' : '🟢 **Status:** Active') + ((!revoked || !data.reason) ? '' : '\n📝 **Reason:** ' + String(data.reason).slice(0, 300)), inline: false },
+        { name: '🏰 SERVER DETAILS', value: '> 🏷️ **Server Name:** ' + gName + '\n> 🆔 **Server ID:** `' + gid + '`\n> 🔗 **Server Invite:** ' + (link ? '[Join ' + gName + '](' + link + ')' : '`No invite available`'), inline: false },
+        { name: '👑 SERVER OWNERSHIP', value: '> 👤 **Server Owner:** ' + (own ? '<@' + own + '>' : '`Unknown`') + '\n> 🛡️ **Ownership Status:** Confirmed\n> 🔒 **Authorization Scope:** This server only', inline: false },
+        { name: '💎 PREMIUM ACCESS', value: '> 💠 **Access Plan:** Kakuzu Premium\n> ' + (revoked ? '🔴 **Current Status:** Inactive' : '🟢 **Current Status:** Active') + '\n> ♾️ **Access Duration:** Active until revoked\n> ⚙️ **Premium Systems:** ' + (revoked ? 'Disabled' : 'Fully enabled') + '\n> 🔐 **Guild Protection:** Bound to the authorized Server ID', inline: false },
+        { name: '🛡️ ACCESS RECORD', value: '> 👮 **' + (revoked ? 'Revoked' : 'Granted') + ' By:** ' + (by ? '<@' + by + '>' : '`Unknown`') + '\n> 📅 **' + (revoked ? 'Revocation' : 'Activation') + ' Date:** ' + stampFull + '\n> ⏱️ **' + (revoked ? 'Revoked' : 'Activated') + ':** ' + stampRel + '\n> ✅ **Authorization Check:** Verified' + ((!revoked || !data.reason) ? '' : '\n> 📝 **Reason:** ' + String(data.reason).slice(0, 300)), inline: false },
+        { name: '📜 ACCESS INFORMATION', value: '> Kakuzu Premium access is permanently linked to the Server ID shown above.\n> It cannot be used in another server without separate authorization.\n> Revoking access will immediately disable all premium systems.', inline: false },
     );
     e.setColor(revoked ? ACCESS_LOG_REVOKED_COLOR : ACCESS_LOG_GRANTED_COLOR);
-    e.setFooter({ text: '🔒 Premium access is authorized only for this server.' });
+    e.setFooter({ text: '🔒 Secured by Kakuzu Guild Access Control • Unauthorized servers cannot access Kakuzu Premium.' });
     e.setTimestamp(data.at instanceof Date ? data.at : new Date());
     return { embeds: [e], allowedMentions: { parse: [] } };
 }
