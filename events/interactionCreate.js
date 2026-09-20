@@ -19,6 +19,11 @@ const verificationDb = require("../handlers/verificationDb");
 const { formatRobloxProfileValue } = require("../handlers/verificationHelpers");
 const sharedPingDb = require("../handlers/sharedPingDb");
 const { withTimeout, fetchWithTimeout } = require("../handlers/fetchTimeout");
+const guildAccess = require("../handlers/guildAccess");
+// Commands that bypass the normal per-guild premium-access guard so support
+// moderators can manage access from the support server. They still enforce
+// their own support-server + role + password checks.
+const ACCESS_MANAGEMENT_COMMANDS = new Set(['accessgrant', 'accessrevoke', 'accessstatus']);
 // Bound for Supabase ping-config reads on the raid path: a slow/down DB must
 // degrade to "no ping", never stall the raid past Discord's 3s ack window.
 const PING_DB_TIMEOUT_MS = 3500;
@@ -961,6 +966,33 @@ module.exports = {
         };
         console.log(`[interaction] start ${cmdLabel} guild=${(interaction.guild && interaction.guild.id) || 'dm'} user=${(interaction.user && interaction.user.id) || '?'}`);
         try {
+        // GLOBAL PREMIUM-ACCESS GUARD: locked guilds (pending/revoked/missing
+        // row/DB failure) may use NOTHING except access-management commands
+        // (own support-server + role + password checks). Supabase authoritative.
+        if (interaction.guildId && !(typeof interaction.isAutocomplete === 'function' && interaction.isAutocomplete())) {
+            const slashName = (typeof interaction.isChatInputCommand === 'function' && interaction.isChatInputCommand()) ? interaction.commandName : null;
+            const bypassesGuard = slashName && ACCESS_MANAGEMENT_COMMANDS.has(slashName);
+            if (!bypassesGuard) {
+                let granted = false;
+                try {
+                    granted = await guildAccess.isGuildGranted(interaction.guildId);
+                } catch (guardErr) {
+                    console.warn('[access-guard] check failed (fail-closed):', (guardErr && guardErr.message) || guardErr);
+                    granted = false;
+                }
+                if (!granted) {
+                    const locked = guildAccess.buildLockedReply();
+                    try {
+                        if (interaction.deferred || interaction.replied) {
+                            await interaction.editReply(locked).catch(() => null);
+                        } else {
+                            await interaction.reply(locked).catch(() => null);
+                        }
+                    } catch (_) { /* guard must never throw */ }
+                    return;
+                }
+            }
+        }
         if (interaction.isChatInputCommand()) {
             const command = interaction.client.commands.get(interaction.commandName);
             // Never silently swallow a command: a bare `return` here makes Discord

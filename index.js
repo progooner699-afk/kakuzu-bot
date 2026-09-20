@@ -46,17 +46,34 @@ console.log(`📦 Loaded ${client.commands.size} slash command(s).`);
 
 const eventsPath = path.join(__dirname, 'events');
 const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith('.js'));
+const registeredEvents = [];
 for (const file of eventFiles) {
     const event = require(path.join(eventsPath, file));
-    if (event.once) {
-        client.once(event.name, (...args) => {
-            event.execute(...args, client).catch(error => console.error(`Event ${event.name} error:`, error));
-        });
-    } else {
-        client.on(event.name, (...args) => {
-            event.execute(...args, client).catch(error => console.error(`Event ${event.name} error:`, error));
-        });
-    }
+    const register = event.once ? client.once.bind(client) : client.on.bind(client);
+    register(event.name, (...args) => {
+        event.execute(...args, client).catch(error => console.error(`Event ${event.name} error:`, error));
+    });
+    registeredEvents.push(event.name);
+}
+console.log(`🔌 Registered ${registeredEvents.length} event listener(s): ${registeredEvents.join(', ')}`);
+
+// PREMIUM-ACCESS WIRING PROOF (fail loudly, never silently):
+// The fail-closed access guard lives in events/interactionCreate.js and the
+// `kakuzu-access` onboarding channel is created by events/guildCreate.js. If a
+// listener is missing (renamed file / broken export) the premium-access system
+// would keep "looking" healthy while enforcing nothing — so verify at startup.
+const REQUIRED_LISTENERS = ['interactionCreate', 'guildCreate', 'guildDelete', 'clientReady'];
+const missingListeners = REQUIRED_LISTENERS.filter(name => !registeredEvents.includes(name));
+if (missingListeners.length > 0) {
+    console.error(`❌ Premium-access wiring INCOMPLETE — missing event listener(s): ${missingListeners.join(', ')}`);
+} else {
+    console.log('🔒 Premium-access wired: interactionCreate (fail-closed guild guard) + guildCreate (kakuzu-access onboarding).');
+}
+// Exactly ONE interactionCreate listener may exist — a second handler would
+// run without the guard and could execute commands in locked guilds.
+const interactionHandlerCount = registeredEvents.filter(name => name === 'interactionCreate').length;
+if (interactionHandlerCount !== 1) {
+    console.error(`❌ Expected exactly 1 interactionCreate handler, found ${interactionHandlerCount} — the access guard may be bypassed.`);
 }
 
 raidStateManager.ensureDataFiles();

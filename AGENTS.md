@@ -32,6 +32,64 @@
 * **Config/Secrets:** `config.json` (clientId), `.env` (`DISCORD_TOKEN`,
   optional `DATABASE_URL` for the shared Postgres ping config below).
   `.env` is git-ignored; `config.json` is committed.
+* **Premium server access (Supabase-authoritative):** `handlers/guildAccess.js`
+  + migration `migrations/001_kakuzu_guild_access.sql`
+  (`kakuzu_guilds` + `kakuzu_access_events`). `guildCreate` upserts join info
+  (preserving `access_status`) and posts one `kakuzu-access` onboarding embed
+  for locked guilds only; `guildDelete` sets `bot_present=false` without
+  revoking. A fail-closed global guard in `events/interactionCreate.js` locks
+  every slash/component/modal interaction in non-granted guilds
+  (`/accessgrant`, `/accessrevoke`, `/accessstatus` bypass with their own
+  support-server + role + password checks). 60s TTL cache, invalidated on
+  grant/revoke. New env: `BOT_OWNER_ID`, `SUPPORT_GUILD_ID`,
+  `ACCESS_MANAGER_ROLE_IDS`, `ACCESS_GRANT_PASSWORD`, `KAKUZU_SUPPORT_URL`,
+  `SUPABASE_DASHBOARD_URL` (optional public Supabase project link for embeds — never
+  credentials; `DATABASE_URL` stays the secret connection string and is never shown).
+* **Premium access — live wiring & guard behaviour (verified):**
+  * **Event-loader proof:** `index.js` loads EVERY `events/*.js`, registers it by
+    exported `name`, then logs the registered listeners and *fails loudly* if any
+    of `interactionCreate` / `guildCreate` / `guildDelete` / `clientReady` is
+    missing, and errors if there is more than one `interactionCreate` listener
+    (a second handler would bypass the guard). Verified live: listeners =
+    `guildCreate, guildDelete, guildMemberAdd, interactionCreate, clientReady`,
+    `interactionCreate` count = **1**.
+  * **Fail-closed guard (BLOCKS EVERYTHING):** the guard in
+    `events/interactionCreate.js` (~line 969) runs BEFORE any slash / button /
+    select / modal handler. It blocks when the guild is `pending`, `revoked`,
+    **has no Supabase row**, or the **DB read fails** — and it checks the *guild*,
+    never the caller, so **`BOT_OWNER_ID` is blocked too** until that guild is
+    granted. Autocomplete is exempt (it executes nothing). Slash commands stay
+    visible but never run.
+  * **Exact locked reply** (`buildLockedReply`, ephemeral `flags: 64`):
+    `"🔒 This server has not been granted access to Kakuzu. Join the Kakuzu
+    Support Server and create a ticket to request access."`
+  * **Bypass:** only `accessgrant` / `accessrevoke` / `accessstatus`
+    (`ACCESS_MANAGEMENT_COMMANDS`), and each re-checks the support server +
+    owner/manager role + password via `authorizeAccessManager`.
+  * **Channel creation (`guildCreate` → `handleGuildJoin`):** upserts the guild
+    as `pending` (preserving `access_status` on re-invite), registers commands,
+    then `ensureOnboardingForLockedGuild` creates `kakuzu-access`, sends the
+    premium-access embed with the support-server link, and stores the
+    channel/message IDs. **Never duplicates** — `resolveExistingOnboardingChannel`
+    reuses a stored ID or any channel already named `kakuzu-access`.
+  * **Permissions:** `botHasOnboardingPerms` requires Manage Channels + View
+    Channel + Send Messages + Embed Links. When **Manage Channels is missing**
+    the bot DM's the owner a dedicated `buildMissingPermsDm` embed
+    ("🔒 Kakuzu Needs Permission to Join Your Server") explaining that Kakuzu is
+    locked and needs Manage Channels to create its `kakuzu-access` channel
+    (`botMissingManageChannels` helper). Fallbacks: system channel → owner DM.
+  * **Ready reconciliation:** `ready.js` runs `reconcileGuildsOnReady` (logs
+    `checked`/`repaired` counts) which repairs the onboarding channel for locked
+    guilds already in the bot **without resetting granted guilds**.
+* **Premium access tests (`test/guild-access.test.js`, 19 tests):** unit tests
+  for the password gate / cache / embeds / locked reply / missing-perms DM, plus
+  **real event-handler integration tests** that call `events/guildCreate.execute`
+  (asserting the `kakuzu-access` channel is created) and
+  `events/interactionCreate.execute` with a mock interaction, asserting a normal
+  command **does not execute** in an unauthorized guild, **does** execute in a
+  granted guild, and is blocked for `BOT_OWNER_ID`. Supabase is faked in-memory
+  (`sharedPingDb.runPoolQuery` swap) so tests are hermetic and never touch
+  production data.
 
 ## 🐘 SHARED POSTGRES — RAID PING CONFIGURATION (`/pingsetup` <-> bot)
 

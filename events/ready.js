@@ -37,6 +37,17 @@ module.exports = {
     async execute(client) {
         console.log(`${client.user.tag} is online!`);
 
+        // Permanent premium-access tables (idempotent; never DROP/reset).
+        // Fire-and-forget so a slow DB never delays command registration.
+        try {
+            const guildAccess = require('../handlers/guildAccess');
+            guildAccess.ensureAccessTables().then((ok) => {
+                if (ok) console.log('[guildAccess] access tables ready.');
+            }).catch((err) => console.warn('[guildAccess] table init failed:', (err && err.message) || err));
+        } catch (err) {
+            console.warn('[guildAccess] table init failed:', (err && err.message) || err);
+        }
+
         // Register this bot's slash commands into every guild it is already a member of.
         // Doing this on startup means commands appear INSTANTLY in all current servers
         // (no manual deploy needed, and no global-command propagation delay).
@@ -105,6 +116,21 @@ module.exports = {
         // Pre-initialize verification databases (sql.js wasm) so on-demand DB
         // queries during interaction handling do not hit the 3-second Discord
         // interaction timeout on first access.
+        // Premium-access reconciliation: NEVER resets status, NEVER recreates
+        // channels for every server — only upserts name/owner (preserving
+        // access_status) and repairs missing onboarding for locked guilds.
+        try {
+            const guildAccess = require('../handlers/guildAccess');
+            guildAccess.reconcileGuildsOnReady(client).then((result) => {
+                const checked = (result && result.checked) || 0;
+                const repaired = (result && result.repaired) || 0;
+                console.log(`[guildAccess] premium-access reconcile complete: ${checked} guild(s) checked, ${repaired} locked guild(s) repaired.`);
+            }).catch((err) => {
+                console.warn('[guildAccess] ready reconcile failed:', (err && err.message) || err);
+            });
+        } catch (err) {
+            console.warn('[guildAccess] ready reconcile failed:', (err && err.message) || err);
+        }
         setTimeout(async () => {
             try {
                 const verificationDb = require('../handlers/verificationDb');
