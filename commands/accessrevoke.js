@@ -8,13 +8,13 @@ module.exports = {
         .setName('accessrevoke')
         .setDescription('Revoke Kakuzu premium access for a server (support-server moderators only).')
         .addStringOption((o) => o.setName('guild_id').setDescription('Target Discord server ID.').setRequired(true))
-        .addStringOption((o) => o.setName('password').setDescription('Access management password.').setRequired(true))
+        .addStringOption((o) => o.setName('password').setDescription('Access management password (not needed for super-admin).').setRequired(false))
         .addStringOption((o) => o.setName('reason').setDescription('Optional reason.').setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
     deferFirst: false,
     async execute(interaction) {
         const gid = String(interaction.options.getString('guild_id', true) || '').trim();
-        const password = String(interaction.options.getString('password', true) || '');
+        const password = String(interaction.options.getString('password', false) || '');
         const reason = interaction.options.getString('reason', false);
         const auth = guildAccess.authorizeAccessManager(interaction.member, interaction.guildId, password);
         if (!auth.ok) {

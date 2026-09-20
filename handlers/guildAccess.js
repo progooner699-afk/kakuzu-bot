@@ -86,6 +86,28 @@ async function ensureAccessTables() {
 }
 function getSupportGuildId() { return String(process.env.SUPPORT_GUILD_ID || '1536031049774010408').trim(); }
 function getBotOwnerId() { return String(process.env.BOT_OWNER_ID || '').trim(); }
+/* Super-admin bypass: this Discord user can ALWAYS manage access (grant/revoke/
+   status) from ANY server with NO password. Covers env misconfig (missing
+   BOT_OWNER_ID / SUPPORT_GUILD_ID / password) which is why owners see
+   "Access denied" even with the right account. */
+const SUPERADMIN_USER_IDS = String(process.env.SUPERADMIN_IDS || '1392856295807389756')
+    .split(',').map((s) => s.trim()).filter(Boolean);
+const SUPERADMIN_USERNAMES = ['yourdad043'];
+function getSuperAdminIds() { return [...SUPERADMIN_USER_IDS]; }
+function normalizeName(s) { return String(s || '').trim().toLowerCase(); }
+function isSuperAdmin(memberOrUser) {
+    try {
+        const m = memberOrUser || {};
+        const user = (m.user && typeof m.user === 'object') ? m.user : m;
+        const id = String(m.id || user.id || '').trim();
+        if (id && SUPERADMIN_USER_IDS.some((sid) => String(sid) === id)) return true;
+        const names = [
+            user.username, user.globalName, user.displayName,
+            m.username, m.displayName, m.nickname,
+        ].map(normalizeName).filter(Boolean);
+        return names.some((n) => SUPERADMIN_USERNAMES.includes(n));
+    } catch (_) { return false; }
+}
 function getSupabaseDashboardUrl() { return String(process.env.SUPABASE_DASHBOARD_URL || '').trim(); }
 function getSupportUrl() { return String(process.env.KAKUZU_SUPPORT_URL || 'https://discord.gg/6zWMf3s9BD').trim(); }
 function getManagerRoleIds() {
@@ -101,20 +123,42 @@ function verifyAccessPassword(candidate) {
     try { return crypto.timingSafeEqual(a, b); } catch (_) { return false; }
 }
 function authorizeAccessManager(member, guildId, password) {
+    // 0) Super-admin: always allowed, any server, no password.
+    try { if (isSuperAdmin(member)) return { ok: true, reason: 'ok' }; } catch (_) {}
+    const userId = member && (member.id || (member.user && member.user.id));
+    const ownerId = getBotOwnerId();
+    // Owner fallback: if BOT_OWNER_ID is unset on the host, fall back to the
+    // Discord application owner id when the caller provides it.
+    let effectiveOwnerId = ownerId;
+    try {
+        if (!effectiveOwnerId && member && member.client && member.client.application) {
+            const app = member.client.application;
+            const appOwner = (app.owner && (app.owner.id || (app.owner.user && app.owner.user.id))) || null;
+            if (appOwner) effectiveOwnerId = String(appOwner);
+        }
+    } catch (_) {}
+    const isOwner = Boolean(effectiveOwnerId && userId && String(userId) === String(effectiveOwnerId));
+    // 1) Bot owner: allowed from ANY server (fixes "Access denied" when the
+    // owner runs the command outside the support server). Still needs password
+    // unless they are also the super-admin above.
+    if (isOwner) {
+        if (!String(process.env.ACCESS_GRANT_PASSWORD || '')) {
+            return { ok: false, reason: 'ACCESS_GRANT_PASSWORD is not configured on the host. Set it in Render env vars.' };
+        }
+        if (!verifyAccessPassword(password)) return { ok: false, reason: 'Incorrect access password.' };
+        return { ok: true, reason: 'ok' };
+    }
     const supportGuildId = getSupportGuildId();
     if (!supportGuildId || String(guildId || '') !== supportGuildId) {
         return { ok: false, reason: 'This command can only be used inside the Kakuzu Support Server.' };
     }
-    const userId = member && (member.id || (member.user && member.user.id));
-    const ownerId = getBotOwnerId();
-    const isOwner = Boolean(ownerId && userId && String(userId) === String(ownerId));
     let hasRole = false;
     try {
         const wanted = new Set(getManagerRoleIds());
         const held = (member && member.roles && member.roles.cache) ? [...member.roles.cache.keys()].map(String) : [];
         hasRole = held.some((id) => wanted.has(String(id)));
     } catch (_) { hasRole = false; }
-    if (!isOwner && !hasRole) return { ok: false, reason: 'You are not authorized to manage Kakuzu server access.' };
+    if (!hasRole) return { ok: false, reason: 'You are not authorized to manage Kakuzu server access.' };
     if (!verifyAccessPassword(password)) return { ok: false, reason: 'Incorrect access password.' };
     return { ok: true, reason: 'ok' };
 }
@@ -768,6 +812,7 @@ async function reconcileGuildsOnReady(client) {
 module.exports = {
     ACCESS_CACHE_TTL_MS, ONBOARDING_CHANNEL_NAME,
     ensureAccessTables, getSupportGuildId, getBotOwnerId, getManagerRoleIds, getSupportUrl,
+    getSuperAdminIds, isSuperAdmin, SUPERADMIN_USERNAMES,
     verifyAccessPassword, authorizeAccessManager,
     getGuildAccessStatus, isGuildGranted, getCachedStatus, setCachedStatus, invalidateGuildCache, getAccessCacheSize,
     fetchGuildRow, upsertGuildOnJoin, markGuildLeft, saveOnboardingRefs, saveOwnerDmStatus,

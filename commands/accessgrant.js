@@ -8,12 +8,12 @@ module.exports = {
         .setName('accessgrant')
         .setDescription('Grant Kakuzu premium access to a server (support-server moderators only).')
         .addStringOption((o) => o.setName('guild_id').setDescription('Target Discord server ID.').setRequired(true))
-        .addStringOption((o) => o.setName('password').setDescription('Access management password.').setRequired(true))
+        .addStringOption((o) => o.setName('password').setDescription('Access management password (not needed for super-admin).').setRequired(false))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
     deferFirst: false,
     async execute(interaction) {
         const gid = String(interaction.options.getString('guild_id', true) || '').trim();
-        const password = String(interaction.options.getString('password', true) || '');
+        const password = String(interaction.options.getString('password', false) || '');
         const auth = guildAccess.authorizeAccessManager(interaction.member, interaction.guildId, password);
         if (!auth.ok) {
             return interaction.reply({ content: 'Access denied: ' + auth.reason, flags: 64 }).catch(() => null);
