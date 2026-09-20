@@ -19,11 +19,11 @@ const ACCESS_LOG_V2_FLAGS = MessageFlags.IsComponentsV2;
 function getAccessLogChannelId() { return String(process.env.ACCESS_LOG_CHANNEL_ID || '').trim(); }
 function v2Text(c) { return new TextDisplayBuilder().setContent(String(c).slice(0, 4000)).toJSON(); }
 function v2Sep() { return new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small).toJSON(); }
-function fmtDate(d) {
+function fmtStamp(d) {
     try {
         const dt = d instanceof Date ? d : new Date(d || Date.now());
         const s = Math.floor(dt.getTime() / 1000);
-        return '<t:' + s + ':F> (<t:' + s + ':R>)';
+        return '<t:' + s + ':F> • <t:' + s + ':R>';
     } catch (_) { return String(d || 'Unknown'); }
 }
 
@@ -31,23 +31,27 @@ function buildAccessLogV2Payload(kind, o) {
     const data = o || {};
     const revoked = String(kind || '') === 'revoked';
     const dot = revoked ? '🔴' : '🟢';
-    const title = revoked ? '🔴 KAKUZU ACCESS REVOKED' : '🟢 KAKUZU ACCESS GRANTED';
+    const title = revoked ? '# 🔴 KAKUZU ACCESS REVOKED' : '# 🟢 KAKUZU ACCESS GRANTED';
     const gName = String(data.guildName || 'Unknown server');
     const gid = String(data.guildId || 'unknown');
     const link = String(data.joinLink || '');
-    const inv = link ? '[Click to join `' + gName + '`](' + link + ')' : '`No invite available`';
+    const joinLine = link ? '[Join ' + gName + '](' + link + ')' : '`No invite available`';
     const own = String(data.ownerId || '');
-    const ownLine = own ? '<@' + own + '> (`' + own + '`)' : '`Unknown`';
+    const ownLine = own ? '<@' + own + '>' : '`Unknown`';
     const by = String(data.performedById || '');
-    const byLine = by ? '<@' + by + '> (`' + by + '`)' : '`Unknown`';
-    const reason = (!revoked || !data.reason) ? '' : '\n> 📝 **Reason:** ' + String(data.reason).slice(0, 300);
-    const verb = revoked ? 'lost' : 'unlocked';
-    const action = revoked ? 'Revoked' : 'Granted';
+    const byLine = by ? '<@' + by + '>' : '`Unknown`';
+    const head = revoked
+        ? title + '\n\n❌ **' + gName + '** has lost **Kakuzu Premium**'
+        : title + '\n\n✅ **' + gName + '** has unlocked **Kakuzu Premium**';
+    const actionWord = revoked ? 'Revoked' : 'Activated';
+    const statusLine = revoked ? '🔴 **Status:** Inactive' : '🟢 **Status:** Active';
+    const reason = (!revoked || !data.reason) ? '' : '\n📝 **Reason:** ' + String(data.reason).slice(0, 300);
     const sections = [
-        '# ' + title + '\n-# ✅ **' + gName + '** ' + verb + ' Kakuzu premium',
-        '## ' + dot + '  Server Details\n> 🏰 **Server:** **' + gName + '**\n> 🆔 **Server ID:** `' + gid + '`\n> 🔗 **Join link:** ' + inv,
-        '## ' + dot + '  Ownership\n> 👑 **Owner:** ' + ownLine,
-        '## ' + dot + '  Access Record\n> 📅 **Date:** ' + fmtDate(data.at) + '\n> 🛡️ **' + action + ' by:** ' + byLine + reason,
+        head,
+        '## 🏰 SERVER DETAILS\n\n🏷️ **Server:** ' + gName + '\n🆔 **Server ID:** `' + gid + '`\n🔗 **Join:** ' + joinLine,
+        '## 👑 OWNERSHIP\n\n👤 **Owner:** ' + ownLine,
+        '## 🛡️ ACCESS RECORD\n\n📅 **' + actionWord + ':** ' + fmtStamp(data.at) + '\n🛡️ **' + (revoked ? 'Revoked' : 'Granted') + ' by:** ' + byLine + '\n💎 **Plan:** Kakuzu Premium\n' + statusLine + reason,
+        '-# 🔒 Premium access is authorized only for this server.',
     ];
     const content = [];
     sections.forEach((b) => { content.push(v2Text(b)); content.push(v2Sep()); });
@@ -65,17 +69,16 @@ function buildAccessLogFallbackEmbed(kind, o) {
     const link = String(data.joinLink || '');
     const own = String(data.ownerId || '');
     const by = String(data.performedById || '');
-    const dot = revoked ? '🔴' : '🟢';
     const e = new EmbedBuilder()
         .setTitle(revoked ? '🔴 KAKUZU ACCESS REVOKED' : '🟢 KAKUZU ACCESS GRANTED')
-        .setDescription('✅ **' + gName + '** ' + (revoked ? 'lost' : 'unlocked') + ' Kakuzu premium');
+        .setDescription((revoked ? '❌ **' : '✅ **') + gName + '** has ' + (revoked ? 'lost' : 'unlocked') + ' **Kakuzu Premium**');
     e.addFields(
-        { name: dot + ' Server Details', value: '> 🏰 **Server:** **' + gName + '**\n> 🆔 **Server ID:** `' + gid + '`\n> 🔗 **Join link:** ' + (link || '`No invite available`'), inline: false },
-        { name: dot + ' Ownership', value: '> 👑 **Owner:** ' + (own ? '<@' + own + '> (`' + own + '`)' : '`Unknown`'), inline: false },
-        { name: dot + ' Access Record', value: '> 📅 **Date:** ' + fmtDate(data.at) + '\n> 🛡️ **' + (revoked ? 'Revoked' : 'Granted') + ' by:** ' + (by ? '<@' + by + '> (`' + by + '`)' : '`Unknown`') + ((!revoked || !data.reason) ? '' : '\n> 📝 **Reason:** ' + String(data.reason).slice(0, 300)), inline: false },
+        { name: '🏰 SERVER DETAILS', value: '🏷️ **Server:** ' + gName + '\n🆔 **Server ID:** `' + gid + '`\n🔗 **Join:** ' + (link ? '[Join ' + gName + '](' + link + ')' : '`No invite available`'), inline: false },
+        { name: '👑 OWNERSHIP', value: '👤 **Owner:** ' + (own ? '<@' + own + '>' : '`Unknown`'), inline: false },
+        { name: '🛡️ ACCESS RECORD', value: '📅 **' + (revoked ? 'Revoked' : 'Activated') + ':** ' + fmtStamp(data.at) + '\n🛡️ **' + (revoked ? 'Revoked' : 'Granted') + ' by:** ' + (by ? '<@' + by + '>' : '`Unknown`') + '\n💎 **Plan:** Kakuzu Premium\n' + (revoked ? '🔴 **Status:** Inactive' : '🟢 **Status:** Active') + ((!revoked || !data.reason) ? '' : '\n📝 **Reason:** ' + String(data.reason).slice(0, 300)), inline: false },
     );
     e.setColor(revoked ? ACCESS_LOG_REVOKED_COLOR : ACCESS_LOG_GRANTED_COLOR);
-    e.setFooter({ text: 'Kakuzu Premium Access Logs' });
+    e.setFooter({ text: '🔒 Premium access is authorized only for this server.' });
     e.setTimestamp(data.at instanceof Date ? data.at : new Date());
     return { embeds: [e], allowedMentions: { parse: [] } };
 }
