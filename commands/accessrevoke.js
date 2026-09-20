@@ -29,8 +29,7 @@ module.exports = {
                 return interaction.editReply({ content: 'Revoke failed: `' + String((err && err.message) || err).slice(0, 300) + '`' }).catch(() => null);
             }
             try {
-                await guildAccess.editOnboardingMessage(interaction.client, gid, (stored) =>
-                    guildAccess.buildRevokedEmbed({ guildName: (stored && stored.guildName) || 'Unknown', guildId: gid }));
+                await guildAccess.editOnboardingMessage(interaction.client, gid, 'revoked', { guildId: gid, revokedAt: new Date() });
             } catch (e) { console.warn('[accessrevoke] onboarding edit failed:', (e && e.message) || e); }
             const extra = reason ? ' Reason: ' + String(reason).slice(0, 300) : '';
             return interaction.editReply({ content: 'Access revoked for `' + gid + '`. The server is now locked.' + extra }).catch(() => null);

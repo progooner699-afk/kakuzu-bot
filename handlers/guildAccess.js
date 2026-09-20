@@ -21,6 +21,11 @@ const {
     ButtonStyle,
     ChannelType,
     PermissionsBitField,
+    ContainerBuilder,
+    TextDisplayBuilder,
+    SeparatorBuilder,
+    SeparatorSpacingSize,
+    MessageFlags,
 } = require('discord.js');
 const sharedPingDb = require('./sharedPingDb');
 const { withTimeout } = require('./fetchTimeout');
@@ -79,10 +84,10 @@ async function ensureAccessTables() {
     })();
     return tablesReadyPromise;
 }
-function getSupportGuildId() { return String(process.env.SUPPORT_GUILD_ID || '').trim(); }
+function getSupportGuildId() { return String(process.env.SUPPORT_GUILD_ID || '1536031049774010408').trim(); }
 function getBotOwnerId() { return String(process.env.BOT_OWNER_ID || '').trim(); }
 function getSupabaseDashboardUrl() { return String(process.env.SUPABASE_DASHBOARD_URL || '').trim(); }
-function getSupportUrl() { return String(process.env.KAKUZU_SUPPORT_URL || '').trim(); }
+function getSupportUrl() { return String(process.env.KAKUZU_SUPPORT_URL || 'https://discord.gg/6zWMf3s9BD').trim(); }
 function getManagerRoleIds() {
     return String(process.env.ACCESS_MANAGER_ROLE_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
 }
@@ -248,13 +253,25 @@ function supportLinkRow() {
         new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Join Kakuzu Support').setURL(url));
 }
 function buildPendingEmbed(o) {
+    const url = getSupportUrl();
+    const supportId = getSupportGuildId();
+    const stepsQ = [
+        '> **1. Join the Kakuzu Support Server**' + (url ? ' -- ' + url : ''),
+        '> **2. Open a ticket** (ticket / support channel) in the support server.',
+        '> **3. Send the moderator your Server ID** (see the copy-paste box below).',
+        '> **4. A Kakuzu moderator runs /accessgrant** for your server.',
+        '> **5. Come back here** -- commands unlock automatically once granted.',
+    ];
+    const steps = stepsQ.join(NL);
     const e = new EmbedBuilder()
         .setTitle('🔒 Kakuzu Premium Access Required')
-        .setDescription('Kakuzu is a private premium bot. This server has not been authorized yet, so its commands and features are currently locked.')
+        .setDescription('Kakuzu is a **private premium bot**. This server has not been authorized yet, so every command and feature is currently locked.' + NL2 +
+            'Nothing is broken — your server simply needs access granted **once** by a Kakuzu moderator.')
         .addFields(filterFields(
-            { name: 'How to get access', value: 'Join the Kakuzu Support Server, create a ticket and ask a moderator to grant Kakuzu access to your server.' },
-            { name: 'Server information', value: 'Server: ' + (o.guildName || 'Unknown') + '\nServer ID: ' + o.guildId + '\nOwner: <@' + (o.ownerId || 'unknown') + '>' },
-            { name: 'Important', value: 'Give the Server ID shown above to the support moderator. Access only needs to be granted once and will remain active after bot updates and redeployments.' },
+            { name: '🎟️ How to get access', value: steps },
+            { name: '📌 Server information', value: 'Server: ' + (o.guildName || 'Unknown') + NL + 'Server ID: `' + o.guildId + '`' + NL + 'Owner: <@' + (o.ownerId || 'unknown') + '>' },
+            { name: '🆘 Support server', value: (url ? url + NL : '') + (supportId ? 'Support Server ID: `' + supportId + '`' : 'Ask a Kakuzu moderator for an invite.') },
+            { name: '⚡ Important', value: 'Access is granted once per server and survives bot updates and redeployments.' + NL + '**Never share the Kakuzu access password with anyone.**' },
             supabaseField()))
         .setColor(PENDING_COLOR)
         .setFooter({ text: 'Kakuzu • Premium Server Access' })
@@ -290,6 +307,176 @@ function buildRevokedEmbed(o) {
     const row = supportLinkRow();
     return { embeds: [e], components: row ? [row] : [] };
 }
+/* ------------------------------------------------------------------ *
+ * Components V2 access card (the kakuzu-access channel message)
+ * ------------------------------------------------------------------ *
+ * The message in `kakuzu-access` is a NATIVE Components V2 card: a Container
+ * (type 17) with an accent colour bar, TextDisplay (type 10) sections split by
+ * native Separator (type 14) dividers, quote-bar (`> `) detail rows, and a
+ * Link button to the Kakuzu Support Server. Components V2 DISABLES the classic
+ * embed on the same message, so every edit of a V2 card MUST keep passing
+ * ACCESS_V2_FLAGS. Components V2 is a gated Discord feature: if Discord rejects
+ * the V2 payload, callers fall back to the classic embed builders above.
+ */
+const ACCESS_V2_FLAGS = 1 << 15;                       // MessageFlags.IsComponentsV2
+const NL = String.fromCharCode(10);
+const NL2 = NL + NL;
+const ACCESS_CARD_KINDS = ['pending', 'granted', 'revoked'];
+
+function v2Text(content) { return new TextDisplayBuilder().setContent(content).toJSON(); }
+function v2Separator() {
+    // divider:true is what actually draws the horizontal line (type 14).
+    return new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small).toJSON();
+}
+function supportButtonRow() {
+    const url = getSupportUrl();
+    if (!url) return null;
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Join Kakuzu Support Server').setURL(url));
+}
+/** Quote-bar'd support-server details, reused by every card. */
+function supportServerQuoteLines() {
+    const url = getSupportUrl();
+    const id = getSupportGuildId();
+    return [
+        '> **Support Server:** ' + (url ? url : 'Ask a Kakuzu moderator for an invite.'),
+        '> **Support Server ID:** `' + (id || 'unset') + '`'
+    ].join(NL);
+}
+
+function pendingCardSections(o) {
+    const gid = String(o.guildId || 'unknown');
+    const gname = o.guildName || 'Unknown';
+    const owner = o.ownerId ? '<@' + o.ownerId + '>' : 'Unknown';
+    return [
+        '### 🔒 KAKUZU PREMIUM ACCESS REQUIRED' + NL +
+        '> **Server:** ' + gname + NL +
+        '> **Server ID:** `' + gid + '`' + NL +
+        '> **Owner:** ' + owner + NL +
+        '> **Status:** `🔴 NOT GRANTED`',
+
+        '### 📋 WHAT IS THIS?' + NL2 +
+        'Kakuzu is a **private premium bot**. This server has not been authorized yet, so every slash command, button and feature is currently **locked**.' + NL2 +
+        'Nothing is broken — your server simply needs access granted once by a Kakuzu moderator.',
+
+        '### 🎟️ HOW TO GET ACCESS' + NL2 +
+        '> **Step 1** — Join the Kakuzu Support Server (link below, button at the bottom).' + NL +
+        '> **Step 2** — Open a **ticket** in the support server.' + NL +
+        '> **Step 3** — Copy the **Server ID** shown above and send it to the moderator.' + NL +
+        '> **Step 4** — A Kakuzu moderator reviews the request and grants access.' + NL +
+        '> **Step 5** — Kakuzu unlocks **automatically** — you never need to re-invite the bot.',
+
+        '### 📌 WHERE TO SEND YOUR REQUEST' + NL2 +
+        supportServerQuoteLines() + NL +
+        '> **Server Name:** ' + gname + NL +
+        '> **Server ID:** `' + gid + '`' + NL +
+        '> **Ticket Contact:** ' + owner,
+
+        '### ✨ HOW TO FIND YOUR SERVER ID' + NL2 +
+        '> Open **User Settings** → **Advanced** → enable **Developer Mode**.' + NL +
+        '> Right-click your server icon → **Copy Server ID**.' + NL +
+        '> Paste that ID into your support ticket.',
+
+        '### ⚡ IMPORTANT' + NL2 +
+        '> Access is granted **once** per server and is **permanent** — it survives bot updates and redeployments.' + NL +
+        '> Only authorized Kakuzu staff can grant or revoke access.' + NL +
+        '> **Never share the Kakuzu access password with anyone.**'
+    ];
+}
+
+function grantedCardSections(o) {
+    const gid = String(o.guildId || 'unknown');
+    const gname = o.guildName || 'Unknown';
+    const unix = o.grantedAt ? Math.floor(new Date(o.grantedAt).getTime() / 1000) : Math.floor(Date.now() / 1000);
+    const byLine = o.grantedBy ? '<@' + o.grantedBy + '>' : 'A Kakuzu moderator';
+    return [
+        '### ✅ KAKUZU ACCESS GRANTED' + NL +
+        '> **Server:** ' + gname + NL +
+        '> **Server ID:** `' + gid + '`' + NL +
+        '> **Status:** `🟢 GRANTED`' + NL +
+        '> **Granted:** <t:' + unix + ':F>' + NL +
+        '> **Granted By:** ' + byLine,
+
+        '### 🚀 YOU ARE ALL SET' + NL2 +
+        'Every Kakuzu command and feature is now **unlocked** in this server. No further action is required.',
+
+        '### 📌 NEXT STEPS' + NL2 +
+        '> Run `/backuppanel` to post the Roblox linking panel.' + NL +
+        '> Ask your raiders to link their Roblox account before requesting help.' + NL +
+        '> Run `/setchannels` to choose the raid-result channel.' + NL +
+        '> Run `/pingsetup` to map country / region ping roles.',
+
+        '### ℹ️ GOOD TO KNOW' + NL2 +
+        '> Access stays active across bot updates and redeployments.' + NL +
+        '> **Never share the Kakuzu access password with anyone.**' + NL +
+        supportServerQuoteLines()
+    ];
+}
+
+function revokedCardSections(o) {
+    const gid = String(o.guildId || 'unknown');
+    const gname = o.guildName || 'Unknown';
+    const unix = o.revokedAt ? Math.floor(new Date(o.revokedAt).getTime() / 1000) : Math.floor(Date.now() / 1000);
+    return [
+        '### 🔒 KAKUZU ACCESS REVOKED' + NL +
+        '> **Server:** ' + gname + NL +
+        '> **Server ID:** `' + gid + '`' + NL +
+        '> **Status:** `🟠 REVOKED`' + NL +
+        '> **Revoked:** <t:' + unix + ':F>',
+
+        '### 📋 WHAT HAPPENED?' + NL2 +
+        'Access for this server has been **revoked**, so Kakuzu\u2019s commands and features are locked again.',
+
+        '### 🎟️ HOW TO RESTORE ACCESS' + NL2 +
+        '> **Step 1** — Join the Kakuzu Support Server (link below, button at the bottom).' + NL +
+        '> **Step 2** — Create a ticket explaining that your access needs to be reviewed.' + NL +
+        '> **Step 3** — Send the **Server ID** shown above to the moderator.' + NL +
+        '> **Step 4** — A moderator re-enables access for your server.' + NL +
+        '> **Step 5** — Kakuzu unlocks **automatically**.',
+
+        '### 📌 WHERE TO SEND YOUR REQUEST' + NL2 +
+        supportServerQuoteLines()
+    ];
+}
+
+function cardSectionsFor(kind, o) {
+    if (kind === 'granted') return grantedCardSections(o);
+    if (kind === 'revoked') return revokedCardSections(o);
+    return pendingCardSections(o);
+}
+
+function accentFor(kind) {
+    if (kind === 'granted') return GRANTED_COLOR;
+    if (kind === 'revoked') return REVOKED_COLOR;
+    return PENDING_COLOR;
+}
+
+/**
+ * Native Components V2 access card (Container + TextDisplays + Separators +
+ * Link button). Returns null when Components V2 is unusable so callers can fall
+ * back to the classic embed builders.
+ */
+function buildAccessV2Payload(kind, o) {
+    const data = o || {};
+    const content = [];
+    // Every section is followed by a native Separator (type 14) so the button
+    // row below is always preceded by one too — matching the raid alert layout.
+    cardSectionsFor(kind, data).forEach((body) => { content.push(v2Text(body)); content.push(v2Separator()); });
+    const container = new ContainerBuilder().setAccentColor(accentFor(kind)).toJSON();
+    container.size = 'large';
+    container.components = content;
+    const row = supportButtonRow();
+    if (row) container.components.push(row.toJSON());
+    return { flags: ACCESS_V2_FLAGS, components: [container] };
+}
+
+/** Classic-embed fallback for the same card (no V2 support / V2 rejected). */
+function buildAccessEmbedPayload(kind, o) {
+    if (kind === 'granted') return buildGrantedEmbed(o || {});
+    if (kind === 'revoked') return buildRevokedEmbed(o || {});
+    return buildPendingEmbed(o || {});
+}
+
 function buildOwnerDmPayload(o) {
     const e = new EmbedBuilder()
         .setTitle('✅ Your Server Has Kakuzu Access')
@@ -357,12 +544,51 @@ async function resolveExistingOnboardingChannel(client, guild, storedId) {
     } catch (_) {}
     return null;
 }
+/**
+ * True when a message is one of OUR access cards. Handles BOTH formats: the
+ * classic embed card AND the native Components V2 card (V2 messages carry no
+ * embed and no content, so the TextDisplays must be scanned instead). Used to
+ * avoid ever posting a second `kakuzu-access` card.
+ */
+function isKakuzuAccessMessage(msg, client) {
+    try {
+        if (!msg || !msg.author || !client || !client.user || msg.author.id !== client.user.id) return false;
+        if (Array.isArray(msg.embeds) && msg.embeds.some((e) => ((e && e.title) || '').includes('Kakuzu'))) return true;
+        const raw = JSON.stringify(msg.components || []);
+        return /KAKUZU (PREMIUM ACCESS REQUIRED|ACCESS GRANTED|ACCESS REVOKED)/.test(raw);
+    } catch (_) { return false; }
+}
+/** True when a message was posted with the native Components V2 flag. */
+function messageIsComponentsV2(msg) {
+    try {
+        const flags = msg && msg.flags;
+        if (flags == null) return false;
+        if (typeof flags.has === 'function') {
+            const bit = (MessageFlags && MessageFlags.IsComponentsV2 != null) ? MessageFlags.IsComponentsV2 : ACCESS_V2_FLAGS;
+            return flags.has(bit);
+        }
+        const n = Number(flags);
+        return Number.isFinite(n) && (n & ACCESS_V2_FLAGS) !== 0;
+    } catch (_) { return false; }
+}
 async function ensureOnboardingForLockedGuild(client, guild, stored) {
     const gid = guild.id;
     let ownerId = (stored && stored.ownerId) || null;
     try { const o = await guild.fetchOwner(); if (o && o.id) ownerId = o.id; } catch (_) {}
     const existing = await resolveExistingOnboardingChannel(client, guild, stored && stored.onboardingChannelId);
-    const payload = buildPendingEmbed({ guildName: guild.name, guildId: gid, ownerId });
+    const cardData = { guildName: guild.name, guildId: gid, ownerId };
+    const payload = buildPendingEmbed(cardData);
+    // Prefer the native Components V2 card (Container + Separators + quote
+    // bars). V2 is a gated Discord feature, so if the send is rejected fall back
+    // to the classic embed — onboarding must never fail to post.
+    const sendCard = async (channel) => {
+        try {
+            return await channel.send(buildAccessV2Payload('pending', cardData));
+        } catch (e) {
+            console.warn('[guildAccess] V2 access card rejected — using embed fallback:', (e && e.message) || e);
+            return channel.send(payload);
+        }
+    };
     if (existing) {
         if (stored && stored.onboardingMessageId) {
             try {
@@ -373,13 +599,13 @@ async function ensureOnboardingForLockedGuild(client, guild, stored) {
             try {
                 const recent = await existing.messages.fetch({ limit: 20 }).catch(() => null);
                 if (recent) {
-                    const mine = recent.find((m) => m.author && client.user && m.author.id === client.user.id && m.embeds && m.embeds.some((e) => (e.title || '').includes('Kakuzu')));
+                    const mine = recent.find((m) => isKakuzuAccessMessage(m, client));
                     if (mine) { await saveOnboardingRefs(gid, existing.id, mine.id); return { channelId: existing.id, messageId: mine.id, created: false }; }
                 }
             } catch (_) {}
         }
         try {
-            const sent = await existing.send(payload);
+            const sent = await sendCard(existing);
             await saveOnboardingRefs(gid, existing.id, sent.id);
             return { channelId: existing.id, messageId: sent.id, created: true };
         } catch (e) {
@@ -393,7 +619,7 @@ async function ensureOnboardingForLockedGuild(client, guild, stored) {
         try {
             const created = await guild.channels.create({ name: ONBOARDING_CHANNEL_NAME, type: ChannelType.GuildText,
                 reason: ONBOARDING_REASON, topic: 'Kakuzu premium access information. Commands stay locked until access is granted.' });
-            const sent = await created.send(payload);
+            const sent = await sendCard(created);
             await saveOnboardingRefs(gid, created.id, sent.id);
             return { channelId: created.id, messageId: sent.id, created: true };
         } catch (e) { console.warn('[guildAccess] channel create failed:', (e && e.message) || e); }
@@ -402,7 +628,7 @@ async function ensureOnboardingForLockedGuild(client, guild, stored) {
     }
     try {
         if (guild.systemChannel && guild.systemChannel.isTextBased && guild.systemChannel.isTextBased()) {
-            const sent = await guild.systemChannel.send(payload);
+            const sent = await sendCard(guild.systemChannel);
             await saveOnboardingRefs(gid, guild.systemChannel.id, sent.id);
             return { channelId: guild.systemChannel.id, messageId: sent.id, created: true, fallback: 'system-channel' };
         }
@@ -427,16 +653,37 @@ async function ensureOnboardingForLockedGuild(client, guild, stored) {
     await saveOnboardingRefs(gid, (stored && stored.onboardingChannelId) || null, (stored && stored.onboardingMessageId) || null);
     return { channelId: null, messageId: null, created: false, error: 'No writable channel or DM available.' };
 }
-async function editOnboardingMessage(client, gid, buildPayload) {
+/**
+ * Rewrites the `kakuzu-access` card in place.
+ *
+ * Two call styles are supported:
+ *   editOnboardingMessage(client, gid, 'granted', { grantedAt, grantedBy })
+ *   editOnboardingMessage(client, gid, (stored) => classicEmbedPayload)   // legacy
+ *
+ * The card's EXISTING format is detected from the message flags, so a V2 card
+ * is edited as V2 (Container + Separators, keeping ACCESS_V2_FLAGS) and an embed
+ * card is edited as an embed. Mixing the two is rejected by Discord, which is
+ * exactly why the format must be preserved on every edit.
+ */
+async function editOnboardingMessage(client, gid, kindOrBuilder, data) {
+    const legacyBuilder = typeof kindOrBuilder === 'function' ? kindOrBuilder : null;
+    const kind = ACCESS_CARD_KINDS.indexOf(String(kindOrBuilder)) !== -1 ? String(kindOrBuilder) : 'pending';
     try {
         const stored = await fetchGuildRow(gid).catch(() => null);
-        const payload = buildPayload(stored || {});
+        const merged = Object.assign({ guildId: String(gid) }, (stored || {}), (data || {}));
+        const payloadFor = (isV2) => (legacyBuilder
+            ? legacyBuilder(stored || {})
+            : (isV2 ? buildAccessV2Payload(kind, merged) : buildAccessEmbedPayload(kind, merged)));
         if (stored && stored.onboardingChannelId && stored.onboardingMessageId) {
             try {
                 const ch = await client.channels.fetch(String(stored.onboardingChannelId)).catch(() => null);
                 if (ch && ch.isTextBased && ch.isTextBased()) {
                     const msg = await ch.messages.fetch(String(stored.onboardingMessageId)).catch(() => null);
-                    if (msg) { await msg.edit(payload); return { edited: true, channelId: ch.id, messageId: msg.id }; }
+                    if (msg) {
+                        const isV2 = messageIsComponentsV2(msg);
+                        await msg.edit(payloadFor(isV2));
+                        return { edited: true, channelId: ch.id, messageId: msg.id, format: isV2 ? 'v2' : 'embed' };
+                    }
                 }
             } catch (e) { console.warn('[guildAccess] onboarding edit failed:', (e && e.message) || e); }
         }
@@ -445,7 +692,17 @@ async function editOnboardingMessage(client, gid, buildPayload) {
             if (!guild) return { edited: false };
             const existing = await resolveExistingOnboardingChannel(client, guild, stored && stored.onboardingChannelId);
             if (existing) {
-                const sent = await existing.send(payload).catch(() => null);
+                // No known message id -> post a fresh card (V2 first, embed fallback).
+                let sent = null;
+                if (legacyBuilder) {
+                    sent = await existing.send(legacyBuilder(stored || {})).catch(() => null);
+                } else {
+                    try { sent = await existing.send(buildAccessV2Payload(kind, merged)); }
+                    catch (e) {
+                        console.warn('[guildAccess] V2 access card rejected on recreate — using embed:', (e && e.message) || e);
+                        sent = await existing.send(buildAccessEmbedPayload(kind, merged)).catch(() => null);
+                    }
+                }
                 if (sent) { await saveOnboardingRefs(gid, existing.id, sent.id); return { edited: false, recreated: true, channelId: existing.id, messageId: sent.id }; }
             }
         } catch (_) {}
@@ -517,6 +774,8 @@ module.exports = {
     grantGuildAccess, revokeGuildAccess, recordAccessEvent,
     buildPendingEmbed, buildGrantedEmbed, buildRevokedEmbed, buildOwnerDmPayload, buildLockedReply,
     buildMissingPermsDm, botMissingManageChannels,
+    ACCESS_V2_FLAGS, ACCESS_CARD_KINDS, buildAccessV2Payload, buildAccessEmbedPayload,
+    messageIsComponentsV2, isKakuzuAccessMessage,
     ensureOnboardingForLockedGuild, editOnboardingMessage, handleGuildJoin, handleGuildLeave, reconcileGuildsOnReady,
     getSupabaseDashboardUrl,
 };

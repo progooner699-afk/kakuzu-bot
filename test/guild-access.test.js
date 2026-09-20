@@ -179,7 +179,20 @@ test('guildJoin handler upserts a pending guild and creates the access channel',
     assert.ok(onboardResult.channelId, 'locked guild must get a channel');
     assert.ok(onboardResult.messageId, 'locked guild must get a stored message id');
     const sentPayload = mockChannel.lastSent;
-    if (sentPayload) { const embeds = sentPayload.embeds || []; assert.ok(embeds.length > 0, 'onboarding message must include an embed'); assert.match(JSON.stringify(embeds[0]), /Kakuzu Premium Access Required/); }
+    if (sentPayload) {
+        const bodies = [];
+        for (const e of (sentPayload.embeds || [])) bodies.push(JSON.stringify(e));
+        for (const top of (sentPayload.components || [])) {
+            for (const c of (top.components || [])) { if (typeof c.content === 'string') bodies.push(c.content); }
+        }
+        assert.ok(bodies.length > 0, 'onboarding message must include an embed or V2 text sections');
+        assert.match(bodies.join('\n'), /Kakuzu Premium Access Required|KAKUZU PREMIUM ACCESS REQUIRED/);
+        const bodiesJoined = bodies.join('\n');
+        const supportUrl = guildAccess.getSupportUrl();
+        const supportId = guildAccess.getSupportGuildId();
+        assert.ok(bodiesJoined.includes(supportUrl) || bodiesJoined.includes(supportId),
+            'onboarding card must carry the support invite link or support server id (got: ' + bodiesJoined.slice(0, 200) + ')');
+    }
 });
 
 test('grant flow marks pending guild as granted and updates onboarding message', async () => {
