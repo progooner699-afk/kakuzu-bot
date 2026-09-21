@@ -189,10 +189,17 @@ test('guildJoin handler upserts a pending guild and creates the access channel',
     const sentPayload = mockChannel.lastSent;
     if (sentPayload) {
         const bodies = [];
-        for (const e of (sentPayload.embeds || [])) bodies.push(JSON.stringify(e));
-        for (const top of (sentPayload.components || [])) {
-            for (const c of (top.components || [])) { if (typeof c.content === 'string') bodies.push(c.content); }
-        }
+        const collectContent = (node) => {
+            if (!node) return;
+            if (typeof node === 'string') { bodies.push(node); return; }
+            if (Array.isArray(node)) { node.forEach(collectContent); return; }
+            if (typeof node.content === 'string') bodies.push(node.content);
+            if (typeof node.description === 'string') bodies.push(node.description);
+            if (Array.isArray(node.embeds)) collectContent(node.embeds);
+            if (Array.isArray(node.components)) collectContent(node.components);
+        };
+        collectContent(sentPayload.embeds || []);
+        collectContent(sentPayload.components || []);
         assert.ok(bodies.length > 0, 'onboarding message must include an embed or V2 text sections');
         assert.match(bodies.join('\n'), /Kakuzu Premium Access Required|KAKUZU PREMIUM ACCESS REQUIRED/);
         const bodiesJoined = bodies.join('\n');

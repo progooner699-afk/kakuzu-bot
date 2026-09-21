@@ -25,6 +25,7 @@ const {
     TextDisplayBuilder,
     SeparatorBuilder,
     SeparatorSpacingSize,
+    ThumbnailBuilder,
     MessageFlags,
 } = require('discord.js');
 const sharedPingDb = require('./sharedPingDb');
@@ -301,58 +302,74 @@ function supportLinkRow() {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Join Kakuzu Support').setURL(url));
 }
+function resolveAccessLogoUrl(o) {
+    try {
+        if (o && typeof o.logoUrl === 'string' && o.logoUrl.trim()) return o.logoUrl.trim();
+        const cu = o && o.client && o.client.user;
+        if (cu && typeof cu.displayAvatarURL === 'function') {
+            const u = cu.displayAvatarURL({ size: 256 });
+            if (typeof u === 'string' && u) return u;
+        }
+    } catch (_) {}
+    return null;
+}
 function buildPendingEmbed(o) {
     const url = getSupportUrl();
     const supportId = getSupportGuildId();
-    const stepsQ = [
-        '> **1. Join the Kakuzu Support Server**' + (url ? ' -- ' + url : ''),
-        '> **2. Open a ticket** (ticket / support channel) in the support server.',
-        '> **3. Send the moderator your Server ID** (see the copy-paste box below).',
-        '> **4. A Kakuzu moderator runs /accessgrant** for your server.',
-        '> **5. Come back here** -- commands unlock automatically once granted.',
-    ];
-    const steps = stepsQ.join(NL);
+    const logo = resolveAccessLogoUrl(o);
+    const steps =
+        '**1.** Join the support server' + (url ? ' — ' + url : '') + NL +
+        '**2.** Open a ticket + send this Server ID: `' + o.guildId + '`' + NL +
+        '**3.** A moderator grants access — commands unlock automatically.';
     const e = new EmbedBuilder()
         .setTitle('🔒 Kakuzu Premium Access Required')
-        .setDescription('Kakuzu is a **private premium bot**. This server has not been authorized yet, so every command and feature is currently locked.' + NL2 +
-            'Nothing is broken — your server simply needs access granted **once** by a Kakuzu moderator.')
+        .setDescription('Kakuzu is a **private premium bot** — this server is not authorized yet, so everything is **locked**.')
         .addFields(filterFields(
             { name: '🎟️ How to get access', value: steps },
-            { name: '📌 Server information', value: 'Server: ' + (o.guildName || 'Unknown') + NL + 'Server ID: `' + o.guildId + '`' + NL + 'Owner: <@' + (o.ownerId || 'unknown') + '>' },
-            { name: '🆘 Support server', value: (url ? url + NL : '') + (supportId ? 'Support Server ID: `' + supportId + '`' : 'Ask a Kakuzu moderator for an invite.') },
-            { name: '⚡ Important', value: 'Access is granted once per server and survives bot updates and redeployments.' + NL + '**Never share the Kakuzu access password with anyone.**' },
+            { name: '📌 Server information', value: (o.guildName || 'Unknown') + ' • `' + o.guildId + '`', inline: true },
+            { name: '👑 Owner', value: '<@' + (o.ownerId || 'unknown') + '>', inline: true },
+            { name: '🆘 Support server', value: (url || 'Ask a moderator for an invite.') + (supportId ? NL + '`' + supportId + '`' : ''), inline: true },
+            { name: '📋 Copy-paste your Server ID', value: '`' + o.guildId + '`' },
+            { name: 'Getting started', value: 'Open a ticket, send the Server ID above — access unlocks automatically.', inline: true },
+            { name: '⚡ Important', value: 'Granted once per server, permanent. **Never share the access password.**' },
             supabaseField()))
         .setColor(PENDING_COLOR)
         .setFooter({ text: 'Kakuzu • Premium Server Access' })
         .setTimestamp();
+    if (logo) { e.setAuthor({ name: 'Kakuzu Premium Access', iconURL: logo }); e.setThumbnail(logo); }
     const row = supportLinkRow();
     return { embeds: [e], components: row ? [row] : [] };
 }
 function buildGrantedEmbed(o) {
     const unix = o.grantedAt ? Math.floor(new Date(o.grantedAt).getTime() / 1000) : Math.floor(Date.now() / 1000);
+    const logo = resolveAccessLogoUrl(o);
     const e = new EmbedBuilder()
         .setTitle('✅ Kakuzu Access Granted')
-        .setDescription('This server has been authorized to use Kakuzu. All available commands and features are now unlocked.')
-        .addFields(filterFields({ name: 'Server', value: (o.guildName || 'Unknown') + '\n`' + o.guildId + '`' },
-            { name: 'Access granted', value: '<t:' + unix + ':F>' },
-            { name: 'Getting started', value: 'You can now use Kakuzu\u2019s slash commands in this server.' },
+        .setDescription((o.guildName || 'This server') + ' is now **unlocked** — all Kakuzu commands and features work here.')
+        .addFields(filterFields({ name: 'Server', value: (o.guildName || 'Unknown') + ' • `' + o.guildId + '`', inline: true },
+            { name: 'Access granted', value: '<t:' + unix + ':F>', inline: true },
+            { name: 'Getting started', value: 'Run `/backuppanel` • `/setchannels` • `/pingsetup`.' },
             supabaseField()))
         .setColor(GRANTED_COLOR)
         .setFooter({ text: 'Kakuzu • Premium Access Active' })
         .setTimestamp();
+    if (logo) { e.setAuthor({ name: 'Kakuzu Premium Access', iconURL: logo }); e.setThumbnail(logo); }
     return { embeds: [e], components: [] };
 }
 function buildRevokedEmbed(o) {
+    const url = getSupportUrl();
+    const logo = resolveAccessLogoUrl(o);
     const e = new EmbedBuilder()
         .setTitle('🔒 Kakuzu Access Revoked')
-        .setDescription('Kakuzu access for this server has been revoked, so its commands and features are currently locked.\n\nJoin the Kakuzu Support Server, create a ticket and ask a moderator to review access for your server.')
+        .setDescription('Access for **' + (o.guildName || 'this server') + '** was revoked — commands are **locked** again. Join support, open a ticket and send `' + o.guildId + '` for a review.')
         .addFields(filterFields(
-            { name: 'Server information', value: 'Server: ' + (o.guildName || 'Unknown') + '\nServer ID: ' + o.guildId },
-            { name: 'Important', value: 'Give the Server ID shown above to the support moderator.' },
+            { name: '📌 Server information', value: (o.guildName || 'Unknown') + ' • `' + o.guildId + '`', inline: true },
+            { name: '🆘 Support server', value: url || 'Ask a moderator for an invite.', inline: true },
             supabaseField()))
         .setColor(REVOKED_COLOR)
         .setFooter({ text: 'Kakuzu • Premium Server Access' })
         .setTimestamp();
+    if (logo) { e.setAuthor({ name: 'Kakuzu Premium Access', iconURL: logo }); e.setThumbnail(logo); }
     const row = supportLinkRow();
     return { embeds: [e], components: row ? [row] : [] };
 }
@@ -397,39 +414,19 @@ function pendingCardSections(o) {
     const gid = String(o.guildId || 'unknown');
     const gname = o.guildName || 'Unknown';
     const owner = o.ownerId ? '<@' + o.ownerId + '>' : 'Unknown';
+    const url = getSupportUrl();
     return [
         '### 🔒 KAKUZU PREMIUM ACCESS REQUIRED' + NL +
-        '> **Server:** ' + gname + NL +
-        '> **Server ID:** `' + gid + '`' + NL +
-        '> **Owner:** ' + owner + NL +
-        '> **Status:** `🔴 NOT GRANTED`',
-
-        '### 📋 WHAT IS THIS?' + NL2 +
-        'Kakuzu is a **private premium bot**. This server has not been authorized yet, so every slash command, button and feature is currently **locked**.' + NL2 +
-        'Nothing is broken — your server simply needs access granted once by a Kakuzu moderator.',
+        '> **Server:** ' + gname + ' • `' + gid + '` • ' + owner + ' • `🔴 NOT GRANTED`',
 
         '### 🎟️ HOW TO GET ACCESS' + NL2 +
-        '> **Step 1** — Join the Kakuzu Support Server (link below, button at the bottom).' + NL +
-        '> **Step 2** — Open a **ticket** in the support server.' + NL +
-        '> **Step 3** — Copy the **Server ID** shown above and send it to the moderator.' + NL +
-        '> **Step 4** — A Kakuzu moderator reviews the request and grants access.' + NL +
-        '> **Step 5** — Kakuzu unlocks **automatically** — you never need to re-invite the bot.',
+        '> **1.** Join the support server' + (url ? ' — ' + url : '') + NL +
+        '> **2.** Open a **ticket** + send Server ID `' + gid + '`' + NL +
+        '> **3.** A moderator grants access — Kakuzu unlocks **automatically**.',
 
         '### 📌 WHERE TO SEND YOUR REQUEST' + NL2 +
         supportServerQuoteLines() + NL +
-        '> **Server Name:** ' + gname + NL +
-        '> **Server ID:** `' + gid + '`' + NL +
-        '> **Ticket Contact:** ' + owner,
-
-        '### ✨ HOW TO FIND YOUR SERVER ID' + NL2 +
-        '> Open **User Settings** → **Advanced** → enable **Developer Mode**.' + NL +
-        '> Right-click your server icon → **Copy Server ID**.' + NL +
-        '> Paste that ID into your support ticket.',
-
-        '### ⚡ IMPORTANT' + NL2 +
-        '> Access is granted **once** per server and is **permanent** — it survives bot updates and redeployments.' + NL +
-        '> Only authorized Kakuzu staff can grant or revoke access.' + NL +
-        '> **Never share the Kakuzu access password with anyone.**'
+        '> Enable **Developer Mode** → right-click server → **Copy Server ID** → paste it in your ticket.'
     ];
 }
 
@@ -440,25 +437,10 @@ function grantedCardSections(o) {
     const byLine = o.grantedBy ? '<@' + o.grantedBy + '>' : 'A Kakuzu moderator';
     return [
         '### ✅ KAKUZU ACCESS GRANTED' + NL +
-        '> **Server:** ' + gname + NL +
-        '> **Server ID:** `' + gid + '`' + NL +
-        '> **Status:** `🟢 GRANTED`' + NL +
-        '> **Granted:** <t:' + unix + ':F>' + NL +
-        '> **Granted By:** ' + byLine,
+        '> **Server:** ' + gname + ' • `' + gid + '` • `🟢 GRANTED` • <t:' + unix + ':F> • ' + byLine,
 
-        '### 🚀 YOU ARE ALL SET' + NL2 +
-        'Every Kakuzu command and feature is now **unlocked** in this server. No further action is required.',
-
-        '### 📌 NEXT STEPS' + NL2 +
-        '> Run `/backuppanel` to post the Roblox linking panel.' + NL +
-        '> Ask your raiders to link their Roblox account before requesting help.' + NL +
-        '> Run `/setchannels` to choose the raid-result channel.' + NL +
-        '> Run `/pingsetup` to map country / region ping roles.',
-
-        '### ℹ️ GOOD TO KNOW' + NL2 +
-        '> Access stays active across bot updates and redeployments.' + NL +
-        '> **Never share the Kakuzu access password with anyone.**' + NL +
-        supportServerQuoteLines()
+        '### 🚀 NEXT STEPS' + NL2 +
+        '> Run `/backuppanel` • `/setchannels` • `/pingsetup` — everything is **unlocked** now.'
     ];
 }
 
@@ -468,22 +450,10 @@ function revokedCardSections(o) {
     const unix = o.revokedAt ? Math.floor(new Date(o.revokedAt).getTime() / 1000) : Math.floor(Date.now() / 1000);
     return [
         '### 🔒 KAKUZU ACCESS REVOKED' + NL +
-        '> **Server:** ' + gname + NL +
-        '> **Server ID:** `' + gid + '`' + NL +
-        '> **Status:** `🟠 REVOKED`' + NL +
-        '> **Revoked:** <t:' + unix + ':F>',
-
-        '### 📋 WHAT HAPPENED?' + NL2 +
-        'Access for this server has been **revoked**, so Kakuzu\u2019s commands and features are locked again.',
+        '> **Server:** ' + gname + ' • `' + gid + '` • `🟠 REVOKED` • <t:' + unix + ':F>',
 
         '### 🎟️ HOW TO RESTORE ACCESS' + NL2 +
-        '> **Step 1** — Join the Kakuzu Support Server (link below, button at the bottom).' + NL +
-        '> **Step 2** — Create a ticket explaining that your access needs to be reviewed.' + NL +
-        '> **Step 3** — Send the **Server ID** shown above to the moderator.' + NL +
-        '> **Step 4** — A moderator re-enables access for your server.' + NL +
-        '> **Step 5** — Kakuzu unlocks **automatically**.',
-
-        '### 📌 WHERE TO SEND YOUR REQUEST' + NL2 +
+        '> Join support → open a **ticket** → send Server ID `' + gid + '` — a moderator re-enables it.' + NL2 +
         supportServerQuoteLines()
     ];
 }
@@ -500,6 +470,18 @@ function accentFor(kind) {
     return PENDING_COLOR;
 }
 
+function v2SectionWithLogo(body, logoUrl) {
+    try {
+        if (logoUrl) {
+            const { SectionBuilder } = require('discord.js');
+            return new SectionBuilder()
+                .setThumbnailAccessory(new ThumbnailBuilder().setURL(logoUrl))
+                .addTextDisplayComponents(new TextDisplayBuilder().setContent(body))
+                .toJSON();
+        }
+    } catch (_) {}
+    return v2Text(body);
+}
 /**
  * Native Components V2 access card (Container + TextDisplays + Separators +
  * Link button). Returns null when Components V2 is unusable so callers can fall
@@ -507,10 +489,14 @@ function accentFor(kind) {
  */
 function buildAccessV2Payload(kind, o) {
     const data = o || {};
+    const logo = resolveAccessLogoUrl(data);
+    const sections = cardSectionsFor(kind, data);
     const content = [];
-    // Every section is followed by a native Separator (type 14) so the button
-    // row below is always preceded by one too — matching the raid alert layout.
-    cardSectionsFor(kind, data).forEach((body) => { content.push(v2Text(body)); content.push(v2Separator()); });
+    // Header (first section) rides in a wide Section with the Kakuzu logo at
+    // the side, so the card reads wider instead of tall. Every section is
+    // followed by a native Separator (type 14) so the button row below is
+    // always preceded by one too — matching the raid alert layout.
+    sections.forEach((body, idx) => { content.push(idx === 0 ? v2SectionWithLogo(body, logo) : v2Text(body)); content.push(v2Separator()); });
     const container = new ContainerBuilder().setAccentColor(accentFor(kind)).toJSON();
     container.size = 'large';
     container.components = content;
@@ -625,7 +611,8 @@ async function ensureOnboardingForLockedGuild(client, guild, stored) {
     let ownerId = (stored && stored.ownerId) || null;
     try { const o = await guild.fetchOwner(); if (o && o.id) ownerId = o.id; } catch (_) {}
     const existing = await resolveExistingOnboardingChannel(client, guild, stored && stored.onboardingChannelId);
-    const cardData = { guildName: guild.name, guildId: gid, ownerId };
+    const logoCtx = client ? { client } : {};
+    const cardData = { guildName: guild.name, guildId: gid, ownerId, client, logoUrl: resolveAccessLogoUrl(logoCtx) };
     const payload = buildPendingEmbed(cardData);
     // Prefer the native Components V2 card (Container + Separators + quote
     // bars). V2 is a gated Discord feature, so if the send is rejected fall back
@@ -719,7 +706,7 @@ async function editOnboardingMessage(client, gid, kindOrBuilder, data) {
     const kind = ACCESS_CARD_KINDS.indexOf(String(kindOrBuilder)) !== -1 ? String(kindOrBuilder) : 'pending';
     try {
         const stored = await fetchGuildRow(gid).catch(() => null);
-        const merged = Object.assign({ guildId: String(gid) }, (stored || {}), (data || {}));
+        const merged = Object.assign({ guildId: String(gid), client, logoUrl: resolveAccessLogoUrl(client ? { client } : {}) }, (stored || {}), (data || {}));
         const payloadFor = (isV2) => (legacyBuilder
             ? legacyBuilder(stored || {})
             : (isV2 ? buildAccessV2Payload(kind, merged) : buildAccessEmbedPayload(kind, merged)));

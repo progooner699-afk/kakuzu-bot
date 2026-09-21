@@ -38,8 +38,7 @@ module.exports = {
             try {
                 let gName = targetGuild.name;
                 try { const full = await interaction.client.guilds.fetch(gid); if (full && full.name) gName = full.name; } catch (_) {}
-                await guildAccess.editOnboardingMessage(interaction.client, gid, () =>
-                    guildAccess.buildGrantedEmbed({ guildName: gName, guildId: gid, grantedAt: row.grantedAt || new Date() }));
+                await guildAccess.editOnboardingMessage(interaction.client, gid, 'granted', { guildName: gName, grantedAt: row.grantedAt || new Date() });
             } catch (e) { console.warn('[accessgrant] onboarding edit failed:', (e && e.message) || e); }
             let ownerId = row.ownerId;
             let gName = targetGuild.name;
