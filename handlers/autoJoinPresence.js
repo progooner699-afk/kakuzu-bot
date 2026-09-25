@@ -15,7 +15,7 @@
  * No-op when ROBLOX_API_KEY is unset (same behavior as pollHelperPresences).
  */
 const raidStateManager = require('./raidStateManager');
-const verificationDb = require('./verificationDb');
+const robloxLinks = require('./robloxLinks');
 const raidV2 = require('./raidV2');
 
 // Roblox presence API caps the userIds array; stay safely under the limit.
@@ -36,11 +36,13 @@ async function pollAutoJoin(client, guildId) {
     if (openRaids.length === 0) return;
 
     // Linked users who could potentially be auto-added.
+    // GLOBAL links (Supabase) are authoritative so a link from any guild
+    // applies here; the per-guild legacy DB is a fallback mirror only.
     let linked;
     try {
-        linked = await verificationDb.getAllVerifiedUsers(guildId);
+        linked = await robloxLinks.getAllGlobalLinksForAutoJoin(guildId);
     } catch (err) {
-        console.warn('[auto-join] verification DB read failed:', (err && err.message) || err);
+        console.warn('[auto-join] global link read failed:', (err && err.message) || err);
         return;
     }
     if (!linked || linked.length === 0) return;

@@ -16,6 +16,7 @@ const raidV2 = require("../handlers/raidV2");
 const raidResultCard = require("../handlers/raidResultCard");
 const robloxApi = require("../handlers/robloxApi");
 const verificationDb = require("../handlers/verificationDb");
+const robloxLinks = require("../handlers/robloxLinks");
 const { formatRobloxProfileValue } = require("../handlers/verificationHelpers");
 const sharedPingDb = require("../handlers/sharedPingDb");
 const { withTimeout, fetchWithTimeout } = require("../handlers/fetchTimeout");
@@ -1082,8 +1083,20 @@ module.exports = {
         if (interaction.customId === "request_raid" || interaction.customId === "request_backup") {
             await interaction.deferReply({ flags: 64 }).catch(() => null);
 
-            const verificationData = await verificationDb.getVerificationData(interaction.user.id, interaction.guild.id);
-            const isVerified = Boolean(verificationData?.is_verified && verificationData?.roblox_user_id);
+            // GLOBAL link lookup: discord_user_id -> Roblox account (no guild_id).
+            const globalRes = await robloxLinks.getGlobalRobloxLink(interaction.user.id).catch(() => null);
+            if (globalRes && !globalRes.ok) {
+                return interaction.editReply({
+                    content: 'Kakuzu cannot check your Roblox link right now because the database is temporarily unavailable. Please try again shortly.',
+                    flags: 64
+                }).catch(() => null);
+            }
+            const globalData = globalRes && globalRes.ok ? globalRes.link : null;
+            // Legacy per-guild row stays as a fallback mirror for links that
+            // predate the global table (until the one-time migration imports them).
+            const legacyData = globalData ? null : await verificationDb.getVerificationData(interaction.user.id, interaction.guild.id);
+            const verificationData = globalData || legacyData;
+            const isVerified = Boolean(verificationData && (verificationData.verified || verificationData.is_verified) && verificationData.roblox_user_id);
             if (!isVerified) {
                 return interaction.editReply({
                     content: buildUnverifiedMessage(interaction.guild.id),
@@ -1286,9 +1299,12 @@ module.exports = {
                 });
             }
 
-            // Check if already verified
-            const existing = await verificationDb.getVerificationData(interaction.user.id, guildId);
-            if (existing && existing.is_verified) {
+            // Check if already verified — GLOBAL link first, per-guild legacy row
+            // as a fallback so older links keep working until migrated.
+            const globalExisting = await robloxLinks.getGlobalRobloxLink(interaction.user.id).catch(() => null);
+            const globalLink = globalExisting && globalExisting.ok ? globalExisting.link : null;
+            const existing = globalLink || await verificationDb.getVerificationData(interaction.user.id, guildId);
+            if (existing && (existing.is_verified || existing.verified)) {
                 const linkedName = existing.roblox_display_name || existing.roblox_username || 'your account';
                 const linkedUsername = existing.roblox_username || '';
                 const linkedUserId = existing.roblox_user_id || '';
@@ -1335,7 +1351,29 @@ module.exports = {
             const robloxAvatarUrl = validation.avatarUrl;
             const profileLink = `https://www.roblox.com/users/${robloxUserId}/profile`;
 
-            // Save the verification
+            // Save the GLOBAL permanent link (Supabase) first — this is the
+            // source of truth every guild reads. Keep the per-guild legacy row
+            // as a fallback mirror so old guild-scoped checks keep working.
+            try {
+                await robloxLinks.saveGlobalRobloxLink(interaction.user.id, {
+                    robloxUserId,
+                    robloxUsername,
+                    robloxDisplayName,
+                    robloxAvatarUrl,
+                });
+            } catch (err) {
+                if (err && err.code === 'ROBLOX_ALREADY_LINKED') {
+                    return interaction.reply({
+                        content: 'This Roblox account is already linked to another Discord account. Unlink it from the original account before trying again.',
+                        flags: 64
+                    }).catch(() => null);
+                }
+                console.warn('[link] global save failed, keeping legacy write:', (err && err.message) || err);
+                return interaction.reply({
+                    content: 'Kakuzu cannot check your Roblox link right now because the database is temporarily unavailable. Please try again shortly.',
+                    flags: 64
+                }).catch(() => null);
+            }
             await verificationDb.directLink(interaction.user.id, {
                 robloxUsername,
                 robloxDisplayName,
@@ -1364,8 +1402,9 @@ module.exports = {
             await interaction.reply({ embeds: [successEmbed], flags: 64 });
         }
 
-        // Handle unlink roblox button click — remove the linked account so the
-        // user can reset and relink a different Roblox account.
+        // Handle unlink roblox button click — GLOBAL unlink: the link belongs to
+        // the Discord user, not the server, so removing it here removes it
+        // everywhere. The per-guild legacy row is cleared too as a mirror.
         if (interaction.customId === "unlink_roblox") {
             const guildId = interaction.guild?.id;
             if (!guildId) {
@@ -1375,8 +1414,16 @@ module.exports = {
                 }).catch(() => null);
             }
 
-            const existing = await verificationDb.getVerificationData(interaction.user.id, guildId);
-            if (!existing || !existing.is_verified) {
+            const globalFound = await robloxLinks.getGlobalRobloxLink(interaction.user.id).catch(() => null);
+            if (globalFound && !globalFound.ok) {
+                return interaction.reply({
+                    content: 'Kakuzu cannot check your Roblox link right now because the database is temporarily unavailable. Please try again shortly.',
+                    flags: 64
+                }).catch(() => null);
+            }
+            const globalExisting = globalFound && globalFound.ok ? globalFound.link : null;
+            const existing = globalExisting || await verificationDb.getVerificationData(interaction.user.id, guildId);
+            if (!existing || !(existing.is_verified || existing.verified)) {
                 return interaction.reply({
                     embeds: [new EmbedBuilder()
                         .setTitle('No Linked Account')
@@ -1390,6 +1437,15 @@ module.exports = {
             const unlinkedName = existing.roblox_display_name || existing.roblox_username || 'your account';
             const unlinkedAvatar = existing.roblox_avatar_url || interaction.client.user.displayAvatarURL({ size: 64 });
 
+            // Global unlink first (applies across every Kakuzu server).
+            try {
+                await robloxLinks.removeGlobalRobloxLink(interaction.user.id);
+            } catch (err) {
+                return interaction.reply({
+                    content: 'Kakuzu cannot check your Roblox link right now because the database is temporarily unavailable. Please try again shortly.',
+                    flags: 64
+                }).catch(() => null);
+            }
             await verificationDb.unlinkRoblox(interaction.user.id, guildId);
 
             return interaction.reply({
@@ -1449,7 +1505,12 @@ module.exports = {
             pendingGameThumbnails.delete(userId);
             pendingCountryCodes.delete(userId);
 
-            const verificationData = await verificationDb.getVerificationData(userId, interaction.guild.id);
+            // Requester identity comes from the GLOBAL link (same service as the
+            // request gate above), so a user linked in Server A can call a raid
+            // in Server B. Legacy per-guild row is only a fallback mirror.
+            const globalLinkRes = await robloxLinks.getGlobalRobloxLink(userId).catch(() => null);
+            const globalLinkData = globalLinkRes && globalLinkRes.ok ? globalLinkRes.link : null;
+            const verificationData = globalLinkData || await verificationDb.getVerificationData(userId, interaction.guild.id);
             const robloxUsername = verificationData?.roblox_username || 'Unknown';
             const robloxDisplayName = verificationData?.roblox_display_name || robloxUsername;
             const robloxUserId = verificationData?.roblox_user_id || "1";
@@ -1592,9 +1653,25 @@ module.exports = {
                 await interaction.reply({ content: '⚠️ This raid is already full (' + limit + '/' + limit + ' helpers).', flags: 64 }).catch(() => null);
                 return;
             }
+            // GLOBAL link lookup (same shared service as raid requests): a link
+            // made in any Kakuzu server works here. DB outage -> temporary
+            // message, never "not linked"; cached data is never deleted.
             let vdata = null;
-            try { vdata = await verificationDb.getVerificationData(interaction.user.id, guildId); } catch (e) { /* ignore */ }
-            const isLinked = vdata && vdata.is_verified && vdata.roblox_user_id && String(vdata.roblox_user_id) !== '1';
+            try {
+                const found = await robloxLinks.getGlobalRobloxLink(interaction.user.id);
+                if (!found.ok) {
+                    await interaction.reply({ content: 'Kakuzu cannot check your Roblox link right now because the database is temporarily unavailable. Please try again shortly.', flags: 64 }).catch(() => null);
+                    return;
+                }
+                vdata = found.link;
+                if (!vdata) {
+                    try { vdata = await verificationDb.getVerificationData(interaction.user.id, guildId); } catch (e) { /* ignore */ }
+                }
+            } catch (e) {
+                await interaction.reply({ content: 'Kakuzu cannot check your Roblox link right now because the database is temporarily unavailable. Please try again shortly.', flags: 64 }).catch(() => null);
+                return;
+            }
+            const isLinked = vdata && (vdata.is_verified || vdata.verified) && vdata.roblox_user_id && String(vdata.roblox_user_id) !== '1';
             if (!isLinked) {
                 const settings = raidStateManager.loadSettings(guildId);
                 const channelId = settings && settings.verificationChannel;
@@ -1893,6 +1970,24 @@ module.exports = {
             const robloxValidation = await robloxApi.validateAndGetAvatar(helperUsername);
             if (!robloxValidation.success) {
                 await interaction.editReply({ content: `❌ **Roblox Username Validation Failed**\n${robloxValidation.error}`, flags: 64 }).catch(() => null);
+                return;
+            }
+            // Helpers use the SAME global link service as requesters: joining
+            // via the accept modal links the Discord user globally (verified),
+            // so they never have to link again in another server.
+            try {
+                await robloxLinks.saveGlobalRobloxLink(interaction.user.id, {
+                    robloxUserId: robloxValidation.userId || "1",
+                    robloxUsername: helperUsername,
+                    robloxDisplayName: robloxValidation.displayName || helperUsername,
+                    robloxAvatarUrl: robloxValidation.avatarUrl || null,
+                });
+            } catch (err) {
+                if (err && err.code === 'ROBLOX_ALREADY_LINKED') {
+                    await interaction.editReply({ content: 'This Roblox account is already linked to another Discord account. Unlink it from the original account before trying again.', flags: 64 }).catch(() => null);
+                    return;
+                }
+                await interaction.editReply({ content: 'Kakuzu cannot check your Roblox link right now because the database is temporarily unavailable. Please try again shortly.', flags: 64 }).catch(() => null);
                 return;
             }
             await verificationDb.directLink(interaction.user.id, {

@@ -48,6 +48,15 @@ module.exports = {
             console.warn('[guildAccess] table init failed:', (err && err.message) || err);
         }
 
+        // Permanent GLOBAL Roblox links table (idempotent; never DROP/reset/
+        // delete rows, never inserts empty rows). Same fire-and-forget pattern.
+        try {
+            const robloxLinks = require('../handlers/robloxLinks');
+            robloxLinks.initializeAtStartup().catch((err) => console.warn('[robloxLinks] table init failed:', (err && err.message) || err));
+        } catch (err) {
+            console.warn('[robloxLinks] table init failed:', (err && err.message) || err);
+        }
+
         // Register this bot's slash commands into every guild it is already a member of.
         // Doing this on startup means commands appear INSTANTLY in all current servers
         // (no manual deploy needed, and no global-command propagation delay).
