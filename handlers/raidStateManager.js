@@ -238,6 +238,57 @@ function parseBooleanYesNo(value) {
     return 'NO';
 }
 
+// --- In-Game Helpers (manual pre-raid names, NOT live Help joins) ---
+// The raid request collector has an optional "In-Game Helpers" text input for
+// players who were already helping the requester before the alert was created.
+// These names are stored on the raid as a cleaned string ARRAY
+// (raid.inGameHelpers) and rendered in the IN-GAME HELPERS section. The
+// separate raid.helpers array (Discord members who press Help and join through
+// Kakuzu) is completely untouched by this.
+const MAX_IN_GAME_HELPER_NAMES = 20;
+const MAX_IN_GAME_HELPER_NAME_LENGTH = 32;
+const MAX_IN_GAME_HELPERS_TEXT_LENGTH = 500;
+
+function sanitizeInGameHelperName(name) {
+    return String(name || '')
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/`/g, "'")
+        .replace(/@/g, '@​');
+}
+
+function parseInGameHelpers(input) {
+    const raw = Array.isArray(input) ? input.join(',') : String(input || '');
+    const seen = new Set();
+    const out = [];
+    const parts = raw.split(',');
+    for (let i = 0; i < parts.length; i++) {
+        let name = sanitizeInGameHelperName(parts[i]).trim().replace(/\s+/g, ' ');
+        if (!name) continue;
+        if (name.length > MAX_IN_GAME_HELPER_NAME_LENGTH) name = name.slice(0, MAX_IN_GAME_HELPER_NAME_LENGTH).trim();
+        if (!name) continue;
+        const key = name.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(name);
+        if (out.length >= MAX_IN_GAME_HELPER_NAMES) break;
+    }
+    return out;
+}
+
+function normalizeInGameHelpersList(value) {
+    if (Array.isArray(value)) return parseInGameHelpers(value.join(','));
+    if (typeof value === 'string') return parseInGameHelpers(value);
+    return [];
+}
+
+function formatInGameHelpersDisplay(raid) {
+    const list = normalizeInGameHelpersList(raid && raid.inGameHelpers);
+    if (list.length === 0) return 'None';
+    let text = list.join(', ');
+    if (text.length > MAX_IN_GAME_HELPERS_TEXT_LENGTH) text = text.slice(0, MAX_IN_GAME_HELPERS_TEXT_LENGTH - 3).trim() + '...';
+    return text;
+}
+
 function canCreateRaid(userId, guildId) {
     return !hasActiveRaid(userId, guildId) && !isBlacklisted(userId, guildId);
 }
@@ -294,6 +345,7 @@ function createRaid(options) {
         enemyClanPresent: parseBooleanYesNo(options.enemyClanPresent),
         reason: normalizeText(options.reason),
         helperLimit: Number(options.helperLimit) || 1,
+        inGameHelpers: normalizeInGameHelpersList(options.inGameHelpers),
         helpers: [],
         messageId: null,
         channelId: null,
@@ -483,12 +535,7 @@ function formatRaidMessage(raid, guildId = null) {
 
     const statusEmoji = statusText === 'OPEN' ? '\u{1F7E2}' : statusText === 'FULL' ? '\u{1F7E0}' : '\u{1F534}';
 
-    const helperNamesList = helperCount > 0
-        ? raid.helpers.map((h) => {
-            if (typeof h === 'string') return '<@' + h + '>';
-            return h.robloxDisplayName || h.robloxUsername || h.discordTag || '<@' + h.userId + '>';
-        }).join(', ')
-        : 'None';
+    const helperNamesList = formatInGameHelpersDisplay(raid);
 
     const targetDisplay = raid.robloxUsername || '<@' + raid.requesterId + '>';
 
@@ -518,8 +565,8 @@ function formatRaidMessage(raid, guildId = null) {
             { name: '\u200b', value: EMBED_DIVIDER, inline: false },
             {
                 name: '\u{1F4CB} IN-GAME HELPERS :',
-                value: '> **Helpers:** `' + helperNamesList + '`\n' +
-                    '> **Total Helpers:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
+                value: '> **In-Game Helpers:** `' + helperNamesList + '`\n' +
+                    '> **Total Helpers Joined:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`',
                 inline: false
             },
             { name: '\u200b', value: EMBED_DIVIDER, inline: false },
@@ -999,6 +1046,9 @@ module.exports = {
     formatTimeSpent,
     GAME_CONFIG,
     countryCodeToName,
+    parseInGameHelpers,
+    normalizeInGameHelpersList,
+    formatInGameHelpersDisplay,
     setRaidMvp,
     pollHelperPresences
 };

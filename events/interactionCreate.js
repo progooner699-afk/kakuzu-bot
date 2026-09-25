@@ -1161,6 +1161,15 @@ module.exports = {
                         .setPlaceholder("Explain why you need help")
                         .setStyle(TextInputStyle.Paragraph)
                         .setRequired(true)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId("inGameHelpers")
+                        .setLabel("In-Game Helpers")
+                        .setPlaceholder("Enter the names of players already helping you, separated by commas")
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(false)
+                        .setMaxLength(400)
                 )
             );
 
@@ -1419,6 +1428,7 @@ module.exports = {
             const enemyNamesInput = interaction.fields.getTextInputValue("enemyNames").trim();
             const helperLimit = Number(interaction.fields.getTextInputValue("helperLimit"));
             const enemyClanName = interaction.fields.getTextInputValue("enemyClanName").trim();
+            const inGameHelpersInput = safeGetTextInputValue(interaction.fields, "inGameHelpers", "");
             const reason = interaction.fields.getTextInputValue("reason");
 
             if (!enemyNamesInput) {
@@ -1429,6 +1439,7 @@ module.exports = {
             }
 
             const enemyNames = enemyNamesInput.split(',').map(n => n.trim()).filter(Boolean);
+            const inGameHelpers = raidStateManager.parseInGameHelpers(inGameHelpersInput || "");
 
             pendingGameSelections.delete(userId);
             pendingRegionSelections.delete(userId);
@@ -1464,6 +1475,7 @@ module.exports = {
                 enemyClanPresent: 'NO',
                 reason,
                 helperLimit,
+                inGameHelpers,
                 guildId: interaction.guild.id,
                 draft: true
             });

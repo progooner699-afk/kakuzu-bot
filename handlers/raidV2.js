@@ -119,9 +119,7 @@ async function buildRaidAlertPayload(raid, buttons) {
     const statusEmoji = statusText === 'OPEN' ? '🟢' : statusText === 'FULL' ? '🟠' : '🔴';
     const targetDisplay = raid.robloxUsername || '<@' + raid.requesterId + '>';
 
-    const helperNamesText = helperCount > 0
-        ? raid.helpers.map(normalizeHelperName).join(', ')
-        : 'None';
+    const inGameHelpersText = rsm.formatInGameHelpersDisplay(raid);
 
     // Edit 2a — requester's CURRENT Roblox pfp (live from the avatar-headshot API).
     const requesterAvatarUrl = await resolveRequesterAvatarUrl(raid);
@@ -200,9 +198,10 @@ async function buildRaidAlertPayload(raid, buttons) {
             .toJSON()
     );
 
-    // --- Section 3: in-game helpers ---
+    // --- Section 3: in-game helpers (manual pre-raid names from the request
+    // collector). The live Help-button joins stay in the LIVE HELPERS section.
     sections.push(text('### 🎮 IN-GAME HELPERS' + NL10 + NL10 +
-        '> **Helpers Needed:** `' + helperNamesText + '`' + NL10 +
+        '> **In-Game Helpers:** `' + inGameHelpersText + '`' + NL10 +
         '> **Total Helpers Joined:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`'));
 
     // --- Section 4: description (plain text, no quote bar) ---
