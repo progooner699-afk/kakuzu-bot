@@ -1,8 +1,4 @@
 'use strict';
-/* guildAccess.js — permanent premium server-access (Supabase authoritative,
-   60s TTL cache speed-layer, fail-closed). Reuses sharedPingDb pool. */
-// __PART2__
-'use strict';
 
 /**
  * guildAccess.js — permanent premium server-access system for Kakuzu.
@@ -33,6 +29,35 @@ const { withTimeout } = require('./fetchTimeout');
 
 const ACCESS_QUERY_TIMEOUT_MS = 8000;
 const ACCESS_CACHE_TTL_MS = 60 * 1000;
+
+/* ── Ack-window budget (WHY this exists) ────────────────────────────────────
+ * Discord kills an interaction if it is not acknowledged within 3 SECONDS, and
+ * the premium-access guard runs BEFORE any deferReply() (it must be able to
+ * block a command entirely, and deferring first would break every showModal
+ * flow). The guard read used to share the 8s write timeout and to AWAIT 4 DDL
+ * statements first — measured against Supabase (transaction pooler, port 6543)
+ * that is ~400ms/query warm, ~1.7s for the DDL set and ~3.9s for a cold
+ * connect. Any of those over 3s made Discord expire the interaction, the late
+ * reply was swallowed by `.catch(() => null)`, and the bot looked "online but
+ * deaf" with completely clean logs.
+ * So: the guard now gets a hard sub-second budget, never waits on DDL, and
+ * bridges a last-known-good status for a short grace window while it refreshes
+ * in the background. Unknown/never-confirmed guilds still fail CLOSED.
+ */
+const GUARD_READ_TIMEOUT_MS = 1200;
+const ACCESS_STALE_GRACE_MS = 120 * 1000;
+const TABLES_INIT_RETRY_BACKOFF_MS = 60 * 1000;
+
+let guardReadTimeoutMs = GUARD_READ_TIMEOUT_MS;
+let accessStaleGraceMs = ACCESS_STALE_GRACE_MS;
+let accessCacheTtlMs = ACCESS_CACHE_TTL_MS;
+/** Test-only seam so suites can simulate fast/slow database reads/expiry. */
+function _setGuardTimingForTests(opts = {}) {
+    if (typeof opts.guardReadTimeoutMs === 'number') guardReadTimeoutMs = opts.guardReadTimeoutMs;
+    if (typeof opts.staleGraceMs === 'number') accessStaleGraceMs = opts.staleGraceMs;
+    if (typeof opts.cacheTtlMs === 'number') accessCacheTtlMs = opts.cacheTtlMs;
+}
+
 
 const CREATE_GUILDS_SQL = [
 'CREATE TABLE IF NOT EXISTS kakuzu_guilds (',
@@ -66,25 +91,71 @@ const CREATE_EVENTS_SQL = [
 '    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()',
 ')'].join('\n');
 
-let tablesReadyPromise = null;
-async function ensureAccessTables() {
-    if (tablesReadyPromise) return tablesReadyPromise;
-    tablesReadyPromise = (async () => {
-        if (!sharedPingDb.isDatabaseConfigured()) return false;
-        try {
-            await sharedPingDb.runPoolQuery(CREATE_GUILDS_SQL, [], ACCESS_QUERY_TIMEOUT_MS);
-            await sharedPingDb.runPoolQuery(CREATE_EVENTS_SQL, [], ACCESS_QUERY_TIMEOUT_MS);
-            await sharedPingDb.runPoolQuery('CREATE INDEX IF NOT EXISTS idx_kakuzu_guilds_access_status ON kakuzu_guilds (access_status)', [], ACCESS_QUERY_TIMEOUT_MS);
-            await sharedPingDb.runPoolQuery('CREATE INDEX IF NOT EXISTS idx_kakuzu_access_events_guild_id ON kakuzu_access_events (guild_id)', [], ACCESS_QUERY_TIMEOUT_MS);
-            return true;
-        } catch (err) {
-            console.warn('[guildAccess] table init failed (will retry lazily):', sharedPingDb.sanitizeError(err));
-            tablesReadyPromise = null;
-            return false;
+let tablesInitInFlight = null;
+let tablesReady = false;
+let lastTablesInitFailureAt = 0;
+
+/**
+ * Create/patch the access tables. Single-flight, and on FAILURE the retry is
+ * rate-limited (see kickTablesInit) instead of being re-run in front of every
+ * interaction: the old code nulled its memo on failure, so after ONE transient
+ * DB error the 4 DDL statements (measured ~1.7s) were re-awaited before EVERY
+ * guarded interaction until the end of the process's life.
+ */
+function ensureAccessTables(force = false) {
+    if (tablesReady) return Promise.resolve(true);
+    if (!tablesInitInFlight) {
+        // A previous attempt FAILED: refuse to stack another one straight away.
+        // Explicit user-initiated write paths pass force=true to heal the schema
+        // on demand; the automatic (per-interaction) kick never forces.
+        if (!force && lastTablesInitFailureAt && (Date.now() - lastTablesInitFailureAt) < TABLES_INIT_RETRY_BACKOFF_MS) {
+            return Promise.resolve(false);
         }
-    })();
-    return tablesReadyPromise;
+        tablesInitInFlight = (async () => {
+            if (!sharedPingDb.isDatabaseConfigured()) return false;
+            try {
+                await sharedPingDb.runPoolQuery(CREATE_GUILDS_SQL, [], ACCESS_QUERY_TIMEOUT_MS);
+                await sharedPingDb.runPoolQuery(CREATE_EVENTS_SQL, [], ACCESS_QUERY_TIMEOUT_MS);
+                await sharedPingDb.runPoolQuery('CREATE INDEX IF NOT EXISTS idx_kakuzu_guilds_access_status ON kakuzu_guilds (access_status)', [], ACCESS_QUERY_TIMEOUT_MS);
+                await sharedPingDb.runPoolQuery('CREATE INDEX IF NOT EXISTS idx_kakuzu_access_events_guild_id ON kakuzu_access_events (guild_id)', [], ACCESS_QUERY_TIMEOUT_MS);
+                tablesReady = true;
+                lastTablesInitFailureAt = 0;
+                return true;
+            } catch (err) {
+                lastTablesInitFailureAt = Date.now();
+                console.warn('[guildAccess] table init failed (will retry lazily):', sharedPingDb.sanitizeError(err));
+                return false;
+            }
+        })();
+        // Release the in-flight marker only AFTER it settles, so concurrent
+        // callers keep sharing one DDL run instead of stacking new ones.
+        tablesInitInFlight
+            .then(() => { tablesInitInFlight = null; })
+            .catch(() => { tablesInitInFlight = null; });
+    }
+    return tablesInitInFlight;
 }
+
+/**
+ * Fire-and-forget schema check for the READ path. Deliberately NEVER awaited by
+ * the guard: if the table is missing the SELECT simply errors, the guard fails
+ * CLOSED, and the schema heals itself a moment later.
+ */
+function kickTablesInit() {
+    if (tablesReady || tablesInitInFlight) return;
+    if (!sharedPingDb.isDatabaseConfigured()) return;
+    if (lastTablesInitFailureAt && (Date.now() - lastTablesInitFailureAt) < TABLES_INIT_RETRY_BACKOFF_MS) return;
+    ensureAccessTables().catch(() => { /* logged inside */ });
+}
+
+/** Test-only seam: forget the one-time schema bootstrap result so a suite can
+ *  pin the failure/backoff path deterministically. */
+function _resetTablesInitForTests() {
+    tablesReady = false;
+    tablesInitInFlight = null;
+    lastTablesInitFailureAt = 0;
+}
+
 function getSupportGuildId() { return String(process.env.SUPPORT_GUILD_ID || '1536031049774010408').trim(); }
 function getBotOwnerId() { return String(process.env.BOT_OWNER_ID || '').trim(); }
 /* Super-admin bypass: this Discord user can ALWAYS manage access (grant/revoke/
@@ -169,18 +240,33 @@ function authorizeAccessManager(member, guildId, password) {
     return { ok: true, reason: 'ok' };
 }
 const accessCache = new Map();
+const accessRefreshInFlight = new Set();
+function accessCacheKey(gid) { return String(gid || ''); }
 function getCachedStatus(gid) {
-    const e = accessCache.get(String(gid || ''));
+    const e = accessCache.get(accessCacheKey(gid));
     if (!e) return null;
-    if (Date.now() > e.expiresAt) { accessCache.delete(String(gid || '')); return null; }
+    if (Date.now() > e.expiresAt) return null; // expired, but KEEP it: it is the last CONFIRMED status
+    return e.status;
+}
+/** Last status actually read from Supabase, within a short grace window. */
+function getStaleConfirmedStatus(gid) {
+    const e = accessCache.get(accessCacheKey(gid));
+    if (!e || !e.confirmedAt) return null;
+    if (Date.now() - e.confirmedAt > accessStaleGraceMs) return null;
     return e.status;
 }
 function setCachedStatus(gid, status) {
     if (!status) return;
-    accessCache.set(String(gid || ''), { status: String(status), expiresAt: Date.now() + ACCESS_CACHE_TTL_MS });
+    const now = Date.now();
+    accessCache.set(accessCacheKey(gid), { status: String(status), expiresAt: now + accessCacheTtlMs, confirmedAt: now });
 }
-function invalidateGuildCache(gid) { accessCache.delete(String(gid || '')); }
+function invalidateGuildCache(gid) { accessCache.delete(accessCacheKey(gid)); }
 function getAccessCacheSize() { return accessCache.size; }
+function normalizeAccessStatus(row) {
+    const s = row && row.accessStatus;
+    return s === 'granted' ? 'granted' : s === 'revoked' ? 'revoked' : 'pending';
+}
+
 function mapRow(row) {
     if (!row) return null;
     return { guildId: row.guild_id, guildName: row.guild_name, ownerId: row.owner_id,
@@ -192,26 +278,61 @@ function mapRow(row) {
 }
 async function recordAccessEvent(gid, action, by) {
     try {
-        await ensureAccessTables();
+        await ensureAccessTables(true);
         await sharedPingDb.runPoolQuery('INSERT INTO kakuzu_access_events (guild_id, action, performed_by) VALUES ($1, $2, $3)',
             [String(gid), String(action), by ? String(by) : null], ACCESS_QUERY_TIMEOUT_MS);
     } catch (err) { console.warn('[guildAccess] audit insert failed:', sharedPingDb.sanitizeError(err)); }
 }
 async function fetchGuildRow(gid) {
-    await ensureAccessTables();
+    // NEVER awaits schema DDL (that used to put ~1.7s of CREATE TABLE/INDEX in
+    // front of the guard). The schema is ensured at startup and re-kicked here
+    // in the background; a missing table simply makes this SELECT throw, which
+    // fails the guard CLOSED for that one interaction and self-heals next tick.
+    kickTablesInit();
     const r = await sharedPingDb.runPoolQuery('SELECT * FROM kakuzu_guilds WHERE guild_id = $1', [String(gid)], ACCESS_QUERY_TIMEOUT_MS);
     if (!r || !r.rows || r.rows.length === 0) return null;
     return mapRow(r.rows[0]);
 }
+/** Revalidate a stale-but-known status without blocking an interaction. */
+function refreshGuildStatusInBackground(gid) {
+    if (accessRefreshInFlight.has(gid)) return;
+    if (!sharedPingDb.isDatabaseConfigured()) return;
+    accessRefreshInFlight.add(gid);
+    fetchGuildRow(gid)
+        .then((row) => setCachedStatus(gid, normalizeAccessStatus(row)))
+        .catch((err) => console.warn('[guildAccess] background revalidate failed (kept last known status):', sharedPingDb.sanitizeError(err)))
+        .finally(() => accessRefreshInFlight.delete(gid));
+}
 async function getGuildAccessStatus(gidRaw) {
     const gid = String(gidRaw || '').trim();
     if (!gid) return 'pending';
-    const cached = getCachedStatus(gid);
-    if (cached) return cached;
+
+    // 1) Fresh cache hit: free, zero latency, zero Supabase load.
+    const fresh = getCachedStatus(gid);
+    if (fresh) return fresh;
+
+    // 2) TTL expired: serve the last CONFIRMED status for a short grace window
+    //    and revalidate in the background. A granted server is never held
+    //    hostage by a slow Supabase cold connect, and a revoked/pending server
+    //    stays locked either way.
+    const stale = getStaleConfirmedStatus(gid);
+    if (stale) {
+        refreshGuildStatusInBackground(gid);
+        return stale;
+    }
+
+    // 3) Never confirmed this session: take ONE bounded read (fail CLOSED).
+    //    A missing DATABASE_URL simply yields no row from the pool, which is
+    //    already "locked" — warn once so the misconfiguration is visible.
+    if (!sharedPingDb.isDatabaseConfigured()) {
+        console.warn('[guildAccess] DATABASE_URL is not configured - premium access fails CLOSED (every server stays locked) until it is set.');
+    }
+    const inFlight = fetchGuildRow(gid);
+    inFlight.then((row) => setCachedStatus(gid, normalizeAccessStatus(row)))
+        .catch(() => { /* reported below / by sharedPingDb */ });
     try {
-        const row = await withTimeout(fetchGuildRow(gid), ACCESS_QUERY_TIMEOUT_MS, 'guild access read');
-        const s = row && row.accessStatus;
-        const safe = s === 'granted' ? 'granted' : s === 'revoked' ? 'revoked' : 'pending';
+        const row = await withTimeout(inFlight, guardReadTimeoutMs, 'guild access read');
+        const safe = normalizeAccessStatus(row);
         setCachedStatus(gid, safe);
         return safe;
     } catch (err) {
@@ -219,12 +340,13 @@ async function getGuildAccessStatus(gidRaw) {
         return 'pending';
     }
 }
+
 async function isGuildGranted(gid) { return (await getGuildAccessStatus(gid)) === 'granted'; }
 
 async function upsertGuildOnJoin(info) {
     const gid = String(info.guildId || '').trim();
     if (!gid) throw new Error('guildId is required.');
-    await ensureAccessTables();
+    await ensureAccessTables(true);
     const sql = 'INSERT INTO kakuzu_guilds (guild_id, guild_name, owner_id, bot_present, left_at, updated_at) VALUES ($1, $2, $3, TRUE, NULL, NOW()) ON CONFLICT (guild_id) DO UPDATE SET guild_name = EXCLUDED.guild_name, owner_id = EXCLUDED.owner_id, bot_present = TRUE, left_at = NULL, updated_at = NOW() RETURNING *';
     const r = await sharedPingDb.runPoolQuery(sql,
         [gid, info.guildName ? String(info.guildName) : null, info.ownerId ? String(info.ownerId) : null], ACCESS_QUERY_TIMEOUT_MS);
@@ -235,7 +357,7 @@ async function upsertGuildOnJoin(info) {
 async function markGuildLeft(gidRaw) {
     const gid = String(gidRaw || '').trim();
     if (!gid) return null;
-    await ensureAccessTables();
+    await ensureAccessTables(true);
     const r = await sharedPingDb.runPoolQuery('UPDATE kakuzu_guilds SET bot_present = FALSE, left_at = NOW(), updated_at = NOW() WHERE guild_id = $1 RETURNING *',
         [gid], ACCESS_QUERY_TIMEOUT_MS).catch((e) => { console.warn('[guildAccess] mark-left failed:', sharedPingDb.sanitizeError(e)); return null; });
     invalidateGuildCache(gid);
@@ -245,13 +367,13 @@ async function markGuildLeft(gidRaw) {
     return row;
 }
 async function saveOnboardingRefs(gidRaw, chId, msgId) {
-    await ensureAccessTables();
+    await ensureAccessTables(true);
     await sharedPingDb.runPoolQuery('UPDATE kakuzu_guilds SET onboarding_channel_id = $2, onboarding_message_id = $3, onboarding_created_at = COALESCE(onboarding_created_at, NOW()), updated_at = NOW() WHERE guild_id = $1',
         [String(gidRaw), chId ? String(chId) : null, msgId ? String(msgId) : null], ACCESS_QUERY_TIMEOUT_MS)
         .catch((e) => console.warn('[guildAccess] onboarding ref save failed:', sharedPingDb.sanitizeError(e)));
 }
 async function saveOwnerDmStatus(gidRaw, status) {
-    await ensureAccessTables();
+    await ensureAccessTables(true);
     await sharedPingDb.runPoolQuery('UPDATE kakuzu_guilds SET owner_dm_status = $2, owner_dm_sent_at = NOW(), updated_at = NOW() WHERE guild_id = $1',
         [String(gidRaw), status ? String(status) : null], ACCESS_QUERY_TIMEOUT_MS)
         .catch((e) => console.warn('[guildAccess] owner DM status save failed:', sharedPingDb.sanitizeError(e)));
@@ -260,7 +382,7 @@ async function saveOwnerDmStatus(gidRaw, status) {
 
 async function grantGuildAccess(gidRaw, modId) {
     const gid = String(gidRaw || '').trim();
-    await ensureAccessTables();
+    await ensureAccessTables(true);
     const existing = await fetchGuildRow(gid);
     if (existing && existing.accessStatus === 'granted') { setCachedStatus(gid, 'granted'); return { row: existing, alreadyGranted: true }; }
     const r = await sharedPingDb.runPoolQuery("UPDATE kakuzu_guilds SET access_status = 'granted', granted_by = $2, granted_at = NOW(), revoked_by = NULL, revoked_at = NULL, updated_at = NOW() WHERE guild_id = $1 RETURNING *",
@@ -273,7 +395,7 @@ async function grantGuildAccess(gidRaw, modId) {
 }
 async function revokeGuildAccess(gidRaw, modId) {
     const gid = String(gidRaw || '').trim();
-    await ensureAccessTables();
+    await ensureAccessTables(true);
     const r = await sharedPingDb.runPoolQuery("UPDATE kakuzu_guilds SET access_status = 'revoked', revoked_by = $2, revoked_at = NOW(), updated_at = NOW() WHERE guild_id = $1 RETURNING *",
         [gid, String(modId)], ACCESS_QUERY_TIMEOUT_MS);
     if (!r || !r.rows || r.rows.length === 0) throw new Error('Target server has no access record. Nothing was changed.');
@@ -283,11 +405,43 @@ async function revokeGuildAccess(gidRaw, modId) {
     return row;
 }
 
-function supabaseField() {
-    const url = getSupabaseDashboardUrl();
-    if (!url) return null;
-    return { name: 'Supabase project', value: url, inline: false };
+/**
+ * SECURITY: this field used to render SUPABASE_DASHBOARD_URL VERBATIM into
+ * public Discord embeds and owner DMs — and that env var is documented as
+ * "safe public link, never credentials" while an actual Postgres connection
+ * string (with password) had been pasted into it. Anything credential-shaped is
+ * NEVER displayed; a normal project link is reduced to its hostname. If this
+ * ever logs the warning below, move the string to DATABASE_URL and ROTATE the
+ * Supabase password (it was already posted to Discord).
+ */
+function isCredentialBearingUrl(value) {
+    const v = String(value || '').trim();
+    if (!v) return false;
+    if (/^(postgres(ql)?|mysql|mongodb(\+srv)?|redis|rediss):\/\//i.test(v)) return true;
+    if (/^[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^@\s]+@/i.test(v)) return true; // scheme://user:pass@
+    return false;
 }
+/** Public-safe text to show in embeds ('' = show nothing). */
+function getDisplayableSupabaseProject() {
+    const raw = getSupabaseDashboardUrl();
+    if (!raw) return '';
+    if (isCredentialBearingUrl(raw)) {
+        console.warn('[guildAccess] SUPABASE_DASHBOARD_URL looks like a CONNECTION STRING - hiding it. Put it in DATABASE_URL and rotate that password.');
+        return '';
+    }
+    try {
+        const u = new URL(raw);
+        if (u.protocol === 'https:' || u.protocol === 'http:') return u.host;
+    } catch (_) { /* not a URL: fall through to a truncated plain value */ }
+    return raw.slice(0, 80);
+}
+
+function supabaseField() {
+    const display = getDisplayableSupabaseProject();
+    if (!display) return null;
+    return { name: 'Supabase project', value: display, inline: false };
+}
+
 
 function filterFields(...fields) { return fields.filter((f) => f != null); }
 
@@ -802,19 +956,21 @@ async function reconcileGuildsOnReady(client) {
     return { checked: guilds.length, repaired };
 }
 module.exports = {
-    ACCESS_CACHE_TTL_MS, ONBOARDING_CHANNEL_NAME,
-    ensureAccessTables, getSupportGuildId, getBotOwnerId, getManagerRoleIds, getSupportUrl,
+    ACCESS_CACHE_TTL_MS, ONBOARDING_CHANNEL_NAME, GUARD_READ_TIMEOUT_MS,
+    ensureAccessTables, kickTablesInit, getSupportGuildId, getBotOwnerId, getManagerRoleIds, getSupportUrl,
     getSuperAdminIds, isSuperAdmin, SUPERADMIN_USERNAMES,
     verifyAccessPassword, authorizeAccessManager,
     getGuildAccessStatus, isGuildGranted, getCachedStatus, setCachedStatus, invalidateGuildCache, getAccessCacheSize,
+    getStaleConfirmedStatus, refreshGuildStatusInBackground, _setGuardTimingForTests, _resetTablesInitForTests,
     fetchGuildRow, upsertGuildOnJoin, markGuildLeft, saveOnboardingRefs, saveOwnerDmStatus,
+
     grantGuildAccess, revokeGuildAccess, recordAccessEvent,
     buildPendingEmbed, buildGrantedEmbed, buildRevokedEmbed, buildOwnerDmPayload, buildLockedReply,
     buildMissingPermsDm, botMissingManageChannels,
     ACCESS_V2_FLAGS, ACCESS_CARD_KINDS, buildAccessV2Payload, buildAccessEmbedPayload,
     messageIsComponentsV2, isKakuzuAccessMessage,
     ensureOnboardingForLockedGuild, editOnboardingMessage, handleGuildJoin, handleGuildLeave, reconcileGuildsOnReady,
-    getSupabaseDashboardUrl,
+    getSupabaseDashboardUrl, getDisplayableSupabaseProject, isCredentialBearingUrl,
 };
 
 

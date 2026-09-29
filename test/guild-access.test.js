@@ -397,3 +397,167 @@ test('premium-access system exports every function the live event handlers rely 
     assert.strictEqual(typeof guildAccess.revokeGuildAccess, 'function');
     assert.strictEqual(typeof guildAccess.getSupabaseDashboardUrl, 'function');
 });
+
+// ── Ack-window safety: the guard runs BEFORE deferReply(), so a slow Supabase
+// must never be allowed to eat Discord's 3-second interaction window. These
+// tests pin the budget, the stale-while-revalidate bridge and the fail-CLOSED
+// behaviour of the premium-access guard.
+
+const guardDefaults = { guardReadTimeoutMs: 1200, cacheTtlMs: 60 * 1000, staleGraceMs: 120 * 1000 };
+
+test('the access guard answers inside the ack window even when Supabase hangs', async () => {
+    const realQuery = sharedPingDb.runPoolQuery;
+    const savedUrl = process.env.DATABASE_URL;
+    try {
+        process.env.DATABASE_URL = '';
+        guildAccess._setGuardTimingForTests({ guardReadTimeoutMs: 150, cacheTtlMs: 60000, staleGraceMs: 120000 });
+        sharedPingDb.runPoolQuery = () => new Promise((resolve) => setTimeout(() => resolve({ rows: [] }), 450));
+        guildAccess.invalidateGuildCache('slow-budget-guild');
+
+        const startedAt = Date.now();
+        const status = await guildAccess.getGuildAccessStatus('slow-budget-guild');
+        const elapsed = Date.now() - startedAt;
+        assert.strictEqual(status, 'pending', 'an unconfirmed guild must fail CLOSED, never granted');
+        assert.ok(elapsed < 300, 'the guard must return within its budget (took ' + elapsed + 'ms, Discord kills at 3000ms)');
+
+        // The unawaited read still lands and warms the cache for the next click.
+        await new Promise((r) => setTimeout(r, 500));
+        assert.strictEqual(guildAccess.getCachedStatus('slow-budget-guild'), 'pending');
+        const retryAt = Date.now();
+        assert.strictEqual(await guildAccess.getGuildAccessStatus('slow-budget-guild'), 'pending');
+        assert.ok(Date.now() - retryAt < 50, 'a warmed cache must answer instantly');
+    } finally {
+        sharedPingDb.runPoolQuery = realQuery;
+        if (savedUrl === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = savedUrl;
+        guildAccess._setGuardTimingForTests(guardDefaults);
+        guildAccess.invalidateGuildCache('slow-budget-guild');
+    }
+});
+
+test('a confirmed granted server is served instantly while Supabase hangs (stale-while-revalidate)', async () => {
+    const realQuery = sharedPingDb.runPoolQuery;
+    const savedUrl = process.env.DATABASE_URL;
+    try {
+        process.env.DATABASE_URL = 'postgres://test.invalid/db';
+        guildAccess._setGuardTimingForTests({ guardReadTimeoutMs: 150, cacheTtlMs: 30, staleGraceMs: 120000 });
+        accessRow('stale-granted-guild', { access_status: 'granted' });
+        guildAccess.invalidateGuildCache('stale-granted-guild');
+        assert.strictEqual(await guildAccess.getGuildAccessStatus('stale-granted-guild'), 'granted');
+
+        await new Promise((r) => setTimeout(r, 80));      // the 30ms fresh TTL lapses
+        sharedPingDb.runPoolQuery = () => new Promise(() => {});   // Supabase never answers
+        const startedAt = Date.now();
+        const status = await guildAccess.getGuildAccessStatus('stale-granted-guild');
+        const elapsed = Date.now() - startedAt;
+        assert.strictEqual(status, 'granted', 'the last confirmed status must bridge the outage');
+        assert.ok(elapsed < 50, 'stale serving must be instant (took ' + elapsed + 'ms)');
+        assert.strictEqual(await guildAccess.isGuildGranted('stale-granted-guild'), true);
+    } finally {
+        sharedPingDb.runPoolQuery = realQuery;
+        if (savedUrl === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = savedUrl;
+        guildAccess._setGuardTimingForTests(guardDefaults);
+        guildAccess.invalidateGuildCache('stale-granted-guild');
+    }
+});
+
+test('an expired entry is revalidated in the background, not inside the guard', async () => {
+    const realQuery = sharedPingDb.runPoolQuery;
+    const savedUrl = process.env.DATABASE_URL;
+    try {
+        process.env.DATABASE_URL = 'postgres://test.invalid/db';
+        guildAccess._setGuardTimingForTests({ guardReadTimeoutMs: 150, cacheTtlMs: 20, staleGraceMs: 120000 });
+        accessRow('revalidate-guild', { access_status: 'pending' });
+        guildAccess.invalidateGuildCache('revalidate-guild');
+        assert.strictEqual(await guildAccess.getGuildAccessStatus('revalidate-guild'), 'pending');
+
+        await new Promise((r) => setTimeout(r, 60));       // the 20ms fresh TTL lapses
+        accessRow('revalidate-guild', { access_status: 'granted' });   // granted in the meantime
+        sharedPingDb.runPoolQuery = async (sql, params = []) => {
+            await new Promise((r) => setTimeout(r, 80));   // slow Supabase
+            return realQuery(sql, params);
+        };
+
+        const startedAt = Date.now();
+        const status = await guildAccess.getGuildAccessStatus('revalidate-guild');
+        assert.strictEqual(status, 'pending', 'the stale status is served immediately');
+        assert.ok(Date.now() - startedAt < 60, 'the interaction must not wait for the slow read');
+
+        let refreshed = null;
+        for (let i = 0; i < 40 && refreshed !== 'granted'; i += 1) {
+            await new Promise((r) => setTimeout(r, 25));
+            refreshed = guildAccess.getStaleConfirmedStatus('revalidate-guild');
+        }
+        assert.strictEqual(refreshed, 'granted', 'the background revalidation must refresh the cache');
+    } finally {
+        sharedPingDb.runPoolQuery = realQuery;
+        if (savedUrl === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = savedUrl;
+        guildAccess._setGuardTimingForTests(guardDefaults);
+        guildAccess.invalidateGuildCache('revalidate-guild');
+    }
+});
+
+test('a revoked server stays locked even when the database is unreachable', async () => {
+    const savedUrl = process.env.DATABASE_URL;
+    try {
+        guildAccess._setGuardTimingForTests({ guardReadTimeoutMs: 150, cacheTtlMs: 20, staleGraceMs: 120000 });
+        accessRow('revoked-while-down-guild', { access_status: 'revoked' });
+        guildAccess.invalidateGuildCache('revoked-while-down-guild');
+        assert.strictEqual(await guildAccess.getGuildAccessStatus('revoked-while-down-guild'), 'revoked');
+        await new Promise((r) => setTimeout(r, 60));
+        setDbFailure(true);
+        assert.strictEqual(await guildAccess.getGuildAccessStatus('revoked-while-down-guild'), 'revoked',
+            'a failed read must never upgrade a revoked server');
+        assert.strictEqual(await guildAccess.isGuildGranted('revoked-while-down-guild'), false);
+    } finally {
+        setDbFailure(false);
+        if (savedUrl === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = savedUrl;
+        guildAccess._setGuardTimingForTests(guardDefaults);
+        guildAccess.invalidateGuildCache('revoked-while-down-guild');
+    }
+});
+
+test('a failed schema bootstrap backs off instead of re-running DDL on every interaction', async () => {
+    const realQuery = sharedPingDb.runPoolQuery;
+    const savedUrl = process.env.DATABASE_URL;
+    let ddlCalls = 0;
+    try {
+        process.env.DATABASE_URL = 'postgres://test.invalid/db';
+        guildAccess._resetTablesInitForTests();
+        sharedPingDb.runPoolQuery = async (sql) => {
+            if (/CREATE\s+(TABLE|INDEX)/i.test(String(sql))) { ddlCalls += 1; throw new Error('simulated DDL failure'); }
+            return { rows: [] };
+        };
+        assert.strictEqual(await guildAccess.ensureAccessTables(), false, 'a failed bootstrap must report failure');
+        assert.strictEqual(ddlCalls, 1, 'the first attempt runs the DDL exactly once');
+        assert.strictEqual(await guildAccess.ensureAccessTables(), false);
+        assert.strictEqual(ddlCalls, 1, 'inside the backoff window the DDL must NOT run again (no DDL storm)');
+        guildAccess.kickTablesInit();
+        await new Promise((r) => setTimeout(r, 50));
+        assert.strictEqual(ddlCalls, 1, 'kickTablesInit must honour the failure backoff too');
+    } finally {
+        sharedPingDb.runPoolQuery = realQuery;
+        guildAccess._resetTablesInitForTests();
+        if (savedUrl === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = savedUrl;
+    }
+});
+
+test('a connection string pasted into SUPABASE_DASHBOARD_URL is never displayed', () => {
+    const savedDash = process.env.SUPABASE_DASHBOARD_URL;
+    try {
+        const connString = 'postgresql://postgres.someproject:SuperSecretPassw0rd@aws-0-ap-south-1.pooler.supabase.com:6543/postgres';
+        process.env.SUPABASE_DASHBOARD_URL = connString;
+        assert.strictEqual(guildAccess.isCredentialBearingUrl(connString), true);
+        assert.strictEqual(guildAccess.isCredentialBearingUrl('https://example.com/plain'), false);
+        assert.strictEqual(guildAccess.getDisplayableSupabaseProject(), '',
+            'a credential-bearing value must be hidden completely');
+        const card = JSON.stringify(guildAccess.buildPendingEmbed({ guildName: 'Server', guildId: '1' }));
+        assert.ok(!card.includes('SuperSecretPassw0rd'), 'the access card must never leak the password');
+        assert.ok(!card.includes('postgresql://'), 'the access card must never leak the connection string');
+
+        process.env.SUPABASE_DASHBOARD_URL = 'https://rzgexgetkoilttqxdlpg.supabase.co/project/_/database/tables';
+        assert.strictEqual(guildAccess.getDisplayableSupabaseProject(), 'rzgexgetkoilttqxdlpg.supabase.co',
+            'a plain project link is reduced to its hostname');
+    } finally {
+        if (savedDash === undefined) delete process.env.SUPABASE_DASHBOARD_URL; else process.env.SUPABASE_DASHBOARD_URL = savedDash;
+    }
+});

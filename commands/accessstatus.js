@@ -54,7 +54,7 @@ module.exports = {
                 { name: 'Owner DM status', value: row.ownerDmStatus || '—', inline: true },
                 { name: 'Onboarding channel', value: row.onboardingChannelId ? '<#' + row.onboardingChannelId + '>' : '—', inline: true },
                 { name: 'Bot join date', value: row.joinedAt ? new Date(row.joinedAt).toISOString() : '—', inline: true },
-            { name: 'Supabase project', value: guildAccess.getSupabaseDashboardUrl() || '—', inline: false },
+            { name: 'Supabase project', value: guildAccess.getDisplayableSupabaseProject() || '—', inline: false },
             )
             .setColor(row.accessStatus === 'granted' ? 0x2ECC71 : 0xE74C3C)
             .setFooter({ text: 'Kakuzu Premium Server Access' })

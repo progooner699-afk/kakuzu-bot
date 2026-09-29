@@ -81,7 +81,7 @@
   * **Ready reconciliation:** `ready.js` runs `reconcileGuildsOnReady` (logs
     `checked`/`repaired` counts) which repairs the onboarding channel for locked
     guilds already in the bot **without resetting granted guilds**.
-* **Premium access tests (`test/guild-access.test.js`, 19 tests):** unit tests
+* **Premium access tests (`test/guild-access.test.js`, 25 tests):** unit tests
   for the password gate / cache / embeds / locked reply / missing-perms DM, plus
   **real event-handler integration tests** that call `events/guildCreate.execute`
   (asserting the `kakuzu-access` channel is created) and
@@ -89,7 +89,65 @@
   command **does not execute** in an unauthorized guild, **does** execute in a
   granted guild, and is blocked for `BOT_OWNER_ID`. Supabase is faked in-memory
   (`sharedPingDb.runPoolQuery` swap) so tests are hermetic and never touch
-  production data.
+  production data. They also pin the **ack-window budget** (a hung Supabase still
+  answers in <300ms), the **stale-while-revalidate** bridge, background
+  revalidation, revoked-stays-locked, the DDL **backoff**, and the
+  credential-URL redaction.
+
+## ⚡ "ONLINE BUT DEAF" HARDENING (ack-safe guard + gateway self-heal)
+
+> **Root cause of the multi-day silence:** the premium-access guard runs BEFORE
+> any `deferReply()` (it must be able to block a command, and deferring first
+> breaks every `showModal` flow). It awaited `ensureAccessTables()` (4 DDL
+> statements, ~1.7s cold) and shared the 8s write timeout, so a cold/loaded
+> Supabase pushed the first reply past Discord's **3-second** ack window. Discord
+> expired the interaction, the late reply was swallowed, commands silently
+> stopped working while logs stayed clean and Render stayed green.
+
+* **Ack-safe guard (`handlers/guildAccess.js`):** the read path uses a hard
+  `GUARD_READ_TIMEOUT_MS = 1200` budget, **never awaits DDL** (`kickTablesInit()`
+  is fire-and-forget), and layers three answers: fresh cache (60s TTL) → last
+  **confirmed** status inside `ACCESS_STALE_GRACE_MS` (120s) with a **background**
+  revalidation (`refreshGuildStatusInBackground`, per-guild single-flight) → one
+  bounded read. Anything unknown/failed is **`pending` (fail CLOSED)**. A missing
+  `DATABASE_URL` warns once and still takes the bounded read (it simply yields no
+  row). Seams: `_setGuardTimingForTests({guardReadTimeoutMs, cacheTtlMs, staleGraceMs})`
+  and `_resetTablesInitForTests()`.
+* **No DDL storm:** a failed bootstrap is memoised by `lastTablesInitFailureAt`
+  and retried at most once per `TABLES_INIT_RETRY_BACKOFF_MS` (60s);
+  `ensureAccessTables(force)` only forces for **explicit user-initiated writes**
+  (`grantGuildAccess`, `revokeGuildAccess`, `upsertGuildOnJoin`, `markGuildLeft`,
+  `saveOnboardingRefs`, `saveOwnerDmStatus`, `recordAccessEvent`).
+* **Gateway self-heal watchdog (`handlers/gatewayGuard.js`):** discord.js can
+  neither recover an unrecoverable close/failed boot login nor notice a
+  nominally-ready-but-stale socket, which is how the bot stayed "online" for
+  days. `startGatewayWatchdog(client)` (armed in `index.js` after login,
+  `unref`'d) ticks every 15s and calls `runWatchdogTick` → `evaluateGateway`
+  (pure decision, exported for tests): act only after `notReadyGraceMs` (45s),
+  at most once per `minReconnectSpacingMs` (60s), `maxReconnects` (5) per
+  `reconnectWindowMs` (10min), then `fatal()` → `process.exit(1)` so Render
+  recycles the process with a fresh session budget. A reconnect only happens when
+  `probeRestGateway` (5s `/gateway/bot` probe) proves REST is alive *and* the
+  client is still not shutting down. **`markShuttingDown(client)` disarms the
+  watchdog before `client.destroy()`**, which is what made the old 0b626e9
+  watchdog fight Render's SIGTERM.
+* **Diagnostics:** `GET /api/health/discord` (`handlers/apiServer.js`) returns
+  `getGatewayDiagnostics(client)` — `status` (`Online`/`Offline`/`NeverConnected`),
+  ping, `silentForMs`, `gatewayDownForMs` and a `watchdog` block
+  (`armed/running/reconnects/lastAction/lastReasons/highPingTicks/gaveUp`).
+  `gatewayGuard.markActivity(client)` is called from the interaction hub so real
+  traffic is the freshest liveness proof.
+* **Tests:** `test/gatewayGuard.test.js` (18 tests) drives the watchdog with
+  explicit clocks — grace window, spacing gate, shutdown no-op, fatal budget,
+  REST-down hold, zombie-ping escalation, arm/disarm. The whole suite is **136
+  tests, all green** (`npm test`).
+* **Credential hygiene:** `SUPABASE_DASHBOARD_URL` must be a **public project
+  link only** (`https://<ref>.supabase.co`); the connection string belongs in
+  `DATABASE_URL`. `isCredentialBearingUrl()` + `getDisplayableSupabaseProject()`
+  hide connection strings from embeds and log a rotation warning. If
+  `SUPABASE_DASHBOARD_URL` ever contained the connection string, treat that
+  password as leaked: move it to `DATABASE_URL`, restore the plain project URL
+  and **rotate the Supabase password**.
 
 ## 🐘 SHARED POSTGRES — RAID PING CONFIGURATION (`/pingsetup` <-> bot)
 
@@ -403,6 +461,9 @@ Refactored the linking → request → join → close loop per the spec:
 | `handlers/sharedPingDb.js` | Permanent shared-Postgres store for country/region ping settings + in-memory cache. |
 | `handlers/dbKeepAlive.js` | Periodic `SELECT 1;` keep-alive on the shared pool (startup + every 72h, 30-min retry on failure) to stop idle Supabase databases from pausing. |
 | `handlers/countryCatalog.js` | Local ISO-3166-1 alpha-2 country catalog (names, flag emojis, sort) + the shared country→region mapping used by BOTH `/pingsetup` and `handlers/regionMap.js`. |
+| `handlers/guildAccess.js` | Premium server-access: Supabase-backed grant/revoke/onboarding + the **ack-safe fail-closed interaction guard** (bounded read, stale-while-revalidate, DDL backoff, credential-URL redaction). |
+| `handlers/gatewayGuard.js` | Gateway lifecycle logging + **self-heal watchdog** (`evaluateGateway`/`runWatchdogTick`/`probeRestGateway`) + shutdown-safe `markShuttingDown`/`markActivity` + `getGatewayDiagnostics`. |
+| `handlers/apiServer.js` | Express dashboard/API: `/`, `/api/stats`, `/api/action/restart`, `/api/health/discord` (gateway diagnostics) and the bearer-protected `/api/guilds/:guildId/roles`. |
 | `commands/pingsetup.js` | Ephemeral interactive `/pingsetup` builder (country/region ping roles, draft → UPSERT). |
 | `handlers/commandHandler.js` | Loads commands from `commands/` into `client.commands`. |
 | `commands/deploy-commands.js` | `registerGuildCommands(guildId)` — used by `ready.js`; also a standalone CLI (`npm run deploy-commands`). |

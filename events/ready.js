@@ -103,7 +103,16 @@ module.exports = {
         // Polls every 15s for helpers in active raids. If no ROBLOX_API_KEY is set,
         // pollHelperPresences silently no-ops and time is tracked via join-to-close delta.
         console.log('⏱️  Starting background helper time-tracking (presence polling)...');
+        // Re-entrancy guard: a tick that takes longer than PRESENCE_POLL_INTERVAL
+        // (slow Roblox/presence API, stalled DB) used to stack up overlapping
+        // ticks forever, multiplying API load until everything stalled.
+        let presenceLoopRunning = false;
         setInterval(async () => {
+            if (presenceLoopRunning) {
+                console.warn('⏭️  Presence loop tick skipped - the previous tick is still running.');
+                return;
+            }
+            presenceLoopRunning = true;
             try {
                 const currentGuilds = [...client.guilds.cache.values()];
                 await Promise.allSettled(currentGuilds.flatMap(g => [
@@ -119,6 +128,8 @@ module.exports = {
                 await processHelpMonitors(client);
             } catch (error) {
                 console.warn('Presence polling loop error:', error?.message || error);
+            } finally {
+                presenceLoopRunning = false;
             }
         }, PRESENCE_POLL_INTERVAL);
 

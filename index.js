@@ -9,7 +9,7 @@ const raidStateManager = require('./handlers/raidStateManager');
 const sharedPingDb = require('./handlers/sharedPingDb');
 const dbKeepAlive = require('./handlers/dbKeepAlive');
 const { checkRobloxCookieAuth } = require('./handlers/robloxAuth');
-const { attachGatewayGuard, reconnectDiscord, markShuttingDown } = require('./handlers/gatewayGuard');
+const { attachGatewayGuard, reconnectDiscord, markShuttingDown, startGatewayWatchdog } = require('./handlers/gatewayGuard');
 
 // Added GuildMessages, MessageContent and GuildMembers for verification DMs
 const client = new Client({
@@ -24,10 +24,13 @@ const client = new Client({
 client.commands = new Collection();
 client.raidStateManager = raidStateManager;
 
-// Gateway lifecycle logging + manual reconnect helper.
-// discord.js v14 auto-reconnects recoverable close codes; the old watchdog
-// timer that polled and re-logged has been REMOVED to prevent races with
-// the SIGTERM graceful-shutdown handler (see handlers/gatewayGuard.js).
+// Gateway lifecycle logging + SHUTDOWN-SAFE self-heal watchdog.
+// discord.js v14 auto-reconnects recoverable close codes, but it CANNOT recover
+// from an unrecoverable close (or a boot login that never reaches READY) — the
+// process then stays green on Render while ignoring every command. The watchdog
+// (handlers/gatewayGuard.js) reconnects only after a 45s grace period, is
+// rate-limit-aware, and is disarmed inside markShuttingDown() BEFORE the client
+// is destroyed, which is exactly what the removed 0b626e9 version got wrong.
 attachGatewayGuard(client);
 
 // Process-level safety nets: a single unhandled promise rejection would by
@@ -115,7 +118,13 @@ checkRobloxCookieAuth('startup', true).catch(err => {
 console.log('[discordAuth] Discord token configured:', !!process.env.DISCORD_TOKEN && process.env.DISCORD_TOKEN.length > 10);
 console.log('[discordAuth] Starting Discord login...');
 const loginPromise = client.login(process.env.DISCORD_TOKEN);
-loginPromise.then(() => console.log('[discordAuth] Discord login OK.')).catch(async (error) => {
+loginPromise.then(() => {
+    console.log('[discordAuth] Discord login OK.');
+    // Arm the self-heal watchdog ONLY after a successful login: before READY the
+    // "not ready" state is expected, and reconnecting during startup would just
+    // burn Discord's identify budget.
+    try { startGatewayWatchdog(client); } catch (err) { console.error('[gateway] could not arm self-heal watchdog:', (err && err.message) || err); }
+}).catch(async (error) => {
     console.error('[discordAuth] Discord login FAILED - exiting so Render restarts with a fresh session:', error && error.stack ? error.stack : error);
     try { await client.destroy(); } catch (err) { /* ignore */ }
     process.exit(1);

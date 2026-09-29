@@ -21,6 +21,7 @@ const { formatRobloxProfileValue } = require("../handlers/verificationHelpers");
 const sharedPingDb = require("../handlers/sharedPingDb");
 const { withTimeout, fetchWithTimeout } = require("../handlers/fetchTimeout");
 const guildAccess = require("../handlers/guildAccess");
+const gatewayGuard = require("../handlers/gatewayGuard");
 // Commands that bypass the normal per-guild premium-access guard so support
 // moderators can manage access from the support server. They still enforce
 // their own support-server + role + password checks.
@@ -948,6 +949,9 @@ module.exports = {
                 : interaction.isRoleSelectMenu ? (interaction.isRoleSelectMenu() ? `roleselect:${interaction.customId}` : 'unknown')
                 : (interaction.type != null ? `type:${interaction.type}` : 'unknown');
             console.log(`[interaction] in ${kind} guild=${(interaction.guild && interaction.guild.id) || 'dm'} user=${(interaction.user && interaction.user.id) || '?'}`);
+            // Real traffic is the freshest proof the gateway is alive; the
+            // self-heal watchdog uses it for "online but deaf" detection.
+            gatewayGuard.markActivity(interaction.client);
         } catch (_) { /* logging must never break routing */ }
         // Top-level guard: no interaction may ever die silently ("The
         // application did not respond"). Anything thrown below gets a safe

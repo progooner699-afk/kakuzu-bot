@@ -6,6 +6,8 @@ const {
     ChannelType,
     ContainerBuilder,
     TextDisplayBuilder,
+    SectionBuilder,
+    ThumbnailBuilder,
     SeparatorBuilder,
     SeparatorSpacingSize,
     MessageFlags,
@@ -39,10 +41,23 @@ function fmtStampRel(d) {
     } catch (_) { return String(d || 'Unknown'); }
 }
 
+function resolveLogLogoUrl(o) {
+    try {
+        if (o && typeof o.logoUrl === 'string' && o.logoUrl.trim()) return o.logoUrl.trim();
+        const cu = o && o.client && o.client.user;
+        if (cu && typeof cu.displayAvatarURL === 'function') {
+            const u = cu.displayAvatarURL({ size: 256 });
+            if (typeof u === 'string' && u) return u;
+        }
+    } catch (_) {}
+    return null;
+}
+
 function buildAccessLogV2Payload(kind, o) {
     const data = o || {};
     const revoked = String(kind || '') === 'revoked';
     const title = revoked ? '## 🔴 KAKUZU ACCESS REVOKED' : '## 🟢 KAKUZU ACCESS GRANTED';
+    const logo = resolveLogLogoUrl(data);
     const gName = String(data.guildName || 'Unknown server');
     const gid = String(data.guildId || 'unknown');
     const link = String(data.joinLink || '');
@@ -51,24 +66,27 @@ function buildAccessLogV2Payload(kind, o) {
     const ownLine = own ? '<@' + own + '>' : '`Unknown`';
     const by = String(data.performedById || '');
     const byLine = by ? '<@' + by + '>' : '`Unknown`';
-    const verb = revoked ? 'lost' : 'granted';
-    const head = revoked
-        ? title + '\n\n**❌ Premium authorization revoked**\n\n> **' + gName + '** has lost **Kakuzu Premium**.\n> Premium systems are now disabled inside that server.'
-        : title + '\n\n**✅ Premium authorization completed successfully**\n\n> **' + gName + '** has been verified and approved to use **Kakuzu Premium**.\n> Premium systems are now available inside the authorized server.';
+    const head = title + '\n> **' + gName + '** • `' + gid + '` • ' + (revoked ? '`🔴 Inactive`' : '`🟢 Active`') + ' • <t:' + Math.floor(new Date(data.at || Date.now()).getTime() / 1000) + ':R>';
     const stampFull = fmtStampFull(data.at);
     const stampRel = fmtStampRel(data.at);
     const reason = (!revoked || !data.reason) ? '' : '\n> 📝 **Reason:** ' + String(data.reason).slice(0, 300);
     const sections = [
         head,
-        '### 🏰 SERVER DETAILS\n\n> 🏷️ **Server Name:** ' + gName + '\n> 🆔 **Server ID:** `' + gid + '`\n> 🔗 **Server Invite:** ' + joinLine,
-        '### 👑 SERVER OWNERSHIP\n\n> 👤 **Server Owner:** ' + ownLine + '\n> 🛡️ **Ownership Status:** Confirmed\n> 🔒 **Authorization Scope:** This server only',
-        '### 💎 PREMIUM ACCESS\n\n> 💠 **Access Plan:** Kakuzu Premium\n> ' + (revoked ? '🔴 **Current Status:** Inactive' : '🟢 **Current Status:** Active') + '\n> ♾️ **Access Duration:** Active until revoked\n> ⚙️ **Premium Systems:** ' + (revoked ? 'Disabled' : 'Fully enabled') + '\n> 🔐 **Guild Protection:** Bound to the authorized Server ID',
-        '### 🛡️ ACCESS RECORD\n\n> 👮 **' + (revoked ? 'Revoked' : 'Granted') + ' By:** ' + byLine + '\n> 📅 **' + (revoked ? 'Revocation' : 'Activation') + ' Date:** ' + stampFull + '\n> ⏱️ **' + (revoked ? 'Revoked' : 'Activated') + ':** ' + stampRel + '\n> ✅ **Authorization Check:** Verified' + reason,
-        '### 📜 ACCESS INFORMATION\n\n> Kakuzu Premium access is permanently linked to the Server ID shown above.\n> It cannot be used in another server without separate authorization.\n> Revoking access will immediately disable all premium systems.',
-        '-# 🔒 Secured by Kakuzu Guild Access Control\n-# Unauthorized servers cannot access Kakuzu Premium.',
+        '### 🏰 SERVER • 👑 OWNER\n> 🏷️ **' + gName + '** • 🆔 `' + gid + '` • 🔗 ' + joinLine + '\n> 👤 ' + ownLine + ' • 👮 ' + byLine,
+        '### 📅 RECORD • ℹ️ INFO\n> 📅 ' + stampFull + ' • 🔐 Bound to `' + gid + '`' + reason,
     ];
     const content = [];
-    sections.forEach((b) => { content.push(v2Text(b)); content.push(v2Sep()); });
+    sections.forEach((b, idx) => {
+        if (idx === 0 && logo) {
+            try {
+                content.push(new SectionBuilder()
+                    .setThumbnailAccessory(new ThumbnailBuilder().setURL(logo))
+                    .addTextDisplayComponents(new TextDisplayBuilder().setContent(String(b).slice(0, 4000)))
+                    .toJSON());
+            } catch (_) { content.push(v2Text(b)); }
+        } else { content.push(v2Text(b)); }
+        content.push(v2Sep());
+    });
     const box = new ContainerBuilder().setAccentColor(revoked ? ACCESS_LOG_REVOKED_COLOR : ACCESS_LOG_GRANTED_COLOR).toJSON();
     box.size = 'large';
     box.components = content;
@@ -83,17 +101,16 @@ function buildAccessLogFallbackEmbed(kind, o) {
     const link = String(data.joinLink || '');
     const own = String(data.ownerId || '');
     const by = String(data.performedById || '');
+    const logo = resolveLogLogoUrl(data);
     const e = new EmbedBuilder()
         .setTitle(revoked ? '🔴 KAKUZU ACCESS REVOKED' : '🟢 KAKUZU ACCESS GRANTED')
-        .setDescription(revoked ? '**❌ Premium authorization revoked**' : '**✅ Premium authorization completed successfully**');
+        .setDescription('**' + gName + '** • `' + gid + '` • ' + (revoked ? '`🔴 Inactive`' : '`🟢 Active`'));
+    if (logo) { e.setAuthor({ name: 'Kakuzu Premium Access', iconURL: logo }); e.setThumbnail(logo); }
     const stampFull = fmtStampFull(data.at);
     const stampRel = fmtStampRel(data.at);
     e.addFields(
-        { name: '🏰 SERVER DETAILS', value: '> 🏷️ **Server Name:** ' + gName + '\n> 🆔 **Server ID:** `' + gid + '`\n> 🔗 **Server Invite:** ' + (link ? '[Join ' + gName + '](' + link + ')' : '`No invite available`'), inline: false },
-        { name: '👑 SERVER OWNERSHIP', value: '> 👤 **Server Owner:** ' + (own ? '<@' + own + '>' : '`Unknown`') + '\n> 🛡️ **Ownership Status:** Confirmed\n> 🔒 **Authorization Scope:** This server only', inline: false },
-        { name: '💎 PREMIUM ACCESS', value: '> 💠 **Access Plan:** Kakuzu Premium\n> ' + (revoked ? '🔴 **Current Status:** Inactive' : '🟢 **Current Status:** Active') + '\n> ♾️ **Access Duration:** Active until revoked\n> ⚙️ **Premium Systems:** ' + (revoked ? 'Disabled' : 'Fully enabled') + '\n> 🔐 **Guild Protection:** Bound to the authorized Server ID', inline: false },
-        { name: '🛡️ ACCESS RECORD', value: '> 👮 **' + (revoked ? 'Revoked' : 'Granted') + ' By:** ' + (by ? '<@' + by + '>' : '`Unknown`') + '\n> 📅 **' + (revoked ? 'Revocation' : 'Activation') + ' Date:** ' + stampFull + '\n> ⏱️ **' + (revoked ? 'Revoked' : 'Activated') + ':** ' + stampRel + '\n> ✅ **Authorization Check:** Verified' + ((!revoked || !data.reason) ? '' : '\n> 📝 **Reason:** ' + String(data.reason).slice(0, 300)), inline: false },
-        { name: '📜 ACCESS INFORMATION', value: '> Kakuzu Premium access is permanently linked to the Server ID shown above.\n> It cannot be used in another server without separate authorization.\n> Revoking access will immediately disable all premium systems.', inline: false },
+        { name: '🏰 SERVER • 👑 OWNER', value: '> **' + gName + '** • `' + gid + '` • ' + (link ? '[Join](' + link + ')' : '`No invite`') + '\n> 👤 ' + (own ? '<@' + own + '>' : '`Unknown`') + ' • 👮 ' + (by ? '<@' + by + '>' : '`Unknown`'), inline: false },
+        { name: '📅 RECORD', value: '> ' + stampFull + ' (' + stampRel + ')' + ((!revoked || !data.reason) ? '' : '\n> 📝 ' + String(data.reason).slice(0, 300)), inline: false },
     );
     e.setColor(revoked ? ACCESS_LOG_REVOKED_COLOR : ACCESS_LOG_GRANTED_COLOR);
     e.setFooter({ text: '🔒 Secured by Kakuzu Guild Access Control • Unauthorized servers cannot access Kakuzu Premium.' });
@@ -165,10 +182,13 @@ async function postAccessLog(client, kind, opts) {
     try {
         const ch = await resolveAccessLogChannel(client);
         if (!ch) { console.warn('[accessLog] channel unavailable — skipping log post.'); return null; }
-        try { return await ch.send(buildAccessLogV2Payload(kind, opts || {})); }
+        const data = Object.assign({}, (opts || {}));
+        // Side logo: Kakuzu bot avatar rides at the side of the card header.
+        if (!data.logoUrl && !data.client && client) data.client = client;
+        try { return await ch.send(buildAccessLogV2Payload(kind, data)); }
         catch (e) {
             console.warn('[accessLog] V2 log rejected — embed fallback:', (e && e.message) || e);
-            try { return await ch.send(buildAccessLogFallbackEmbed(kind, opts || {})); } catch (_) { return null; }
+            try { return await ch.send(buildAccessLogFallbackEmbed(kind, data)); } catch (_) { return null; }
         }
     } catch (e) { console.warn('[accessLog] post failed:', (e && e.message) || e); return null; }
 }
