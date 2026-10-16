@@ -978,14 +978,18 @@ module.exports = {
             const slashName = (typeof interaction.isChatInputCommand === 'function' && interaction.isChatInputCommand()) ? interaction.commandName : null;
             const bypassesGuard = slashName && ACCESS_MANAGEMENT_COMMANDS.has(slashName);
             if (!bypassesGuard) {
-                let granted = false;
+                let access = null;
                 try {
-                    granted = await guildAccess.isGuildGranted(interaction.guildId);
+                    access = await guildAccess.checkGuildAccess(interaction.guildId);
                 } catch (guardErr) {
-                    console.warn('[access-guard] check failed (fail-closed):', (guardErr && guardErr.message) || guardErr);
-                    granted = false;
+                    console.warn('[access-guard] check threw (fail-closed):', (guardErr && guardErr.message) || guardErr);
+                    access = { kind: guildAccess.ACCESS_CHECK_FAILED, status: 'pending', source: 'guard', reason: 'guard exception' };
                 }
+                const granted = access && access.kind === guildAccess.ACCESS_GRANTED;
                 if (!granted) {
+                    const kind = access ? access.kind : 'check_failed';
+                    const reason = access ? access.reason : 'unknown';
+                    console.log('[access-guard] guild=%s kind=%s reason=%s action=blocked', interaction.guildId, kind, reason);
                     const locked = guildAccess.buildLockedReply();
                     try {
                         if (interaction.deferred || interaction.replied) {
@@ -996,6 +1000,7 @@ module.exports = {
                     } catch (_) { /* guard must never throw */ }
                     return;
                 }
+                console.log('[access-guard] guild=%s kind=granted action=allowed', interaction.guildId);
             }
         }
         if (interaction.isChatInputCommand()) {

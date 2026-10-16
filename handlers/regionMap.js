@@ -14,6 +14,7 @@
  * throughout the codebase (see countryCatalog REGIONS / normalizeRegion):
  *   ASIA, EU, NA, SA, OCEANIA, AFRICA, MIDDLE_EAST
  */
+const { fetchWithTimeout } = require('./fetchTimeout');
 /**
  * Asynchronous fallback that queries ip-api.com for the geographic location
  * of a public IP. Returns a `{ label, countryCode, ... }` object on success,
@@ -23,17 +24,36 @@
  * @param {string} ip - the public-facing IP
  * @returns {Promise<{label: string, countryCode: string|null, country: string|null, regionName: string|null, city: string|null}|null>}
  */
-async function geolocateIp(ip) {
-  if (!ip) return null;
-  // Hard timeout so a hanging lookup can never stall the raid request.
+async function geolocateIp(ip, context = {}) {
+  const guildId = context.guildId || 'unknown';
+  const guildName = context.guildName || 'unknown';
+  const placeId = context.placeId ?? 'n/a';
+  const jobId = context.jobId || context.serverId || 'n/a';
+  const username = context.robloxUsername || 'unknown';
+
+  if (!ip) {
+    console.warn(`[KAKUZU:IP] guild=${guildId} guildName=${JSON.stringify(guildName)} placeId=${placeId} jobId=${JSON.stringify(jobId)} robloxUser=${JSON.stringify(username)} addressMissing=true IP geolocation failed`);
+    return null;
+  }
+
+  const normalizedIp = String(ip).trim();
+  if (isInvalidOrPrivateIp(normalizedIp)) {
+    console.warn(`[KAKUZU:IP] guild=${guildId} guildName=${JSON.stringify(guildName)} placeId=${placeId} jobId=${JSON.stringify(jobId)} robloxUser=${JSON.stringify(username)} IP geolocation failed invalidPrivateIp=true address=${JSON.stringify(normalizedIp)}`);
+    return null;
+  }
+
+  console.log(`[KAKUZU:IP] guild=${guildId} guildName=${JSON.stringify(guildName)} placeId=${placeId} jobId=${JSON.stringify(jobId)} robloxUser=${JSON.stringify(username)} resolvingAddress=${JSON.stringify(normalizedIp)}`);
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), GEO_API_TIMEOUT_MS);
   try {
-    const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,countryCode,regionName,city`, {
+    const res = await fetch(`http://ip-api.com/json/${normalizedIp}?fields=status,country,countryCode,regionName,city`, {
       signal: controller.signal
     });
+    console.log(`[KAKUZU:IP] guild=${guildId} guildName=${JSON.stringify(guildName)} placeId=${placeId} jobId=${JSON.stringify(jobId)} robloxUser=${JSON.stringify(username)} httpStatus=${res.status} target=http://ip-api.com/json/${normalizedIp}?fields=status,country,countryCode,regionName,city`);
     const data = await res.json();
-    if (data.status === 'success') {
+    if (data && data.status === 'success') {
+      console.log(`[KAKUZU:IP] guild=${guildId} guildName=${JSON.stringify(guildName)} placeId=${placeId} jobId=${JSON.stringify(jobId)} robloxUser=${JSON.stringify(username)} country=${JSON.stringify(data.country || 'unknown')} countryCode=${JSON.stringify(data.countryCode || 'unknown')} region=${JSON.stringify(data.regionName || 'unknown')} city=${JSON.stringify(data.city || 'unknown')}`);
       return {
         label: `${data.city}, ${data.regionName}, ${data.country}`,
         countryCode: data.countryCode || null,
@@ -42,9 +62,10 @@ async function geolocateIp(ip) {
         city: data.city || null
       };
     }
+    console.warn(`[KAKUZU:IP] guild=${guildId} guildName=${JSON.stringify(guildName)} placeId=${placeId} jobId=${JSON.stringify(jobId)} robloxUser=${JSON.stringify(username)} IP geolocation failed status=${JSON.stringify((data && data.status) || 'unknown')} country=${JSON.stringify((data && data.country) || 'unknown')}`);
     return null;
   } catch (err) {
-    console.error('geolocateIp failed:', err);
+    console.error(`[KAKUZU:IP] guild=${guildId} guildName=${JSON.stringify(guildName)} placeId=${placeId} jobId=${JSON.stringify(jobId)} robloxUser=${JSON.stringify(username)} IP geolocation failed error=${(err && err.message) || String(err)}`);
     return null;
   } finally {
     clearTimeout(timer);
@@ -58,6 +79,42 @@ async function geolocateIp(ip) {
 // maps to one canonical region; legacy/non-ISO aliases (RoValra quirks like
 // the 'SINGAPORE' typo, 'USA', 'UK', ...) are appended on top.
 const countryCatalogDb = require('./countryCatalog');
+
+function logRegionContext(prefix, context = {}, message, extra = {}) {
+  const guildId = context.guildId || 'unknown';
+  const guildName = context.guildName || 'unknown';
+  const placeId = context.placeId ?? 'n/a';
+  const jobId = context.jobId || context.serverId || 'n/a';
+  const username = context.robloxUsername || 'unknown';
+  const base = [prefix, `guild=${guildId}`, `guildName=${JSON.stringify(guildName)}`, `placeId=${placeId}`, `jobId=${JSON.stringify(jobId)}`, `robloxUser=${JSON.stringify(username)}`];
+  const kv = Object.entries(extra).map(([k, v]) => `${k}=${typeof v === 'string' ? JSON.stringify(v) : String(v)}`);
+  console.log(base.concat(kv).join(' ') + ' ' + message);
+}
+
+function getIpGeoLogContext(ip, context = {}) {
+  return {
+    protocol: 'https',
+    ip: ip ? String(ip).trim() : 'n/a',
+    guildId: context.guildId || 'unknown',
+    guildName: context.guildName || 'unknown',
+    placeId: context.placeId ?? 'n/a',
+    jobId: context.jobId || context.serverId || 'n/a',
+    robloxUsername: context.robloxUsername || 'unknown'
+  };
+}
+
+function isInvalidOrPrivateIp(ip) {
+  const value = String(ip || '').trim();
+  if (!value) return true;
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return true;
+  const parts = value.split('.').map(Number);
+  if (parts.some((part) => Number.isNaN(part) || part < 0 || part > 255)) return true;
+  const [a, b] = parts;
+  if (a === 10 || a === 127 || a === 0 || a === 169 && b === 254 || a === 192 && b === 168 || a === 172 && b >= 16 && b <= 31 || a === 198 && b === 18) {
+    return true;
+  }
+  return false;
+}
 
 const COUNTRY_TO_REGION = {};
 for (const [name, region] of countryCatalogDb.COUNTRY_NAME_TO_REGION) {
@@ -126,45 +183,106 @@ function normalizeCountryCodeToRegion(code) {
 // The old invented `GET /v1/geolocation?ip=` endpoint returned 404 for every
 // IP and never worked.
 const ROVALRA_DC_LIST_ENDPOINT = 'https://apis.rovalra.com/v1/datacenters/list';
-const ROVALRA_TIMEOUT_MS = 8000;
+const ROVALRA_TIMEOUT_MS = Number(process.env.ROVALRA_TIMEOUT_MS || 8000);
 const ROVALRA_CACHE_TTL_MS = 60 * 60 * 1000; // datacenter list is stable — 1h cache
+const ROVALRA_MAX_RETRIES = 2;
+const ROVALRA_RETRY_BASE_MS = 1000;
+const ROVALRA_DC_ID_CACHE_TTL_MS = 60 * 60 * 1000;
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+function isTransientHttpStatus(status) {
+    return status >= 500 || status === 429;
+}
 const GEO_API_TIMEOUT_MS = 4000;
 
 // In-memory cache of dataCenterId -> location { city, region, country, country_name }.
-let rovalraDcCache = { map: null, at: 0 };
+let rovalraMapCachedAt = 0;
+const rovalraDcIdCache = new Map(); // dataCenterId -> { location, at }
+let rovalraInFlight = null;
 
-async function fetchRoValraDatacenterMap() {
-  if (rovalraDcCache.map && Date.now() - rovalraDcCache.at < ROVALRA_CACHE_TTL_MS) {
-    return rovalraDcCache.map;
+async function fetchRoValraDatacenterMap(context = {}) {
+  const guildId = context.guildId || 'unknown';
+  const guildName = context.guildName || 'unknown';
+  const placeId = context.placeId ?? 'n/a';
+  const jobId = context.jobId || context.serverId || 'n/a';
+  const username = context.robloxUsername || 'unknown';
+  const base = `guild=${guildId} guildName=${JSON.stringify(guildName)} placeId=${placeId} jobId=${JSON.stringify(jobId)} robloxUser=${JSON.stringify(username)}`;
+
+  // 1) In-flight deduplication: only one map fetch in flight at a time.
+  if (rovalraInFlight) {
+    console.log(`[KAKUZU:ROVALRA:CACHE] ${base} endpoint=${ROVALRA_DC_LIST_ENDPOINT} in_flight_dedup=true`);
+    return rovalraInFlight;
   }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ROVALRA_TIMEOUT_MS);
-  try {
-    const res = await fetch(ROVALRA_DC_LIST_ENDPOINT, { signal: controller.signal });
-    if (!res.ok) return null;
-    let list;
-    try {
-      list = await res.json();
-    } catch {
-      return null; // malformed JSON
-    }
-    if (!Array.isArray(list)) return null;
+
+  // 2) Whole-map cache freshness + per-dataCenterId bounded cache.
+  if (rovalraMapCachedAt && Date.now() - rovalraMapCachedAt < ROVALRA_CACHE_TTL_MS) {
     const map = new Map();
-    for (const entry of list) {
-      if (!entry || !Array.isArray(entry.dataCenterIds) || !entry.location) continue;
-      for (const id of entry.dataCenterIds) {
-        map.set(Number(id), entry.location);
+    const now = Date.now();
+    for (const [id, entry] of rovalraDcIdCache) {
+      if (now - entry.at < ROVALRA_DC_ID_CACHE_TTL_MS) map.set(id, entry.location);
+    }
+    if (map.size > 0) {
+      console.log(`[KAKUZU:ROVALRA:CACHE] ${base} endpoint=${ROVALRA_DC_LIST_ENDPOINT} cache_hit=true entries=${map.size}`);
+      return map;
+    }
+  }
+
+  // 3) Fetch with retries for transient failures only (5xx, 429, network, timeout).
+  rovalraInFlight = (async () => {
+    for (let attempt = 0; attempt <= ROVALRA_MAX_RETRIES; attempt++) {
+      try {
+        console.log(`[KAKUZU:ROVALRA:HTTP] ${base} endpoint=${ROVALRA_DC_LIST_ENDPOINT} attempt=${attempt + 1} timeout_ms=${ROVALRA_TIMEOUT_MS}`);
+        const res = await fetchWithTimeout(ROVALRA_DC_LIST_ENDPOINT, {}, ROVALRA_TIMEOUT_MS);
+        console.log(`[KAKUZU:ROVALRA:HTTP] ${base} endpoint=${ROVALRA_DC_LIST_ENDPOINT} attempt=${attempt + 1} http_status=${res.status}`);
+        if (!res.ok) {
+          if (isTransientHttpStatus(res.status) && attempt < ROVALRA_MAX_RETRIES) {
+            const retryAfter = res.headers.get('retry-after');
+            const delay = retryAfter ? parseInt(retryAfter, 10) * 1000 : ROVALRA_RETRY_BASE_MS * (attempt + 1);
+            console.warn(`[KAKUZU:ROVALRA] ${base} endpoint=${ROVALRA_DC_LIST_ENDPOINT} attempt=${attempt + 1} http_status=${res.status} transient=true retry_in_ms=${delay}`);
+            await sleep(delay);
+            continue;
+          }
+          console.warn(`[KAKUZU:ROVALRA] ${base} endpoint=${ROVALRA_DC_LIST_ENDPOINT} attempt=${attempt + 1} http_status=${res.status} transient=false`);
+          return null;
+        }
+        let list;
+        try { list = await res.json(); } catch (err) {
+          console.warn(`[KAKUZU:ROVALRA:HTTP] ${base} endpoint=${ROVALRA_DC_LIST_ENDPOINT} attempt=${attempt + 1} malformed_json=true error=${err.message}`);
+          return null;
+        }
+        if (!Array.isArray(list)) {
+          console.warn(`[KAKUZU:ROVALRA:HTTP] ${base} endpoint=${ROVALRA_DC_LIST_ENDPOINT} attempt=${attempt + 1} invalid_payload=true`);
+          return null;
+        }
+        const map = new Map();
+        const now = Date.now();
+        for (const entry of list) {
+          if (!entry || !Array.isArray(entry.dataCenterIds) || !entry.location) continue;
+          for (const id of entry.dataCenterIds) {
+            const nid = Number(id);
+            map.set(nid, entry.location);
+            rovalraDcIdCache.set(nid, { location: entry.location, at: now });
+          }
+        }
+        rovalraMapCachedAt = now;
+        console.log(`[KAKUZU:ROVALRA:CACHE] ${base} endpoint=${ROVALRA_DC_LIST_ENDPOINT} cache_updated=true entries=${list.length} map_size=${map.size}`);
+        return map;
+      } catch (err) {
+        const isTimeout = err.name === 'AbortError' || (err.message && err.message.includes('timed out'));
+        console.warn(`[KAKUZU:ROVALRA:HTTP] ${base} endpoint=${ROVALRA_DC_LIST_ENDPOINT} attempt=${attempt + 1} error=${(err && err.message) || String(err)} transient=${isTimeout}`);
+        if (attempt < ROVALRA_MAX_RETRIES) {
+          await sleep(ROVALRA_RETRY_BASE_MS * (attempt + 1));
+          continue;
+        }
+        return null;
       }
     }
-    rovalraDcCache = { map, at: Date.now() };
-    return map;
-  } catch {
-    return null; // network error / timeout — never crash the raid request
-  } finally {
-    clearTimeout(timer);
-  }
-}
+    return null;
+  })();
 
+  rovalraInFlight.then(() => { rovalraInFlight = null; }).catch(() => { rovalraInFlight = null; });
+  return rovalraInFlight;
+}
 /**
  * Resolves a Roblox game server's dataCenterId to a NORMALIZED region code +
  * ISO country code via the RoValra datacenter list. Returns null on any
@@ -173,12 +291,29 @@ async function fetchRoValraDatacenterMap() {
  * @param {string|number} dataCenterId - DataCenterId from the gamejoin joinScript
  * @returns {Promise<{region: string|null, countryCode: string|null, countryName: string|null, city: string|null, label: string|null}|null>}
  */
-async function resolveRoValraDatacenterRegion(dataCenterId) {
-  if (dataCenterId == null) return null;
-  const map = await fetchRoValraDatacenterMap();
-  if (!map) return null;
+async function resolveRoValraDatacenterRegion(dataCenterId, context = {}) {
+  const guildId = context.guildId || 'unknown';
+  const guildName = context.guildName || 'unknown';
+  const placeId = context.placeId ?? 'n/a';
+  const jobId = context.jobId || context.serverId || 'n/a';
+  const username = context.robloxUsername || 'unknown';
+
+  if (dataCenterId == null) {
+    console.warn(`[KAKUZU:ROVALRA] guild=${guildId} guildName=${JSON.stringify(guildName)} placeId=${placeId} jobId=${JSON.stringify(jobId)} robloxUser=${JSON.stringify(username)} missingDataCenterId=true`);
+    return null;
+  }
+
+  const map = await fetchRoValraDatacenterMap(context);
+  if (!map) {
+    console.warn(`[KAKUZU:ROVALRA] guild=${guildId} guildName=${JSON.stringify(guildName)} placeId=${placeId} jobId=${JSON.stringify(jobId)} robloxUser=${JSON.stringify(username)} noDatacenterMap=true`);
+    return null;
+  }
+
   const location = map.get(Number(dataCenterId));
-  if (!location) return null;
+  if (!location) {
+    console.warn(`[KAKUZU:ROVALRA] guild=${guildId} guildName=${JSON.stringify(guildName)} placeId=${placeId} jobId=${JSON.stringify(jobId)} robloxUser=${JSON.stringify(username)} dataCenterId=${JSON.stringify(String(dataCenterId))} lookupMiss=true`);
+    return null;
+  }
 
   const countryCode = location.country || null;
   const countryName = location.country_name || null;
@@ -186,8 +321,13 @@ async function resolveRoValraDatacenterRegion(dataCenterId) {
   const region = normalizeCountryToRegion(countryName)
     || normalizeCountryCodeToRegion(countryCode)
     || null;
-  // Human-readable label for embeds: "Mumbai, India" style.
+  if (!region || !countryCode) {
+    console.warn(`[KAKUZU:ROVALRA] guild=${guildId} guildName=${JSON.stringify(guildName)} placeId=${placeId} jobId=${JSON.stringify(jobId)} robloxUser=${JSON.stringify(username)} country=${JSON.stringify(countryName || 'unknown')} countryCode=${JSON.stringify(countryCode || 'unknown')} region=${JSON.stringify(region || 'unknown')} mapStatus=unmapped`);
+  }
+
   const labelParts = [city, countryName].filter(Boolean);
+  console.log(`[KAKUZU:ROVALRA] guild=${guildId} guildName=${JSON.stringify(guildName)} placeId=${placeId} jobId=${JSON.stringify(jobId)} robloxUser=${JSON.stringify(username)} country=${JSON.stringify(countryName || 'unknown')} countryCode=${JSON.stringify(countryCode || 'unknown')} city=${JSON.stringify(city || 'unknown')} mappedRegion=${JSON.stringify(region || 'unknown')} label=${JSON.stringify(labelParts.join(', ') || 'unknown')}`);
+
   return {
     region,
     countryCode,

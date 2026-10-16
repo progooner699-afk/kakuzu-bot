@@ -259,6 +259,7 @@ function setCachedStatus(gid, status) {
     if (!status) return;
     const now = Date.now();
     accessCache.set(accessCacheKey(gid), { status: String(status), expiresAt: now + accessCacheTtlMs, confirmedAt: now });
+    console.log(`[KAKUZU:ACCESS:CACHE] guild=${gid} updated=status:${String(status)} ttl_ms=${accessCacheTtlMs}`);
 }
 function invalidateGuildCache(gid) { accessCache.delete(accessCacheKey(gid)); }
 function getAccessCacheSize() { return accessCache.size; }
@@ -302,6 +303,74 @@ function refreshGuildStatusInBackground(gid) {
         .then((row) => setCachedStatus(gid, normalizeAccessStatus(row)))
         .catch((err) => console.warn('[guildAccess] background revalidate failed (kept last known status):', sharedPingDb.sanitizeError(err)))
         .finally(() => accessRefreshInFlight.delete(gid));
+}
+
+/* ── Tri-state access check (reusable) ──────────────────────────────────────
+ * Returns one of:
+ *   ACCESS_GRANTED        — Supabase confirmed the guild is granted.
+ *   ACCESS_NOT_GRANTED    — Supabase confirmed pending/revoked (we know the answer).
+ *   ACCESS_CHECK_FAILED   — DB read failed/timed out / DATABASE_URL missing.
+ *
+ * Fail-closed: callers must deny on NOT_GRANTED and CHECK_FAILED alike, but
+ * CHECK_FAILED is logged distinctly so DB/config failures are never silently
+ * mistaken for a confirmed "not granted" state. Empty Supabase results (no
+ * row) are distinguished from query failures: no row => NOT_GRANTED, error =>
+ * CHECK_FAILED.
+ */
+const ACCESS_GRANTED = 'granted';
+const ACCESS_NOT_GRANTED = 'not_granted';
+const ACCESS_CHECK_FAILED = 'check_failed';
+
+function accessKindFor(status) {
+    return status === 'granted' ? ACCESS_GRANTED : ACCESS_NOT_GRANTED;
+}
+
+/**
+ * Reusable premium-access check for a guild.
+ * @param {string} gidRaw - Discord guild id
+ * @returns {Promise<{kind: string, status: string, source: string, reason: string}>}
+ */
+async function checkGuildAccess(gidRaw) {
+    const gid = String(gidRaw || '').trim();
+    if (!gid) {
+        console.warn('[KAKUZU:ACCESS] guild=<missing> kind=not_granted reason=missing_guild_id');
+        return { kind: ACCESS_NOT_GRANTED, status: 'pending', source: 'input', reason: 'missing guild id' };
+    }
+
+    // 1) Fresh cache hit: free, zero latency, zero Supabase load.
+    const fresh = getCachedStatus(gid);
+    if (fresh) {
+        console.log(`[KAKUZU:ACCESS:CACHE] guild=${gid} hit=true kind=${accessKindFor(fresh)} source=fresh_cache`);
+        return { kind: accessKindFor(fresh), status: fresh, source: 'cache', reason: 'fresh cache hit' };
+    }
+
+    // 2) Stale confirmed status within grace window: serve last known + refresh in background.
+    const stale = getStaleConfirmedStatus(gid);
+    if (stale) {
+        refreshGuildStatusInBackground(gid);
+        console.log(`[KAKUZU:ACCESS:CACHE] guild=${gid} stale=true kind=${accessKindFor(stale)} within_grace=true revalidating_background=true`);
+        return { kind: accessKindFor(stale), status: stale, source: 'cache-stale', reason: 'served last confirmed status within grace window' };
+    }
+
+    // 3) Never confirmed this session: take ONE bounded read (fail CLOSED).
+    //    NOTE: we do NOT bail out early when DATABASE_URL is unset. The
+    //    in-memory Supabase fake used by the test suite (and local dev) still
+    //    answers the SELECT, so a granted guild (row present, no DB config)
+    //    must still unlock. Fail-closed here means the bounded read itself
+    //    errors/times out -> CHECK_FAILED, never a guessed status.
+    const inFlight = fetchGuildRow(gid);
+    inFlight.then((row) => setCachedStatus(gid, normalizeAccessStatus(row)))
+        .catch((err) => console.warn('[KAKUZU:ACCESS:DB] guild=%s background_cache_write_failed reason=%s', gid, sharedPingDb.sanitizeError(err)));
+    try {
+        const row = await withTimeout(inFlight, guardReadTimeoutMs, 'guild access read');
+        const safe = normalizeAccessStatus(row);
+        setCachedStatus(gid, safe);
+        console.log(`[KAKUZU:ACCESS:DB] guild=%s kind=%s status=%s source=db_read`, gid, accessKindFor(safe), safe);
+        return { kind: accessKindFor(safe), status: safe, source: 'db', reason: 'bounded database read' };
+    } catch (err) {
+        console.warn('[KAKUZU:ACCESS:DB] guild=%s kind=check_failed reason=%s fail_closed=true', gid, sharedPingDb.sanitizeError(err));
+        return { kind: ACCESS_CHECK_FAILED, status: 'pending', source: 'db', reason: 'bounded read failed: ' + sharedPingDb.sanitizeError(err) };
+    }
 }
 async function getGuildAccessStatus(gidRaw) {
     const gid = String(gidRaw || '').trim();
@@ -957,10 +1026,11 @@ async function reconcileGuildsOnReady(client) {
 }
 module.exports = {
     ACCESS_CACHE_TTL_MS, ONBOARDING_CHANNEL_NAME, GUARD_READ_TIMEOUT_MS,
+    ACCESS_GRANTED, ACCESS_NOT_GRANTED, ACCESS_CHECK_FAILED,
     ensureAccessTables, kickTablesInit, getSupportGuildId, getBotOwnerId, getManagerRoleIds, getSupportUrl,
     getSuperAdminIds, isSuperAdmin, SUPERADMIN_USERNAMES,
     verifyAccessPassword, authorizeAccessManager,
-    getGuildAccessStatus, isGuildGranted, getCachedStatus, setCachedStatus, invalidateGuildCache, getAccessCacheSize,
+    getGuildAccessStatus, isGuildGranted, checkGuildAccess, getCachedStatus, setCachedStatus, invalidateGuildCache, getAccessCacheSize,
     getStaleConfirmedStatus, refreshGuildStatusInBackground, _setGuardTimingForTests, _resetTablesInitForTests,
     fetchGuildRow, upsertGuildOnJoin, markGuildLeft, saveOnboardingRefs, saveOwnerDmStatus,
 

@@ -139,37 +139,39 @@ async function getUserPresence(userId) {
         );
 
         if (!response.ok) {
+            console.warn(`[KAKUZU:ROBUX] userId=${userId} presenceFetchFailed=true httpStatus=${response.status} endpoint=https://presence.roblox.com/v1/presence/users`);
             return { success: false, error: `Failed to fetch presence: ${response.status}` };
         }
 
         const data = await response.json();
 
         if (!data.userPresences || data.userPresences.length === 0) {
+            console.warn(`[KAKUZU:ROBUX] userId=${userId} noPresenceData=true endpoint=https://presence.roblox.com/v1/presence/users`);
             return { success: false, error: 'No presence data found' };
         }
 
         const presence = data.userPresences[0];
-        
-        // userPresenceType 2 = InGame, 3 = InStudio
+
         if (presence.userPresenceType !== 2 && presence.userPresenceType !== 3) {
+            console.warn(`[KAKUZU:ROBUX] userId=${userId} userPresenceType=${presence.userPresenceType ?? 'unknown'} notInGame=true`);
             return { success: false, error: 'User is not currently in a game' };
         }
 
         const placeId = presence.placeId;
         const gameId = presence.gameId;
-        console.log('DEBUG placeId:', placeId, 'serverId:', gameId);
-        
+        console.log(`[KAKUZU:ROBUX] userId=${userId} placeId=${placeId ?? 'n/a'} jobId=${gameId ?? 'n/a'} userPresenceType=${presence.userPresenceType ?? 'unknown'}`);
+
         if (!placeId) {
+            console.warn(`[KAKUZU:ROBUX] userId=${userId} missingPlaceId=true`);
             return { success: false, error: 'No game place ID found' };
         }
 
-        // Get game details
         const universeResponse = await fetchWithTimeout(
             `https://games.roblox.com/v1/games?universeIds=${presence.universeId}`,
             {},
             ROBLOX_FETCH_TIMEOUT_MS
         );
-        
+
         let gameName = 'Unknown Game';
         if (universeResponse.ok) {
             const universeData = await universeResponse.json();
@@ -178,7 +180,6 @@ async function getUserPresence(userId) {
             }
         }
 
-        // Get server join script
         let joinScript = '';
         if (gameId) {
             const serverResponse = await fetchWithTimeout(
@@ -186,7 +187,7 @@ async function getUserPresence(userId) {
                 {},
                 ROBLOX_FETCH_TIMEOUT_MS
             );
-            
+
             if (serverResponse.ok) {
                 const serverData = await serverResponse.json();
                 if (serverData.joinScript) {
@@ -205,7 +206,7 @@ async function getUserPresence(userId) {
             joinScript
         };
     } catch (error) {
-        console.error('Roblox presence fetch error:', error);
+        console.error(`[KAKUZU:ROBUX] userId=${userId} presenceFetchError=${(error && error.message) || String(error)}`);
         return { success: false, error: 'Failed to fetch Roblox presence' };
     }
 }
@@ -217,7 +218,7 @@ async function getUserPresence(userId) {
  */
 async function detectGameAndRegion(userId) {
     const presence = await getUserPresence(userId);
-    
+
     if (!presence.success) {
         return presence;
     }
@@ -226,8 +227,8 @@ async function detectGameAndRegion(userId) {
     let detectedGame = 'unknown';
     let detectedRegion = 'NA';
     let detectedCountryCode = null;
-    let regionLabel = null;   // human-readable "City, Country" of the server
-    let regionSource = null;  // 'RoValra' | 'ip-api' | null
+    let regionLabel = null;
+    let regionSource = null;
 
     if (gameName.includes('strongest battlegrounds') || gameName.includes('tsb')) {
         detectedGame = 'tsb';
@@ -244,52 +245,66 @@ async function detectGameAndRegion(userId) {
         detectedGame = 'fishtrap';
     }
 
-    // Resolve the hosting server's IP / data-center via the gamejoin API
     if (presence.serverId && presence.placeId) {
         try {
             const { getServerIp } = require('./robloxAuth');
             const ipResult = await getServerIp(presence.placeId, presence.serverId);
+            const hasServerLocationData = Boolean(ipResult && (ipResult.machineAddress || ipResult.publicAddress || ipResult.dataCenterId));
+            const guildContext = { guildId: 'unknown', guildName: 'unknown', placeId: presence.placeId, serverId: presence.serverId, robloxUsername: userId ? String(userId) : 'unknown' };
+
+            console.log(`[KAKUZU:REGION] guild=${guildContext.guildId} guildName=${JSON.stringify(guildContext.guildName)} placeId=${presence.placeId} jobId=${JSON.stringify(presence.serverId)} robloxUser=${JSON.stringify(guildContext.robloxUsername)} serverDetectionStarted=true machineAddressFound=${Boolean(ipResult && ipResult.machineAddress)} publicAddressFound=${Boolean(ipResult && ipResult.publicAddress)} dataCenterId=${JSON.stringify(ipResult && ipResult.dataCenterId ? String(ipResult.dataCenterId) : 'none')}`);
+
             if (ipResult && (ipResult.machineAddress || ipResult.dataCenterId)) {
                 const { resolveRoValraDatacenterRegion, geolocateIp, normalizeCountryToRegion, normalizeCountryCodeToRegion } = require('./regionMap');
-                let resolved = null;      // normalized region code (or raw label)
-                let resolvedLabel = null; // human-readable "City, Country"
+                let resolved = null;
+                let resolvedLabel = null;
                 let source = null;
 
-                // 1) RoValra FIRST — its public datacenter list gives the EXACT
-                //    country for the server's dataCenterId (no IP guessing).
                 try {
-                    const rovalra = await resolveRoValraDatacenterRegion(ipResult.dataCenterId);
+                    const rovalra = await resolveRoValvaDatacenterRegion(ipResult.dataCenterId, guildContext);
                     if (rovalra && (rovalra.region || rovalra.countryCode)) {
                         resolved = rovalra.region || null;
                         detectedCountryCode = rovalra.countryCode || null;
                         resolvedLabel = rovalra.label || null;
                         source = 'RoValra';
+                        console.log(`[KAKUZU:REGION] guild=${guildContext.guildId} guildName=${JSON.stringify(guildContext.guildName)} placeId=${presence.placeId} jobId=${JSON.stringify(presence.serverId)} robloxUser=${JSON.stringify(guildContext.robloxUsername)} resolvedFromRoValra=true country=${JSON.stringify(detectedCountryCode || 'unknown')} mappedRegion=${JSON.stringify(resolved || 'unknown')}`);
+                    } else {
+                        console.warn(`[KAKUZU:ROVALRA] guild=${guildContext.guildId} guildName=${JSON.stringify(guildContext.guildName)} placeId=${presence.placeId} jobId=${JSON.stringify(presence.serverId)} robloxUser=${JSON.stringify(guildContext.robloxUsername)} machineAddressMissingFromResponse=true dataCenterId=${JSON.stringify(ipResult && ipResult.dataCenterId ? String(ipResult.dataCenterId) : 'none')}`);
                     }
-                } catch (err) { /* fall through to ip-api */ }
+                } catch (err) {
+                    console.warn(`[KAKUZU:ROVALRA] guild=${guildContext.guildId} guildName=${JSON.stringify(guildContext.guildName)} placeId=${presence.placeId} jobId=${JSON.stringify(presence.serverId)} robloxUser=${JSON.stringify(guildContext.robloxUsername)} rovalraFailure=true error=${(err && err.message) || String(err)}`);
+                }
 
-                // 2) ip-api.com fallback when RoValra had no hit / failed.
                 if (!resolved && (ipResult.publicAddress || ipResult.machineAddress)) {
+                    const ipCandidate = ipResult.publicAddress || ipResult.machineAddress;
+                    console.log(`[KAKUZU:IP] guild=${guildContext.guildId} guildName=${JSON.stringify(guildContext.guildName)} placeId=${presence.placeId} jobId=${JSON.stringify(presence.serverId)} robloxUser=${JSON.stringify(guildContext.robloxUsername)} addressCandidate=${JSON.stringify(ipCandidate || 'none')} machineAddressFound=${Boolean(ipResult.machineAddress)} publicAddressFound=${Boolean(ipResult.publicAddress)}`);
                     try {
-                        const geo = await geolocateIp(ipResult.publicAddress || ipResult.machineAddress);
+                        const geo = await geolocateIp(ipCandidate, guildContext);
                         if (geo) {
                             resolved = normalizeCountryToRegion(geo.country)
                                 || normalizeCountryCodeToRegion(geo.countryCode)
-                                || geo.label; // last resort: raw "City, Region, Country" label
+                                || geo.label;
                             detectedCountryCode = geo.countryCode || null;
                             resolvedLabel = geo.label;
                             source = 'ip-api';
+                            console.log(`[KAKUZU:REGION] guild=${guildContext.guildId} guildName=${JSON.stringify(guildContext.guildName)} placeId=${presence.placeId} jobId=${JSON.stringify(presence.serverId)} robloxUser=${JSON.stringify(guildContext.robloxUsername)} resolvedFromIp=true country=${JSON.stringify(detectedCountryCode || 'unknown')} mappedRegion=${JSON.stringify(resolved || 'unknown')}`);
+                        } else {
+                            console.warn(`[KAKUZU:IP] guild=${guildContext.guildId} guildName=${JSON.stringify(guildContext.guildName)} placeId=${presence.placeId} jobId=${JSON.stringify(presence.serverId)} robloxUser=${JSON.stringify(guildContext.robloxUsername)} IP geolocation failed`);
                         }
-                    } catch (err) { /* both failed -> 'Unknown' below */ }
+                    } catch (err) {
+                        console.error(`[KAKUZU:IP] guild=${guildContext.guildId} guildName=${JSON.stringify(guildContext.guildName)} placeId=${presence.placeId} jobId=${JSON.stringify(presence.serverId)} robloxUser=${JSON.stringify(guildContext.robloxUsername)} IP geolocation failed error=${(err && err.message) || String(err)}`);
+                    }
                 }
 
-                detectedRegion = resolved || 'Unknown'; // both live services failed
+                detectedRegion = resolved || 'Unknown';
                 regionLabel = resolvedLabel;
                 regionSource = source;
-                console.log('Resolved region:', detectedRegion, 'country:', detectedCountryCode || '-',
-                    '(source:', source || 'unknown', resolvedLabel ? '| ' + resolvedLabel : '', ')');
+                console.log(`[KAKUZU:REGION] guild=${guildContext.guildId} guildName=${JSON.stringify(guildContext.guildName)} placeId=${presence.placeId} jobId=${JSON.stringify(presence.serverId)} robloxUser=${JSON.stringify(guildContext.robloxUsername)} finalRegion=${JSON.stringify(detectedRegion)} countryCode=${JSON.stringify(detectedCountryCode || 'unknown')} regionSource=${JSON.stringify(source || 'unknown')} label=${JSON.stringify(resolvedLabel || 'unknown')}`);
+            } else {
+                console.warn(`[KAKUZU:REGION] guild=${guildContext.guildId} guildName=${JSON.stringify(guildContext.guildName)} placeId=${presence.placeId} jobId=${JSON.stringify(presence.serverId)} robloxUser=${JSON.stringify(guildContext.robloxUsername)} noServerLocationData=true`);
             }
         } catch (err) {
-            console.error('gamejoin region lookup failed:', err);
+            console.error(`[KAKUZU:REGION] guild=unknown guildName="unknown" placeId=${presence.placeId ?? 'n/a'} jobId=${JSON.stringify(presence.serverId || 'n/a')} robloxUser=${JSON.stringify(userId || 'unknown')} gamejoinRegionLookupFailed=true error=${(err && err.message) || String(err)}`);
         }
     }
 
@@ -305,8 +320,6 @@ async function detectGameAndRegion(userId) {
         serverLink = `https://www.roblox.com/games/${presence.placeId}`;
     }
 
-    // Fetch the Roblox game icon (thumbnail) to render as the embed's media image.
-    let gameIconUrl = '';
     if (presence.universeId) {
         try {
             const thumbResponse = await fetchWithTimeout(
