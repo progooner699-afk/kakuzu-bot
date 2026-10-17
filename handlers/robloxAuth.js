@@ -147,7 +147,10 @@ function classifyGameJoinBlocker(httpStatus, response) {
   const msg = String((response && (response.errorMessage
     || (response.error && response.error.message)
     || (Array.isArray(response.errors) && response.errors[0] && response.errors[0].message))) || '');
-  if (/challenge is required/i.test(msg)) return 'roblox_challenge_required';
+  const hasChallengeHeader = Boolean(response && response.challengeType);
+  // Challenge is identified by EITHER the body message OR the presence of an
+  // rblx-challenge-type header (which names the specific challenge method).
+  if (/challenge is required/i.test(msg) || (hasChallengeHeader && httpStatus === 403)) return 'roblox_challenge_required';
   if (httpStatus === 403) return 'forbidden_origin_or_token';
   if (httpStatus === 401) return 'unauthorized_cookie';
   if (httpStatus === 429) return 'rate_limited';
@@ -219,14 +222,27 @@ async function getServerIp(placeId, serverId, context = {}) {
     // via Set-Cookie. It is adopted ONLY when this join authenticated (a
     // joinScript came back); the value itself is never logged.
     const replacement = extractReplacementSecurityCookie(res);
+    // Inspect Roblox challenge headers (safe: only the public challenge-type
+    // enum value and presence booleans are surfaced — never the challenge-id
+    // value itself, never metadata contents, never cookies/CSRF tokens/IPs).
+    const challengeType = res.headers.get('rblx-challenge-type') || null;
+    const challengeIdPresent = Boolean(res.headers.get('rblx-challenge-id'));
+    const challengeMetaPresent = Boolean(res.headers.get('rblx-challenge-metadata'));
+    const responseContentType = res.headers.get('content-type') || null;
     let response;
-    try { response = await res.json(); } catch (_) { response = {}; }
-    // Surface the HTTP status on the parsed body: Roblox's challenge body
-    // carries errorCode/errorMessage but NOT a `status: 403` field, so the
-    // challenge detection below must not rely on the body alone (verified
-    // against a live 403 challenge on 2026-10-17).
+    let bodyJsonValid = false;
+    try { response = await res.json(); bodyJsonValid = true; } catch (_) { response = {}; }
+    // Surface the HTTP status + challenge header info on the parsed body so
+    // downstream challenge detection can branch on headers, not just body text.
+    // Roblox's challenge body carries errorCode/errorMessage but NOT a
+    // `status: 403` field (verified against a live 403 challenge on 2026-10-17).
     if (response && typeof response === 'object') {
       response.httpStatus = res.status;
+      response.challengeType = challengeType;
+      response.challengeIdPresent = challengeIdPresent;
+      response.challengeMetaPresent = challengeMetaPresent;
+      response.responseContentType = responseContentType;
+      response.bodyJsonValid = bodyJsonValid;
     }
 
     // No behavioral change: rotation still requires a real joinScript.
@@ -240,7 +256,12 @@ async function getServerIp(placeId, serverId, context = {}) {
       httpStatus: res.status,
       csrfPresent,
       replacementReceived: replacement.received,
-      response
+      response,
+      challengeType,
+      challengeIdPresent,
+      challengeMetaPresent,
+      responseContentType,
+      bodyJsonValid
     });
 
     // Persist the SAME whitelisted fields for getLastGameJoinAttempt() so
@@ -256,6 +277,12 @@ async function getServerIp(placeId, serverId, context = {}) {
         joinScript: joinScriptFound,
         csrfPresent,
         replacementCookieReceived: replacement.received,
+        challengeType: challengeType || null,
+        challengeHeadersPresent: Boolean(challengeType),
+        challengeIdPresent: challengeIdPresent,
+        challengeMetaPresent: challengeMetaPresent,
+        responseContentType: responseContentType || null,
+        bodyJsonValid: bodyJsonValid,
         responseStatus: response && response.status !== undefined ? response.status : null,
         queuePosition: response && response.queuePosition !== undefined ? response.queuePosition : null,
         errorCode: response && response.errorCode !== undefined ? response.errorCode : null,
@@ -290,14 +317,17 @@ async function getServerIp(placeId, serverId, context = {}) {
   ].join(' ').toLowerCase();
   // Use the HTTP status surfaced by attemptJoin: the live challenge body does
   // NOT include a `status: 403` field (only errorCode/errorMessage), so
-  // checking the body alone made this branch dead code.
-  const isChallengeRequired = (response.httpStatus === 403 || response.status === 403) && /challenge/i.test(fields);
+  // checking the body alone made this branch dead code. The challenge can
+  // also be positively identified by the rblx-challenge-type response header.
+  const hasChallengeHeader = Boolean(response.challengeType);
+  const isChallengeRequired = (response.httpStatus === 403 || response.status === 403) && (/challenge/i.test(fields) || hasChallengeHeader);
 
   if (isChallengeRequired) {
     console.warn(
       `[gamejoin] challenge_required=true attempt=1 httpStatus=${response.httpStatus ?? 403} ` +
       `statusMessage="${String(response.statusMessage || 'Challenge is required to authorize the request')}" ` +
       `errorCode=${response.errorCode ?? 'none'} errorMessage="${String(response.errorMessage || 'none')}" ` +
+      `challengeType=${response.challengeType || 'none'} challengeHeadersPresent=${hasChallengeHeader ? 'true' : 'false'} ` +
       `csrfPresent=${Boolean(response.csrfPresent)} replacementCookieReceived=${Boolean(response.replacementCookieReceived)}`
     );
     return null;
@@ -331,17 +361,27 @@ async function getServerIp(placeId, serverId, context = {}) {
  * Logs a single join-game-instance attempt using ONLY whitelisted fields.
  * Never logs the raw response body, machineAddress, public addresses/IPs,
  * cookies, CSRF tokens, bearer/Authorization headers or secrets.
+ * Challenge headers are logged as: challengeType (public enum value like
+ * 'captcha'/'turnstile') + presence booleans only (never the challenge-id
+ * value or metadata contents).
  * @param {{attempt:number, httpStatus:number|null, csrfPresent:boolean,
- *          replacementReceived:boolean, response:object}} log
+ *          replacementReceived:boolean, response:object,
+ *          challengeType:string|null, challengeIdPresent:boolean,
+ *          challengeMetaPresent:boolean, responseContentType:string|null,
+ *          bodyJsonValid:boolean}} log
  */
-function logGameJoinAttempt({ attempt, httpStatus, csrfPresent, replacementReceived, response }) {
+function logGameJoinAttempt({ attempt, httpStatus, csrfPresent, replacementReceived, response, challengeType, challengeIdPresent, challengeMetaPresent, responseContentType, bodyJsonValid }) {
   const joinScript = !!(response && response.joinScript);
   const fields = [
     `attempt=${attempt}`,
     `httpStatus=${httpStatus}`,
     `joinScript=${joinScript ? 'true' : 'false'}`,
     `csrfPresent=${csrfPresent ? 'true' : 'false'}`,
-    `replacementCookieReceived=${replacementReceived ? 'true' : 'false'}`
+    `replacementCookieReceived=${replacementReceived ? 'true' : 'false'}`,
+    `challengeType=${challengeType || 'none'}`,
+    `challengeHeadersPresent=${challengeType ? 'true' : 'false'}`,
+    `responseContentType=${responseContentType || 'none'}`,
+    `bodyJsonValid=${bodyJsonValid ? 'true' : 'false'}`
   ];
 
   if (response) {

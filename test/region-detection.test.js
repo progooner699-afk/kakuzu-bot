@@ -140,6 +140,25 @@ function findLog(pattern) {
     return logs.find((entry) => entry.args.some((a) => pattern.test(String(a))));
 }
 
+/**
+ * Builds a mock fetch Response headers object that supports challenge headers.
+ * Used by gamejoin tests to verify challenge-type detection.
+ * Safe: the challenge-id and metadata values are test secrets that are never
+ * expected to appear in persisted records.
+ */
+function makeMockHeaders(opts = {}) {
+    const headers = {};
+    if (opts.csrf) headers['x-csrf-token'] = opts.csrf;
+    if (opts.challengeType) headers['rblx-challenge-type'] = opts.challengeType;
+    if (opts.challengeId) headers['rblx-challenge-id'] = opts.challengeId;
+    if (opts.challengeMeta) headers['rblx-challenge-metadata'] = opts.challengeMeta;
+    if (opts.contentType) headers['content-type'] = opts.contentType;
+    return {
+        get: (name) => headers[String(name).toLowerCase()] || null,
+        getSetCookie: () => opts.setCookie || []
+    };
+}
+
 test('getUserPresence extracts distinct placeId and serverId (jobId) without conflating gameId', async () => {
     stubPresence({ placeId: '123456', serverId: 'JOB-AAAA', universeId: '777', gameName: 'Rivals' });
     const presence = await robloxApi.getUserPresence(USER_ID);
@@ -278,20 +297,28 @@ test('real getServerIp on a live-shape 403 challenge records a safe attempt and 
     const prevCookie = process.env.BOT_ROBLOSECURITY;
     process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
 
-    const makeHeaders = (csrf) => ({
-        get: (name) => (String(name).toLowerCase() === 'x-csrf-token' ? csrf : null),
-        getSetCookie: () => []
-    });
+    const makeHeaders = (opts = {}) => {
+        const headers = {};
+        if (opts.csrf) headers['x-csrf-token'] = opts.csrf;
+        if (opts.challengeType) headers['rblx-challenge-type'] = opts.challengeType;
+        if (opts.challengeId) headers['rblx-challenge-id'] = opts.challengeId;
+        if (opts.challengeMeta) headers['rblx-challenge-metadata'] = opts.challengeMeta;
+        if (opts.contentType) headers['content-type'] = opts.contentType;
+        return {
+            get: (name) => headers[String(name).toLowerCase()] || null,
+            getSetCookie: () => opts.setCookie || []
+        };
+    };
 
     logs = [];
     try {
         global.fetch = async (url) => {
             const u = String(url);
             if (u.includes('users.roblox.com')) {
-                return { ok: true, status: 200, headers: makeHeaders(null), json: async () => ({ id: 424242 }) };
+                return { ok: true, status: 200, headers: makeHeaders({}), json: async () => ({ id: 424242 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
-                return { ok: true, status: 403, headers: makeHeaders(CSRF_TOKEN), json: async () => ({}) };
+                return { ok: true, status: 403, headers: makeHeaders({ csrf: CSRF_TOKEN }), json: async () => ({}) };
             }
             if (u.includes('gamejoin.roblox.com')) {
                 // Live-shape body: NO `status: 403` field, only errorCode/errorMessage.
@@ -299,7 +326,7 @@ test('real getServerIp on a live-shape 403 challenge records a safe attempt and 
                     ok: false,
                     status: 403,
                     statusMessage: 'Forbidden',
-                    headers: makeHeaders(CSRF_TOKEN),
+                    headers: makeHeaders({ csrf: CSRF_TOKEN }),
                     json: async () => ({ errorCode: 0, errorMessage: 'Challenge is required to authorize the request' })
                 };
             }
@@ -318,6 +345,13 @@ test('real getServerIp on a live-shape 403 challenge records a safe attempt and 
         assert.equal(rec.joinScript, false);
         assert.equal(rec.csrfPresent, true);
         assert.equal(rec.blocker, 'roblox_challenge_required');
+        // Challenge header diagnostics (this test has NO rblx-challenge-type header).
+        assert.equal(rec.challengeType, null, 'challengeType must be null when no challenge header is present');
+        assert.equal(rec.challengeHeadersPresent, false, 'challengeHeadersPresent must be false without the header');
+        assert.equal(rec.challengeIdPresent, false, 'challengeIdPresent must be false without the header');
+        assert.equal(rec.challengeMetaPresent, false, 'challengeMetaPresent must be false without the header');
+        assert.equal(rec.bodyJsonValid, true, 'body must be valid JSON in this test');
+        assert.equal(rec.responseContentType, null, 'responseContentType must be null when no content-type header is set');
         assert.equal(rec.guildId, GUILD_ID);
         assert.equal(String(rec.raidId), '42');
         assert.equal(rec.placeId, '10449761463');
@@ -328,6 +362,8 @@ test('real getServerIp on a live-shape 403 challenge records a safe attempt and 
         const serialized = JSON.stringify(rec);
         assert.ok(!serialized.includes(COOKIE_SECRET), 'record must never contain the cookie value');
         assert.ok(!serialized.includes(CSRF_TOKEN), 'record must never contain the CSRF token');
+        // Challenge-id (if present) must never be persisted either.
+        assert.ok(!serialized.includes('challenge-id-value'), 'record must never contain a challenge id value');
     } finally {
         if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
         else process.env.BOT_ROBLOSECURITY = prevCookie;
@@ -342,4 +378,248 @@ test('classifyGameJoinBlocker: HTTP status drives the class when the body omits 
     // classifyGameJoinBlocker keys the challenge off the message; the HTTP
     // status is what reaches it (response.httpStatus) after the fix.
     assert.equal(classifyGameJoinBlocker(403, { errorMessage: 'Challenge is required' }), 'roblox_challenge_required');
+    // A 403 with rblx-challenge-type header is identified as challenge even
+    // when the body message does not mention "challenge".
+    assert.equal(classifyGameJoinBlocker(403, { challengeType: 'captcha' }), 'roblox_challenge_required');
+    assert.equal(classifyGameJoinBlocker(403, { challengeType: 'turnstile' }), 'roblox_challenge_required');
+    // A 200 with a challenge header is NOT an error — falls through to no_join_script.
+    assert.equal(classifyGameJoinBlocker(200, { challengeType: 'captcha' }), 'no_join_script');
+    // 403 without challengeType and no challenge message = forbidden, not challenge.
+    assert.equal(classifyGameJoinBlocker(403, {}), 'forbidden_origin_or_token');
+});
+
+// ---------------------------------------------------------------------------
+// TASK 1 + 2: 403 WITH challenge headers — verify the challenge type is
+// positively identified from the rblx-challenge-type response header.
+// ---------------------------------------------------------------------------
+
+test('getServerIp: 403 with rblx-challenge-type header fires challenge branch and persists the type', async () => {
+    const COOKIE_SECRET = 'TEST_COOKIE_SECRET_challenge_header';
+    const CSRF_TOKEN = 'FAKE-CSRF-TOKEN_challenge';
+    const CHALLENGE_ID_SECRET = 'challenge-id-value-secret-never-logged';
+    const CHALLENGE_META_SECRET = 'metadata-contents-secret-never-logged';
+    const prevCookie = process.env.BOT_ROBLOSECURITY;
+    process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
+
+    logs = [];
+    try {
+        global.fetch = async (url) => {
+            const u = String(url);
+            if (u.includes('users.roblox.com')) {
+                return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
+            }
+            if (u.includes('auth.roblox.com/v2/logout')) {
+                return { ok: true, status: 403, headers: makeMockHeaders({ csrf: CSRF_TOKEN }), json: async () => ({}) };
+            }
+            if (u.includes('gamejoin.roblox.com')) {
+                return {
+                    ok: false,
+                    status: 403,
+                    statusMessage: 'Forbidden',
+                    headers: makeMockHeaders({
+                        csrf: CSRF_TOKEN,
+                        challengeType: 'captcha',
+                        challengeId: CHALLENGE_ID_SECRET,
+                        challengeMeta: CHALLENGE_META_SECRET,
+                        contentType: 'application/json'
+                    }),
+                    json: async () => ({ errorCode: 0, errorMessage: 'Challenge is required to authorize the request' })
+                };
+            }
+            throw new Error(`unexpected fetch in test: ${u}`);
+        };
+
+        const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-AAAA', { guildId: GUILD_ID, raidId: 42 });
+        assert.equal(result, null, 'a challenge-blocked join must resolve to null (no fabricated location)');
+
+        // Challenge branch must fire.
+        assert.ok(findLog(/challenge_required=true/), 'challenge branch must fire');
+        assert.ok(findLog(/challengeType=captcha/), 'challenge type must appear in logs');
+
+        const rec = realRobloxAuth.getLastGameJoinAttempt();
+        assert.ok(rec, 'noteAttempt must persist the attempt for /raiddebug');
+        assert.equal(rec.httpStatus, 403);
+        assert.equal(rec.challengeType, 'captcha', 'challengeType must be persisted from the rblx-challenge-type header');
+        assert.equal(rec.challengeHeadersPresent, true, 'challengeHeadersPresent must be true when the header is present');
+        assert.equal(rec.challengeIdPresent, true, 'challengeIdPresent must be true (the ID value itself is never logged)');
+        assert.equal(rec.challengeMetaPresent, true, 'challengeMetaPresent must be true (metadata contents are never logged)');
+        assert.equal(rec.bodyJsonValid, true, 'body must be valid JSON');
+        assert.equal(rec.responseContentType, 'application/json');
+        assert.equal(rec.blocker, 'roblox_challenge_required');
+        assert.ok(!rec.joinScript, 'no joinScript on a challenge');
+
+        // Secrets must never be persisted in the diagnostics record.
+        const serialized = JSON.stringify(rec);
+        assert.ok(!serialized.includes(COOKIE_SECRET), 'record must never contain the cookie value');
+        assert.ok(!serialized.includes(CSRF_TOKEN), 'record must never contain the CSRF token');
+        assert.ok(!serialized.includes(CHALLENGE_ID_SECRET), 'record must never contain the challenge-id value');
+        assert.ok(!serialized.includes(CHALLENGE_META_SECRET), 'record must never contain the challenge-metadata contents');
+    } finally {
+        if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
+        else process.env.BOT_ROBLOSECURITY = prevCookie;
+        restoreFetch();
+    }
+});
+
+// ---------------------------------------------------------------------------
+// TASK 1 + 2: 403 WITHOUT challenge headers — verify a plain 403 is NOT
+// misclassified as a challenge (it goes to forbidden_origin_or_token).
+// ---------------------------------------------------------------------------
+
+test('getServerIp: 403 without challenge headers and no challenge message is forbidden_origin_or_token', async () => {
+    const COOKIE_SECRET = 'TEST_COOKIE_SECRET_forbidden_plain';
+    const CSRF_TOKEN = 'FAKE-CSRF-TOKEN_forbidden';
+    const prevCookie = process.env.BOT_ROBLOSECURITY;
+    process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
+
+    logs = [];
+    try {
+        global.fetch = async (url) => {
+            const u = String(url);
+            if (u.includes('users.roblox.com')) {
+                return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
+            }
+            if (u.includes('auth.roblox.com/v2/logout')) {
+                return { ok: true, status: 403, headers: makeMockHeaders({ csrf: CSRF_TOKEN }), json: async () => ({}) };
+            }
+            if (u.includes('gamejoin.roblox.com')) {
+                return {
+                    ok: false,
+                    status: 403,
+                    statusMessage: 'Forbidden',
+                    headers: makeMockHeaders({ csrf: CSRF_TOKEN, contentType: 'application/json' }),
+                    json: async () => ({ errorMessage: 'You are not authorized to join this game.' })
+                };
+            }
+            throw new Error(`unexpected fetch in test: ${u}`);
+        };
+
+        const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-AAAA', { guildId: GUILD_ID, raidId: 42 });
+        assert.equal(result, null);
+
+        const rec = realRobloxAuth.getLastGameJoinAttempt();
+        assert.ok(rec);
+        assert.equal(rec.httpStatus, 403);
+        assert.equal(rec.challengeType, null, 'no challenge header in this response');
+        assert.equal(rec.challengeHeadersPresent, false, 'challengeHeadersPresent must be false without the header');
+        assert.equal(rec.challengeIdPresent, false);
+        assert.equal(rec.challengeMetaPresent, false);
+        assert.equal(rec.bodyJsonValid, true);
+        assert.equal(rec.responseContentType, 'application/json');
+        assert.equal(rec.blocker, 'forbidden_origin_or_token', 'a 403 without challenge must NOT be classified as roblox_challenge_required');
+    } finally {
+        if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
+        else process.env.BOT_ROBLOSECURITY = prevCookie;
+        restoreFetch();
+    }
+});
+
+// ---------------------------------------------------------------------------
+// TASK 6: successful GameJoin response with joinScript — verify location
+// extraction and the absence of a blocker.
+// ---------------------------------------------------------------------------
+
+test('getServerIp: successful GameJoin with joinScript returns machine/public address + dataCenterId', async () => {
+    const COOKIE_SECRET = 'TEST_COOKIE_SECRET_success';
+    const CSRF_TOKEN = 'FAKE-CSRF-TOKEN_success';
+    const prevCookie = process.env.BOT_ROBLOSECURITY;
+    process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
+
+    logs = [];
+    try {
+        global.fetch = async (url) => {
+            const u = String(url);
+            if (u.includes('users.roblox.com')) {
+                return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
+            }
+            if (u.includes('auth.roblox.com/v2/logout')) {
+                return { ok: true, status: 403, headers: makeMockHeaders({ csrf: CSRF_TOKEN }), json: async () => ({}) };
+            }
+            if (u.includes('gamejoin.roblox.com')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    statusMessage: 'OK',
+                    headers: makeMockHeaders({ csrf: CSRF_TOKEN, contentType: 'application/json' }),
+                    json: async () => ({
+                        joinScript: {
+                            MachineAddress: '10.0.0.1',
+                            DataCenterId: 'dc-123',
+                            UdmuxEndpoints: [{ Address: '203.0.113.1' }]
+                        }
+                    })
+                };
+            }
+            throw new Error(`unexpected fetch in test: ${u}`);
+        };
+
+        const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-AAAA', { guildId: GUILD_ID, raidId: 42 });
+        assert.ok(result, 'must return a location object');
+        assert.equal(result.machineAddress, '10.0.0.1');
+        assert.equal(result.publicAddress, '203.0.113.1');
+        assert.equal(result.dataCenterId, 'dc-123');
+
+        const rec = realRobloxAuth.getLastGameJoinAttempt();
+        assert.ok(rec);
+        assert.equal(rec.httpStatus, 200);
+        assert.equal(rec.joinScript, true);
+        assert.equal(rec.blocker, null, 'successful join must have no blocker');
+        assert.equal(rec.bodyJsonValid, true);
+        assert.equal(rec.responseContentType, 'application/json');
+    } finally {
+        if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
+        else process.env.BOT_ROBLOSECURITY = prevCookie;
+        restoreFetch();
+    }
+});
+
+// ---------------------------------------------------------------------------
+// TASK 6: malformed response body — verify bodyJsonValid=false is recorded
+// and the request still fails gracefully.
+// ---------------------------------------------------------------------------
+
+test('getServerIp: malformed (non-JSON) response body sets bodyJsonValid=false', async () => {
+    const COOKIE_SECRET = 'TEST_COOKIE_SECRET_malformed';
+    const CSRF_TOKEN = 'FAKE-CSRF-TOKEN_malformed';
+    const prevCookie = process.env.BOT_ROBLOSECURITY;
+    process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
+
+    logs = [];
+    try {
+        global.fetch = async (url) => {
+            const u = String(url);
+            if (u.includes('users.roblox.com')) {
+                return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
+            }
+            if (u.includes('auth.roblox.com/v2/logout')) {
+                return { ok: true, status: 403, headers: makeMockHeaders({ csrf: CSRF_TOKEN }), json: async () => ({}) };
+            }
+            if (u.includes('gamejoin.roblox.com')) {
+                return {
+                    ok: false,
+                    status: 403,
+                    statusMessage: 'Forbidden',
+                    headers: makeMockHeaders({ csrf: CSRF_TOKEN, contentType: 'text/html' }),
+                    json: async () => { throw new Error('Unexpected token < in JSON'); }
+                };
+            }
+            throw new Error(`unexpected fetch in test: ${u}`);
+        };
+
+        const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-AAAA', { guildId: GUILD_ID, raidId: 42 });
+        assert.equal(result, null, 'a malformed body must resolve to null');
+
+        const rec = realRobloxAuth.getLastGameJoinAttempt();
+        assert.ok(rec);
+        assert.equal(rec.httpStatus, 403);
+        assert.equal(rec.bodyJsonValid, false, 'bodyJsonValid must be false when JSON parsing fails');
+        assert.equal(rec.responseContentType, 'text/html');
+        assert.equal(rec.challengeType, null);
+        assert.equal(rec.challengeHeadersPresent, false);
+        assert.equal(rec.blocker, 'forbidden_origin_or_token', '403 without challenge headers and no parseable body = forbidden');
+    } finally {
+        if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
+        else process.env.BOT_ROBLOSECURITY = prevCookie;
+        restoreFetch();
+    }
 });
