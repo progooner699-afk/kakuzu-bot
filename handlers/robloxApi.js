@@ -229,7 +229,11 @@ async function detectGameAndRegion(userId, context = {}) {
 
     const gameName = presence.gameName.toLowerCase();
     let detectedGame = 'unknown';
-    let detectedRegion = 'NA';
+    // NEVER fabricate 'NA' for an unknown location. The GameJoin block below
+    // overwrites this with the resolved region; when detection cannot run
+    // (missing jobId) the region must stay 'Unknown' so no wrong-continent
+    // ping role is ever selected (pinned by test/region-detection.test.js).
+    let detectedRegion = 'Unknown';
     let detectedCountryCode = null;
     let regionLabel = null;
     let regionSource = null;
@@ -253,16 +257,19 @@ async function detectGameAndRegion(userId, context = {}) {
     if (presence.serverId && presence.placeId) {
         try {
             const { getServerIp } = require('./robloxAuth');
-            const ipResult = await getServerIp(presence.placeId, presence.serverId);
+            const ipResult = await getServerIp(presence.placeId, presence.serverId, {
+                guildId: detectGuildId || undefined,
+                raidId: detectRaidId || undefined
+            });
             const hasServerLocationData = Boolean(ipResult && (ipResult.machineAddress || ipResult.publicAddress || ipResult.dataCenterId));
-            // Guild context flows through the region pipeline; it is only
-            // 'unknown' when the caller genuinely cannot obtain it, never
-            // because we hardcoded a placeholder. The interaction handler
-            // passes the real guildId via presence.guildId/placeId (captured
-            // from the Discord server), so it is always present.
+            // Guild context flows through the region pipeline for diagnostics.
+            // It comes from the CALLER (the interaction handler passes the real
+            // guildId/guildName via detectGameAndRegion's context argument);
+            // presence.* is only a legacy fallback. It is 'unknown' only when
+            // the caller genuinely cannot obtain it.
             const guildContext = {
-                guildId: presence.guildId || 'unknown',
-                guildName: presence.guildName || 'unknown',
+                guildId: detectGuildId || presence.guildId || 'unknown',
+                guildName: detectGuildName || presence.guildName || 'unknown',
                 placeId: presence.placeId,
                 serverId: presence.serverId,
                 robloxUsername: userId ? String(userId) : 'unknown'
@@ -338,6 +345,12 @@ async function detectGameAndRegion(userId, context = {}) {
         } catch (err) {
             console.error(`[KAKUZU:REGION] guild=unknown guildName="unknown" placeId=${presence.placeId ?? 'n/a'} jobId=${JSON.stringify(presence.serverId || 'n/a')} robloxUser=${JSON.stringify(userId || 'unknown')} gamejoinRegionLookupFailed=true error=${(err && err.message) || String(err)}`);
         }
+    } else {
+        // Missing-ID flow: Roblox presence returned no server job id (privacy
+        // settings / not fully in-game). GameJoin never runs, so the location
+        // genuinely cannot be resolved. Say so explicitly and keep 'Unknown'
+        // - never invent IDs and never fall back to a fabricated region.
+        console.warn(`[KAKUZU:REGION] guild=${detectGuildId || 'unknown'} guildName=${JSON.stringify(detectGuildName || 'unknown')} placeId=${presence.placeId ?? 'n/a'} jobId=${JSON.stringify(presence.serverId ?? null)} robloxUser=${JSON.stringify(String(userId))} missingServerId=true GameJoin skipped - region unresolved, keeping Unknown`);
     }
 
     let serverLink = '';

@@ -661,7 +661,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
         if (!settings.resultChannel) return;
         const targetResultChannel = await interaction.client.channels.fetch(settings.resultChannel).catch(() => null);
         if (!targetResultChannel || !targetResultChannel.isTextBased()) return;
-        const regionRoleInfo = await getRaidPingInfo(interaction.client, interaction.guild.id, { countryCode: null, region: raid.region });
+        const regionRoleInfo = await getRaidPingInfo(interaction.client, interaction.guild.id, { countryCode: raid.countryCode || null, region: raid.region });
         const cardOpts = {
             raid,
             outcome,
@@ -1115,7 +1115,11 @@ module.exports = {
             }
 
             const robloxUserId = verificationData.roblox_user_id;
-            const detection = await robloxApi.detectGameAndRegion(robloxUserId);
+            const detection = await robloxApi.detectGameAndRegion(robloxUserId, {
+                guildId: interaction.guild.id,
+                guildName: interaction.guild.name,
+                discordUserId: interaction.user.id
+            });
 
             if (!detection.success) {
                 return interaction.editReply({

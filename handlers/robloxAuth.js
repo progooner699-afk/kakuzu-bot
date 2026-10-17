@@ -221,6 +221,13 @@ async function getServerIp(placeId, serverId, context = {}) {
     const replacement = extractReplacementSecurityCookie(res);
     let response;
     try { response = await res.json(); } catch (_) { response = {}; }
+    // Surface the HTTP status on the parsed body: Roblox's challenge body
+    // carries errorCode/errorMessage but NOT a `status: 403` field, so the
+    // challenge detection below must not rely on the body alone (verified
+    // against a live 403 challenge on 2026-10-17).
+    if (response && typeof response === 'object') {
+      response.httpStatus = res.status;
+    }
 
     // No behavioral change: rotation still requires a real joinScript.
     if (response && response.joinScript) {
@@ -235,6 +242,27 @@ async function getServerIp(placeId, serverId, context = {}) {
       replacementReceived: replacement.received,
       response
     });
+
+    // Persist the SAME whitelisted fields for getLastGameJoinAttempt() so
+    // /raiddebug can name the exact failing stage without grepping Render
+    // logs. Never the cookie, CSRF token, raw body, IPs or headers.
+    {
+      const joinScriptFound = Boolean(response && response.joinScript);
+      noteAttempt({
+        attempt,
+        placeId: String(placeId),
+        serverId: String(serverId),
+        httpStatus: res.status,
+        joinScript: joinScriptFound,
+        csrfPresent,
+        replacementCookieReceived: replacement.received,
+        responseStatus: response && response.status !== undefined ? response.status : null,
+        queuePosition: response && response.queuePosition !== undefined ? response.queuePosition : null,
+        errorCode: response && response.errorCode !== undefined ? response.errorCode : null,
+        errorMessage: response && typeof response.errorMessage === 'string' ? response.errorMessage : null,
+        blocker: joinScriptFound ? null : classifyGameJoinBlocker(res.status, response)
+      });
+    }
 
     return response || {};
   }
@@ -260,11 +288,14 @@ async function getServerIp(placeId, serverId, context = {}) {
     String(response.errorMessage || ''),
     String(response.errorSubcode || '')
   ].join(' ').toLowerCase();
-  const isChallengeRequired = response.status === 403 && /challenge/i.test(fields);
+  // Use the HTTP status surfaced by attemptJoin: the live challenge body does
+  // NOT include a `status: 403` field (only errorCode/errorMessage), so
+  // checking the body alone made this branch dead code.
+  const isChallengeRequired = (response.httpStatus === 403 || response.status === 403) && /challenge/i.test(fields);
 
   if (isChallengeRequired) {
     console.warn(
-      `[gamejoin] challenge_required=true attempt=1 httpStatus=403 ` +
+      `[gamejoin] challenge_required=true attempt=1 httpStatus=${response.httpStatus ?? 403} ` +
       `statusMessage="${String(response.statusMessage || 'Challenge is required to authorize the request')}" ` +
       `errorCode=${response.errorCode ?? 'none'} errorMessage="${String(response.errorMessage || 'none')}" ` +
       `csrfPresent=${Boolean(response.csrfPresent)} replacementCookieReceived=${Boolean(response.replacementCookieReceived)}`

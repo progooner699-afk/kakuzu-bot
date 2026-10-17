@@ -210,3 +210,136 @@ test('isCookieConfigured is false with no cookie and BOT_COOKIE stays a live get
     const desc = Object.getOwnPropertyDescriptor(realRobloxAuth, 'BOT_COOKIE');
     assert.equal(typeof desc.get, 'function', 'BOT_COOKIE must be a live getter, not a snapshot');
 });
+
+// ---------------------------------------------------------------------------
+// Regression tests for the Oct-2026 detection-chain repair.
+// ---------------------------------------------------------------------------
+
+test('missing serverId: GameJoin never runs, region stays Unknown (never NA), diagnostic names the missing jobId', async () => {
+    stubPresence({ placeId: '123456', serverId: null, universeId: '777', gameName: 'Rivals' });
+    let gameJoinCalled = false;
+    MOCK_ROBLOX_AUTH.getServerIp = async () => { gameJoinCalled = true; return null; };
+
+    logs = [];
+    const result = await detectGameAndRegion(USER_ID, { guildId: GUILD_ID, guildName: 'Kakuzu HQ' });
+    restoreFetch();
+
+    assert.equal(result.success, true);
+    assert.equal(gameJoinCalled, false, 'GameJoin must not be attempted without a server job id');
+    assert.equal(result.serverId, null);
+    // Core invariant: an unresolvable location is Unknown, never fabricated NA.
+    assert.equal(result.region, 'Unknown');
+    assert.notEqual(result.region, 'NA');
+    assert.equal(result.regionSource, null);
+
+    const warn = findLog(/missingServerId=true/);
+    assert.ok(warn, 'expected a staged diagnostic naming the missing jobId');
+});
+
+test('previously successful flow reproduces the Oct-11 log: RoValra Mumbai -> ASIA / IN with guild context', async () => {
+    stubPresence({ placeId: '10449761463', serverId: 'JOB-AAAA', universeId: '777', gameName: 'Rivals' });
+    let gameJoinContext = null;
+    MOCK_ROBLOX_AUTH.getServerIp = async (placeId, serverId, context) => {
+        gameJoinContext = context || null;
+        return { machineAddress: '203.0.113.10', publicAddress: '198.51.100.20', dataCenterId: '359' };
+    };
+    MOCK_REGIONMAP.resolveRoValraDatacenterRegion = async () => ({
+        region: 'ASIA',
+        countryCode: 'IN',
+        label: 'Mumbai, India'
+    });
+    MOCK_REGIONMAP.normalizeCountryToRegion = () => null;
+    MOCK_REGIONMAP.normalizeCountryCodeToRegion = () => 'ASIA';
+
+    logs = [];
+    const result = await detectGameAndRegion(USER_ID, { guildId: GUILD_ID, guildName: 'Kakuzu HQ', raidId: 42 });
+    restoreFetch();
+
+    assert.equal(result.success, true);
+    assert.equal(result.region, 'ASIA');
+    assert.equal(result.countryCode, 'IN');
+    assert.equal(result.regionSource, 'RoValra');
+    assert.equal(result.regionLabel, 'Mumbai, India');
+
+    // Guild context must reach BOTH the GameJoin seam and the staged logs
+    // (was dead-wired before the fix).
+    assert.ok(gameJoinContext, 'getServerIp must receive the detection context');
+    assert.equal(gameJoinContext.guildId, GUILD_ID);
+    assert.equal(String(gameJoinContext.raidId), '42');
+    assert.ok(
+        findLog(/guild=987654321098765432 guildName="Kakuzu HQ"/),
+        'staged diagnostics must carry the real guild id/name, not unknown'
+    );
+});
+
+test('real getServerIp on a live-shape 403 challenge records a safe attempt and fires the challenge branch', async () => {
+    const COOKIE_SECRET = 'TEST_COOKIE_SECRET_never_persist';
+    const CSRF_TOKEN = 'FAKE-CSRF-TOKEN-never_log';
+    const prevCookie = process.env.BOT_ROBLOSECURITY;
+    process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
+
+    const makeHeaders = (csrf) => ({
+        get: (name) => (String(name).toLowerCase() === 'x-csrf-token' ? csrf : null),
+        getSetCookie: () => []
+    });
+
+    logs = [];
+    try {
+        global.fetch = async (url) => {
+            const u = String(url);
+            if (u.includes('users.roblox.com')) {
+                return { ok: true, status: 200, headers: makeHeaders(null), json: async () => ({ id: 424242 }) };
+            }
+            if (u.includes('auth.roblox.com/v2/logout')) {
+                return { ok: true, status: 403, headers: makeHeaders(CSRF_TOKEN), json: async () => ({}) };
+            }
+            if (u.includes('gamejoin.roblox.com')) {
+                // Live-shape body: NO `status: 403` field, only errorCode/errorMessage.
+                return {
+                    ok: false,
+                    status: 403,
+                    statusMessage: 'Forbidden',
+                    headers: makeHeaders(CSRF_TOKEN),
+                    json: async () => ({ errorCode: 0, errorMessage: 'Challenge is required to authorize the request' })
+                };
+            }
+            throw new Error(`unexpected fetch in test: ${u}`);
+        };
+
+        const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-AAAA', { guildId: GUILD_ID, raidId: 42 });
+        assert.equal(result, null, 'a challenge-blocked join must resolve to null (no fabricated location)');
+
+        // The challenge branch must fire on the live body shape (was dead code).
+        assert.ok(findLog(/challenge_required=true/), 'challenge branch must fire for a live 403 body');
+
+        const rec = realRobloxAuth.getLastGameJoinAttempt();
+        assert.ok(rec, 'noteAttempt must persist the attempt for /raiddebug');
+        assert.equal(rec.httpStatus, 403);
+        assert.equal(rec.joinScript, false);
+        assert.equal(rec.csrfPresent, true);
+        assert.equal(rec.blocker, 'roblox_challenge_required');
+        assert.equal(rec.guildId, GUILD_ID);
+        assert.equal(String(rec.raidId), '42');
+        assert.equal(rec.placeId, '10449761463');
+        assert.equal(rec.serverId, 'JOB-AAAA');
+        assert.match(String(rec.errorMessage), /challenge/i);
+
+        // Secrets must never be persisted in the diagnostics record.
+        const serialized = JSON.stringify(rec);
+        assert.ok(!serialized.includes(COOKIE_SECRET), 'record must never contain the cookie value');
+        assert.ok(!serialized.includes(CSRF_TOKEN), 'record must never contain the CSRF token');
+    } finally {
+        if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
+        else process.env.BOT_ROBLOSECURITY = prevCookie;
+        restoreFetch();
+    }
+});
+
+test('classifyGameJoinBlocker: HTTP status drives the class when the body omits it (dead-code pin)', () => {
+    // Live 403 body: no challenge message in the body, status only on HTTP.
+    assert.equal(classifyGameJoinBlocker(403, {}), 'forbidden_origin_or_token');
+    assert.equal(classifyGameJoinBlocker(200, { errorMessage: 'no problem' }), 'no_join_script');
+    // classifyGameJoinBlocker keys the challenge off the message; the HTTP
+    // status is what reaches it (response.httpStatus) after the fix.
+    assert.equal(classifyGameJoinBlocker(403, { errorMessage: 'Challenge is required' }), 'roblox_challenge_required');
+});
