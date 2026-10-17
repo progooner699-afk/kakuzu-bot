@@ -935,6 +935,7 @@ module.exports = {
     lookupCaseInsensitive,
     pickRoleId,
     getRaidPingInfo,
+    normalizeRegion,
     pendingHelpMonitors,
     cleanupExpiredMonitors,
     processHelpMonitors,

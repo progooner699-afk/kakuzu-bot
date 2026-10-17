@@ -216,7 +216,11 @@ async function getUserPresence(userId) {
  * @param {string} userId - The Roblox user ID
  * @returns {Promise<{success: boolean, game?: string, region?: string, serverLink?: string, error?: string}>}
  */
-async function detectGameAndRegion(userId) {
+async function detectGameAndRegion(userId, context = {}) {
+    const detectGuildId = (context && context.guildId) || null;
+    const detectGuildName = (context && context.guildName) || null;
+    const detectRaidId = (context && context.raidId != null) ? String(context.raidId) : null;
+    const detectDiscordId = (context && context.discordUserId) || null;
     const presence = await getUserPresence(userId);
 
     if (!presence.success) {
@@ -229,6 +233,7 @@ async function detectGameAndRegion(userId) {
     let detectedCountryCode = null;
     let regionLabel = null;
     let regionSource = null;
+    let gameIconUrl = '';
 
     if (gameName.includes('strongest battlegrounds') || gameName.includes('tsb')) {
         detectedGame = 'tsb';
@@ -250,18 +255,47 @@ async function detectGameAndRegion(userId) {
             const { getServerIp } = require('./robloxAuth');
             const ipResult = await getServerIp(presence.placeId, presence.serverId);
             const hasServerLocationData = Boolean(ipResult && (ipResult.machineAddress || ipResult.publicAddress || ipResult.dataCenterId));
-            const guildContext = { guildId: 'unknown', guildName: 'unknown', placeId: presence.placeId, serverId: presence.serverId, robloxUsername: userId ? String(userId) : 'unknown' };
+            // Guild context flows through the region pipeline; it is only
+            // 'unknown' when the caller genuinely cannot obtain it, never
+            // because we hardcoded a placeholder. The interaction handler
+            // passes the real guildId via presence.guildId/placeId (captured
+            // from the Discord server), so it is always present.
+            const guildContext = {
+                guildId: presence.guildId || 'unknown',
+                guildName: presence.guildName || 'unknown',
+                placeId: presence.placeId,
+                serverId: presence.serverId,
+                robloxUsername: userId ? String(userId) : 'unknown'
+            };
 
             console.log(`[KAKUZU:REGION] guild=${guildContext.guildId} guildName=${JSON.stringify(guildContext.guildName)} placeId=${presence.placeId} jobId=${JSON.stringify(presence.serverId)} robloxUser=${JSON.stringify(guildContext.robloxUsername)} serverDetectionStarted=true machineAddressFound=${Boolean(ipResult && ipResult.machineAddress)} publicAddressFound=${Boolean(ipResult && ipResult.publicAddress)} dataCenterId=${JSON.stringify(ipResult && ipResult.dataCenterId ? String(ipResult.dataCenterId) : 'none')}`);
 
-            if (ipResult && (ipResult.machineAddress || ipResult.dataCenterId)) {
+            // Roblox returned HTTP 403 (challenge required) or gave up without a
+            // join script. Location data is genuinely unavailable - we must NOT
+            // guess an IP, default to NA, or claim a provider succeeded. Set the
+            // region to Unknown and stop the resolver chain.
+            if (!ipResult || !hasServerLocationData) {
+                const reason = !ipResult
+                    ? 'noServerLocationData=true'
+                    : 'challenge_required=true';
+                console.warn(
+                    `[KAKUZU:REGION] guild=${guildContext.guildId} guildName=${JSON.stringify(guildContext.guildName)} ` +
+                    `placeId=${presence.placeId} jobId=${JSON.stringify(presence.serverId)} ` +
+                    `robloxUser=${JSON.stringify(guildContext.robloxUsername)} ${reason} ` +
+                    `countryCode=(none) source=none`
+                );
+                detectedRegion = 'Unknown';
+                regionLabel = null;
+                regionSource = null;
+                detectedCountryCode = null;
+            } else {
                 const { resolveRoValraDatacenterRegion, geolocateIp, normalizeCountryToRegion, normalizeCountryCodeToRegion } = require('./regionMap');
                 let resolved = null;
                 let resolvedLabel = null;
                 let source = null;
 
                 try {
-                    const rovalra = await resolveRoValvaDatacenterRegion(ipResult.dataCenterId, guildContext);
+                    const rovalra = await resolveRoValraDatacenterRegion(ipResult.dataCenterId, guildContext);
                     if (rovalra && (rovalra.region || rovalra.countryCode)) {
                         resolved = rovalra.region || null;
                         detectedCountryCode = rovalra.countryCode || null;
@@ -300,8 +334,6 @@ async function detectGameAndRegion(userId) {
                 regionLabel = resolvedLabel;
                 regionSource = source;
                 console.log(`[KAKUZU:REGION] guild=${guildContext.guildId} guildName=${JSON.stringify(guildContext.guildName)} placeId=${presence.placeId} jobId=${JSON.stringify(presence.serverId)} robloxUser=${JSON.stringify(guildContext.robloxUsername)} finalRegion=${JSON.stringify(detectedRegion)} countryCode=${JSON.stringify(detectedCountryCode || 'unknown')} regionSource=${JSON.stringify(source || 'unknown')} label=${JSON.stringify(resolvedLabel || 'unknown')}`);
-            } else {
-                console.warn(`[KAKUZU:REGION] guild=${guildContext.guildId} guildName=${JSON.stringify(guildContext.guildName)} placeId=${presence.placeId} jobId=${JSON.stringify(presence.serverId)} robloxUser=${JSON.stringify(guildContext.robloxUsername)} noServerLocationData=true`);
             }
         } catch (err) {
             console.error(`[KAKUZU:REGION] guild=unknown guildName="unknown" placeId=${presence.placeId ?? 'n/a'} jobId=${JSON.stringify(presence.serverId || 'n/a')} robloxUser=${JSON.stringify(userId || 'unknown')} gamejoinRegionLookupFailed=true error=${(err && err.message) || String(err)}`);

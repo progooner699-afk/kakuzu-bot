@@ -120,7 +120,65 @@ async function checkRobloxCookieAuth(context, force) {
     return { success };
 }
 
+// Last gamejoin attempt diagnostics (safe: whitelisted fields only, never the
+// raw body, IPs, cookies or tokens). Powers /raiddebug so admins can inspect
+// the latest attempt on Render without grepping thousands of log lines.
+let lastGameJoinAttempt = null;
+function getLastGameJoinAttempt() {
+  return lastGameJoinAttempt ? Object.assign({}, lastGameJoinAttempt) : null;
+}
+
+function refreshCookieFromEnv() {
+  const fromEnv = process.env.BOT_ROBLOSECURITY || '';
+  if (fromEnv && fromEnv !== botCookie) botCookie = fromEnv;
+}
+
+function isCookieConfigured() {
+  refreshCookieFromEnv();
+  return Boolean(botCookie && botCookie.length > 0);
+}
+
+/**
+ * Maps a failed gamejoin response to a stable blocker code so /raiddebug and
+ * the staged logs can name the exact failure without guessing (challenge vs
+ * origin vs auth vs rate-limit vs network).
+ */
+function classifyGameJoinBlocker(httpStatus, response) {
+  const msg = String((response && (response.errorMessage
+    || (response.error && response.error.message)
+    || (Array.isArray(response.errors) && response.errors[0] && response.errors[0].message))) || '');
+  if (/challenge is required/i.test(msg)) return 'roblox_challenge_required';
+  if (httpStatus === 403) return 'forbidden_origin_or_token';
+  if (httpStatus === 401) return 'unauthorized_cookie';
+  if (httpStatus === 429) return 'rate_limited';
+  if (httpStatus != null && httpStatus >= 500) return 'roblox_server_error';
+  if (/unparseable/i.test(msg)) return 'unparseable_response';
+  if (httpStatus === 400) return 'bad_request_ids';
+  return 'no_join_script';
+}
+
+/**
+ * Pulls the whitelisted location fields out of a gamejoin joinScript.
+ * `publicAddress` is the public-facing IP from UdmuxEndpoints[0].Address.
+ */
+function extractJoinLocation(response) {
+  const udmuxAddress = Array.isArray(response.joinScript.UdmuxEndpoints)
+    && response.joinScript.UdmuxEndpoints[0]
+    && typeof response.joinScript.UdmuxEndpoints[0].Address === 'string'
+    ? response.joinScript.UdmuxEndpoints[0].Address
+    : null;
+  return {
+    machineAddress: response.joinScript.MachineAddress,
+    publicAddress: udmuxAddress,
+    dataCenterId: response.joinScript.DataCenterId
+  };
+}
+
 async function getCsrfToken() {
+  // Probe WITH the cookie: Roblox only returns an x-csrf-token for an
+  // authenticated session. The old probed WITHOUT any cookie, so it never
+  // received a token and every gamejoin POST went out unauthenticated.
+  if (!botCookie) return null;
   const res = await fetchWithTimeout('https://auth.roblox.com/v2/logout', {
     method: 'POST',
     headers: { Cookie: `.ROBLOSECURITY=${botCookie}` }
@@ -128,23 +186,13 @@ async function getCsrfToken() {
   return res.headers.get('x-csrf-token');
 }
 
-/**
- * Resolves a Roblox placeId + serverId into the game instance's IP and data
- * center via the gamejoin API. Returns { machineAddress, publicAddress,
- * dataCenterId } when Roblox hands back a joinScript, otherwise returns null
- * (see logGameJoinAttempt for the safe diagnostics emitted on every attempt).
- * `publicAddress` is extracted from
- * `UdmuxEndpoints[0].Address` (the public-facing IP) or null if unavailable.
- * Diagnostics are safe: each attempt logs only whitelisted flags (httpStatus,
- * joinScript presence, response status/statusMessage, queuePosition, Roblox
- * error code/subcode/message, csrfPresent bool, replacementCookieReceived).
- * Machine addresses, public addresses/IPs, cookies, CSRF tokens, Authorization
- * headers and secrets are NEVER logged.
- * @param {string|number} placeId
- * @param {string} serverId - the server instance's jobId / gameInstanceGuid
- * @returns {Promise<{machineAddress: string, publicAddress: string|null, dataCenterId: string}|null>}
- */
-async function getServerIp(placeId, serverId) {
+async function getServerIp(placeId, serverId, context = {}) {
+  refreshCookieFromEnv();
+  const diagGuildId = (context && context.guildId) || 'unknown';
+  const diagRaidId = (context && context.raidId != null) ? String(context.raidId) : 'n/a';
+  const noteAttempt = (info) => {
+    lastGameJoinAttempt = Object.assign({ at: Date.now(), guildId: diagGuildId, raidId: diagRaidId }, info);
+  };
   // Safe authenticated-cookie diagnostic BEFORE any gamejoin attempt.
   await checkRobloxCookieAuth('pre-gamejoin');
 
@@ -191,9 +239,40 @@ async function getServerIp(placeId, serverId) {
     return response || {};
   }
 
+  // The ONLY request we make. We must NOT retry the challenge: Roblox returns
+  // HTTP 403 with "Challenge is required to authorize the request" for
+  // unauthenticated/automation-pattern requests, and retrying the same
+  // challenge (or rotating cookies / fabricating auth data) is explicitly
+  // prohibited and cannot produce location data. The join script + the
+  // machine/data-center fields we need never reach the response, so location
+  // data is unavailable and we return a clear sentinel rather than guessing.
   let response = await attemptJoin(1);
-  let retries = 0;
 
+  // Explicitly detect the Roblox challenge-required (403) response and handle
+  // it without retrying. We can only distinguish it by whitelisted fields:
+  // response.status (0 for network/parse failures, 22 for queue) and the
+  // whitelisted error fields (errorCode / errorMessage). Any 403 that is not a
+  // simple queue-position retry is a hard authorization challenge.
+  const fields = [
+    String(response.status),
+    String(response.statusMessage || ''),
+    String(response.errorCode || ''),
+    String(response.errorMessage || ''),
+    String(response.errorSubcode || '')
+  ].join(' ').toLowerCase();
+  const isChallengeRequired = response.status === 403 && /challenge/i.test(fields);
+
+  if (isChallengeRequired) {
+    console.warn(
+      `[gamejoin] challenge_required=true attempt=1 httpStatus=403 ` +
+      `statusMessage="${String(response.statusMessage || 'Challenge is required to authorize the request')}" ` +
+      `errorCode=${response.errorCode ?? 'none'} errorMessage="${String(response.errorMessage || 'none')}" ` +
+      `csrfPresent=${Boolean(response.csrfPresent)} replacementCookieReceived=${Boolean(response.replacementCookieReceived)}`
+    );
+    return null;
+  }
+
+  let retries = 0;
   while (!response.joinScript && response.status === 22 && retries < 8) {
     await new Promise(r => setTimeout(r, 1500));
     response = await attemptJoin(retries + 2);
@@ -276,7 +355,7 @@ function logGameJoinAttempt({ attempt, httpStatus, csrfPresent, replacementRecei
 
 // Live binding: callers reading `BOT_COOKIE` after an in-memory rotation still
 // see the cookie actually in use (a plain property would snapshot the value).
-const robloxAuthExports = { getCsrfToken, getServerIp, checkRobloxCookieAuth };
+const robloxAuthExports = { getCsrfToken, getServerIp, checkRobloxCookieAuth, getLastGameJoinAttempt, classifyGameJoinBlocker, isCookieConfigured };
 Object.defineProperty(robloxAuthExports, 'BOT_COOKIE', {
     enumerable: true,
     get() { return botCookie; }
