@@ -17,6 +17,9 @@
 const raidStateManager = require('./raidStateManager');
 const robloxLinks = require('./robloxLinks');
 const raidV2 = require('./raidV2');
+// Shared tiered matcher — one implementation for auto-join, Help monitors and
+// helper time tracking (the old inline predicate was duplicated and broken).
+const { evaluateHelperMatch } = require('./helperVerification');
 
 // Roblox presence API caps the userIds array; stay safely under the limit.
 const PRESENCE_CHUNK_SIZE = 200;
@@ -61,11 +64,20 @@ async function pollAutoJoin(client, guildId) {
 
     const byRobloxId = new Map(candidates.map(u => [String(u.roblox_user_id), u]));
 
+    // Requesters are polled in the SAME batch: their CURRENT jobId is the
+    // authoritative reference for exact instance matching (and lets us self-heal
+    // a stale raid.serverId). They are excluded as candidates above, not queried.
+    const idsToFetch = new Set(candidates.map(u => String(u.roblox_user_id)));
+    for (const r of openRaids) {
+        const rid = String(r.robloxUserId == null ? '' : r.robloxUserId).trim();
+        if (rid && rid !== '1') idsToFetch.add(rid);
+    }
+
     // Ask Roblox presence (chunked) — failures are non-fatal, next tick retries.
-    const presences = [];
-    for (let i = 0; i < candidates.length; i += PRESENCE_CHUNK_SIZE) {
-        const chunk = candidates.slice(i, i + PRESENCE_CHUNK_SIZE)
-            .map(u => String(u.roblox_user_id));
+    const presenceByRobloxId = new Map();
+    const allIds = [...idsToFetch];
+    for (let i = 0; i < allIds.length; i += PRESENCE_CHUNK_SIZE) {
+        const chunk = allIds.slice(i, i + PRESENCE_CHUNK_SIZE);
         try {
             const response = await fetchWithTimeout('https://presence.roblox.com/v1/presence/users', {
                 method: 'POST',
@@ -77,37 +89,42 @@ async function pollAutoJoin(client, guildId) {
                 continue;
             }
             const data = await response.json();
-            presences.push(...(data.userPresences || data.data || []));
+            for (const record of (data.userPresences || data.data || [])) {
+                presenceByRobloxId.set(String(record.userId), record);
+            }
         } catch (err) {
             console.warn('[auto-join] presence API error:', (err && err.message) || err);
         }
     }
-    if (presences.length === 0) return;
+    if (presenceByRobloxId.size === 0) return;
 
     const changedRaids = new Map();
-    for (const user of presences) {
-        if (user.userPresenceType !== 2) continue; // 2 = InGame
-        const placeId = user.placeId != null ? String(user.placeId) : '';
-        // gameId = the Roblox server job ID the user is in. Matching on this
-        // (when the raid has a known serverId) pins the helper to the EXACT
-        // server instance, not just the same game/universe (placeId).
-        const gameId = user.gameId != null ? String(user.gameId) : '';
-        if (!placeId && !gameId) continue;
-        const info = byRobloxId.get(String(user.userId));
-        if (!info) continue;
+    for (const [robloxId, user] of presenceByRobloxId) {
+        const info = byRobloxId.get(robloxId);
+        if (!info) continue; // a requester (or unrelated id) — not an auto-join candidate
 
-    // A linked user must be inside THIS raid's Roblox server: either their
-    // current server (gameId) matches the raid's serverId, or — for raids
-    // that still only carry a placeId — the placeId matches AND no more
-    // specific serverId is known so we avoid cross-server false positives.
-    const raid = openRaids.find(r => {
-        const placeMatches = !r.placeId || String(r.placeId) === placeId;
-        const serverMatches = (gameId && r.serverId && String(r.serverId) === gameId);
-        // Prefer an exact server match; only fall back to place match when
-        // the raid has no serverId yet (defensive — normally set at join).
-        return serverMatches || (placeMatches && !r.serverId);
-    });
-    if (!raid) continue;
+        // Shared tiered matcher: exact instance when a live reference exists,
+        // the recorded instance otherwise, and a same-experience fallback that
+        // can NEVER permanently lock a raid out after its jobId churns — the old
+        // `serverMatches || (placeMatches && !r.serverId)` guard was inverted, so
+        // once a recorded jobId died no helper could ever be added again.
+        let raid = null;
+        let verdict = null;
+        for (const candidate of openRaids) {
+            const requesterPresence =
+                presenceByRobloxId.get(String(candidate.robloxUserId == null ? '' : candidate.robloxUserId)) || null;
+            const outcome = evaluateHelperMatch({ raid: candidate, helperPresence: user, requesterPresence });
+            if (outcome.matched) { raid = candidate; verdict = outcome; break; }
+        }
+        if (!raid || !verdict) continue;
+
+        // Self-heal: adopt the requester's live instance as the raid's server.
+        // Persisted via the setter because addHelper() reloads raids from disk.
+        if (verdict.refreshServerId && raid.serverId !== verdict.refreshServerId) {
+            raidStateManager.setRaidServerId(raid.raidId, verdict.refreshServerId, guildId);
+            raid.serverId = verdict.refreshServerId;
+            console.log('[auto-join] raid #' + raid.raidId + ' serverId refreshed (requester moved instances)');
+        }
 
         const result = await raidStateManager.addHelper(raid.raidId, info.userId, {
             username: info.roblox_username,
@@ -118,7 +135,7 @@ async function pollAutoJoin(client, guildId) {
         if (result && result.success) {
             changedRaids.set(raid.raidId, result.raid);
             console.log('[auto-join] <@' + info.userId + '> (' + info.roblox_username +
-                ') auto-joined raid #' + raid.raidId + ' via presence (place ' + placeId + ')');
+                ') auto-joined raid #' + raid.raidId + ' via presence (tier ' + verdict.tier + ')');
         }
     }
 

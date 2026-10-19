@@ -115,13 +115,30 @@ module.exports = {
             presenceLoopRunning = true;
             try {
                 const currentGuilds = [...client.guilds.cache.values()];
-                await Promise.allSettled(currentGuilds.flatMap(g => [
-                    // Helper time-tracking (presence deltas for existing helpers).
-                    raidStateManager.pollHelperPresences(client, g.id),
-                    // Presence-based AUTO-JOIN: linked users who are InGame in an
-                    // open raid's experience are added to the LIVE HELPERS list.
-                    autoJoinPresence.pollAutoJoin(client, g.id)
-                ]));
+                // pollHelperPresences RETURNS the raids whose helper state
+                // changed (active/idle transitions, serverId self-heals) — the
+                // old loop discarded those return values, so a helper going
+                // idle never re-rendered the alert and durations never updated
+                // on screen. Collect + re-render per guild below.
+                const changedByGuild = new Map(); // guildId -> raid[]
+                await Promise.allSettled(currentGuilds.map(async (g) => {
+                    const [helperRes] = await Promise.allSettled([
+                        // Helper time-tracking (presence deltas for existing helpers).
+                        raidStateManager.pollHelperPresences(client, g.id),
+                        // Presence-based AUTO-JOIN: linked users who are InGame in an
+                        // open raid's experience are added to the LIVE HELPERS list.
+                        // (Re-renders its own alerts internally via updateAlertMessage.)
+                        autoJoinPresence.pollAutoJoin(client, g.id)
+                    ]);
+                    if (helperRes && helperRes.status === 'fulfilled' && Array.isArray(helperRes.value) && helperRes.value.length > 0) {
+                        changedByGuild.set(g.id, helperRes.value);
+                    }
+                }));
+                for (const [guildId, raids] of changedByGuild) {
+                    for (const raid of raids) {
+                        await autoJoinPresence.updateAlertMessage(client, raid, guildId).catch(() => null);
+                    }
+                }
                 // Help-button presence monitoring: users who pressed Help are
                 // checked separately; only added to Live Helpers when Roblox
                 // confirms they are inside the exact raid server.

@@ -22,6 +22,8 @@ const sharedPingDb = require("../handlers/sharedPingDb");
 const { withTimeout, fetchWithTimeout } = require("../handlers/fetchTimeout");
 const guildAccess = require("../handlers/guildAccess");
 const gatewayGuard = require("../handlers/gatewayGuard");
+// Pure tiered server matcher (shared with auto-join + helper time tracking).
+const helperVerification = require("../handlers/helperVerification");
 // Commands that bypass the normal per-guild premium-access guard so support
 // moderators can manage access from the support server. They still enforce
 // their own support-server + role + password checks.
@@ -39,18 +41,46 @@ const pendingServerIds = new Map();
 const pendingGameThumbnails = new Map();
 const pendingCountryCodes = new Map();
 
-// Temporary monitoring records for users who pressed Help. Key = discordUserId.
+// Temporary monitoring records for users who pressed Help. Key =
+// `${guildId}:${raidId}:${discordUserId}` — keying by user alone meant a
+// helper pressing Help on raid B while still monitored on raid A got the
+// "already checking" reply and could never switch raids.
 // These are NOT helpers — they are users the bot is watching to see if they
 // join the raid server. Auto-expires after 10 minutes.
-// Value: { guildId, raidId, robloxUserId, robloxUsername, displayName, avatarUrl, expiresAt }
+// Value: { guildId, raidId, discordUserId, robloxUserId, robloxUsername, displayName, avatarUrl, expiresAt }
 const pendingHelpMonitors = new Map();
 const HELP_MONITOR_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+// Builds the namespaced monitor key so one user can be watched on one raid
+// per guild without clobbering a monitor on another raid.
+function helpMonitorKey(guildId, raidId, discordUserId) {
+    return `${guildId || 'dm'}:${raidId}:${discordUserId}`;
+}
+
+// Maps the tracked-link shape from BOTH link stores to the verification-row
+// fields the Help flow consumes. Global links (Supabase) expose camelCase
+// `userId`/`verified`; legacy per-guild rows expose snake_case
+// `roblox_user_id`/`is_verified`. Handles whichever is present.
+function normalizeLinkForRaid(globalLink, legacyRow) {
+    const source = globalLink || legacyRow || null;
+    if (!source) return null;
+    const robloxUserId = source.roblox_user_id != null
+        ? String(source.roblox_user_id).trim()
+        : (source.robloxUserId != null ? String(source.robloxUserId).trim() : '');
+    if (!robloxUserId || robloxUserId === '1') return null;
+    return {
+        roblox_user_id: robloxUserId,
+        roblox_username: source.roblox_username || source.robloxUsername || null,
+        roblox_display_name: source.roblox_display_name || source.robloxDisplayName || null,
+        roblox_avatar_url: source.roblox_avatar_url || source.robloxAvatarUrl || null
+    };
+}
 
 // Clean up expired monitoring records periodically.
 function cleanupExpiredMonitors() {
     const now = Date.now();
-    for (const [userId, rec] of pendingHelpMonitors) {
-        if (rec.expiresAt <= now) pendingHelpMonitors.delete(userId);
+    for (const [key, rec] of pendingHelpMonitors) {
+        if (rec.expiresAt <= now) pendingHelpMonitors.delete(key);
     }
 }
 
@@ -158,11 +188,18 @@ function buildUnverifiedMessage(guildId) {
  * rejected by the API and would make the whole alert message fail to post. So we
  * expose an https Roblox "start" link (the client redirects to the launcher) and
  * fall back to the stored HTTPS server link when no place id is available.
+ * When the raid carries a live serverId (Job ID), it is appended as
+ * `gameInstanceId` so the launcher targets the requester's EXACT server
+ * instance instead of matchmaking the helper into a random public server —
+ * the old placeId-only link is why helpers "joined" but never landed in the
+ * raid server and were never detected.
  */
 function buildRobloxJoinLink(raid) {
     const placeId = raid && raid.placeId;
     if (placeId) {
-        return `https://www.roblox.com/games/start?placeId=${placeId}`;
+        const serverId = raid && raid.serverId ? String(raid.serverId).trim() : '';
+        const base = `https://www.roblox.com/games/start?placeId=${placeId}`;
+        return serverId ? `${base}&gameInstanceId=${encodeURIComponent(serverId)}` : base;
     }
     const fallback = (raid && raid.serverLink) ? raid.serverLink : null;
     return fallback && /^https?:\/\//i.test(fallback) ? fallback : null;
@@ -848,22 +885,48 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
     });
 }
 
+// One-shot guard: a missing ROBLOX_API_KEY must warn once, not every 15s tick.
+let helpMonitorApiKeyWarned = false;
+
 async function processHelpMonitors(client) {
     cleanupExpiredMonitors();
     if (pendingHelpMonitors.size === 0) return;
     const apiKey = process.env.ROBLOX_API_KEY;
-    if (!apiKey) return;
+    if (!apiKey) {
+        if (!helpMonitorApiKeyWarned) {
+            helpMonitorApiKeyWarned = true;
+            console.warn('[help-monitor] ROBLOX_API_KEY is not set - Help monitors cannot verify server joins and will expire. Set the key to enable detection.');
+        }
+        return;
+    }
     const byGuild = new Map();
-    for (const [userId, rec] of pendingHelpMonitors) {
+    for (const [key, rec] of pendingHelpMonitors) {
         if (!byGuild.has(rec.guildId)) byGuild.set(rec.guildId, []);
-        byGuild.get(rec.guildId).push({ userId, rec });
+        byGuild.get(rec.guildId).push({ key, userId: rec.discordUserId, rec });
     }
     for (const [guildId, monitors] of byGuild) {
-        const robloxIds = monitors.map(m => m.rec.robloxUserId);
-        const idToMonitor = new Map(monitors.map(m => [m.rec.robloxUserId, m]));
-        const presences = [];
-        for (let i = 0; i < robloxIds.length; i += 100) {
-            const chunk = robloxIds.slice(i, i + 100);
+        // Resolve raids UP FRONT so the raid requester's Roblox id joins the same
+        // presence batch: the requester's CURRENT jobId is the reference that
+        // exact instance matching compares against. Matching against a jobId
+        // captured once at request time is what used to break public servers —
+        // instances churn and the recorded id dies.
+        const resolved = monitors.map(m => ({
+            key: m.key,
+            userId: m.userId,
+            rec: m.rec,
+            raid: raidStateManager.getRaidById(m.rec.raidId, guildId)
+        }));
+        const idsToFetch = new Set();
+        for (const item of resolved) {
+            if (item.rec.robloxUserId) idsToFetch.add(String(item.rec.robloxUserId));
+            const rid = item.raid && item.raid.robloxUserId != null ? String(item.raid.robloxUserId).trim() : '';
+            if (rid && rid !== '1') idsToFetch.add(rid);
+        }
+
+        const presenceByRobloxId = new Map();
+        const allIds = [...idsToFetch];
+        for (let i = 0; i < allIds.length; i += 100) {
+            const chunk = allIds.slice(i, i + 100);
             try {
                 const response = await fetchWithTimeout('https://presence.roblox.com/v1/presence/users', {
                     method: 'POST',
@@ -872,27 +935,44 @@ async function processHelpMonitors(client) {
                 }, 8000);
                 if (!response.ok) continue;
                 const data = await response.json();
-                presences.push(...(data.userPresences || data.data || []));
+                for (const record of (data.userPresences || data.data || [])) {
+                    presenceByRobloxId.set(String(record.userId), record);
+                }
             } catch (err) {
                 console.warn('[help-monitor] presence fetch error:', (err && err.message) || err);
             }
         }
-        for (const user of presences) {
-            const entry = idToMonitor.get(String(user.userId));
-            if (!entry) continue;
-            const { userId, rec } = entry;
-            if (user.userPresenceType !== 2) continue;
-            const placeId = user.placeId != null ? String(user.placeId) : '';
-            const gameId = user.gameId != null ? String(user.gameId) : '';
-            if (!placeId && !gameId) continue;
-            const raid = raidStateManager.getRaidById(rec.raidId, rec.guildId);
-            if (!raid || raid.status === 'CLOSED') { pendingHelpMonitors.delete(userId); continue; }
+        for (const item of resolved) {
+            const { key, userId, rec, raid } = item;
+            // A raid that filled while this user waited can no longer admit
+            // them — release the monitor now instead of letting it idle to TTL.
+            if (!raid || raid.status === 'CLOSED') { pendingHelpMonitors.delete(key); continue; }
+            const limit = Number(raid.helperLimit) || 0;
+            if (limit > 0 && Array.isArray(raid.helpers) && raid.helpers.length >= limit) { pendingHelpMonitors.delete(key); continue; }
             const alreadyHelper = Array.isArray(raid.helpers) && raid.helpers.some(h => typeof h === 'object' && h.userId === userId);
-            if (alreadyHelper) { pendingHelpMonitors.delete(userId); continue; }
-            const placeMatches = !raid.placeId || String(raid.placeId) === placeId;
-            const serverMatches = (gameId && raid.serverId && String(raid.serverId) === gameId);
-            const inServer = serverMatches || (placeMatches && !raid.serverId);
-            if (!inServer) continue;
+            if (alreadyHelper) { pendingHelpMonitors.delete(key); continue; }
+
+            const helperPresence = presenceByRobloxId.get(String(rec.robloxUserId)) || null;
+            const requesterPresence = presenceByRobloxId.get(
+                raid.robloxUserId != null ? String(raid.robloxUserId).trim() : ''
+            ) || null;
+
+            // Tiered verdict: exact_instance when a live reference exists, the
+            // recorded instance otherwise, and a same-experience fallback that
+            // can never permanently lock the raid out after its jobId churns.
+            // (The old `serverMatches || (placeMatches && !raid.serverId)` guard
+            // was inverted, so a dead recorded id blocked every helper forever.)
+            const verdict = helperVerification.evaluateHelperMatch({ raid, helperPresence, requesterPresence });
+            if (!verdict.matched) continue; // keep watching; TTL decides the rest
+
+            // Self-heal a stale recorded jobId BEFORE adding. Persisted through
+            // the setter because addHelper() below RELOADS raids from disk.
+            if (verdict.refreshServerId && raid.serverId !== verdict.refreshServerId) {
+                raidStateManager.setRaidServerId(raid.raidId, verdict.refreshServerId, guildId);
+                raid.serverId = verdict.refreshServerId;
+                console.log('[help-monitor] raid #' + raid.raidId + ' serverId refreshed (requester moved instances)');
+            }
+
             const result = await raidStateManager.addHelper(rec.raidId, userId, {
                 username: rec.robloxUsername, displayName: rec.displayName, userId: rec.robloxUserId, avatarUrl: rec.avatarUrl
             }, rec.guildId);
@@ -907,7 +987,7 @@ async function processHelpMonitors(client) {
                 const embeds = raidStateManager.formatRaidMessage(updated, rec.guildId);
                 await raidStateManager.editRaidAlertMessage(client, updated, { embeds: embeds, components: [row] });
             }
-            pendingHelpMonitors.delete(userId);
+            pendingHelpMonitors.delete(key);
             console.log('[help-monitor] <@' + userId + '> (' + rec.robloxUsername + ') detected in raid #' + rec.raidId + ' — Live Helpers');
             try {
                 const dmEmbed = new EmbedBuilder().setTitle('✅ You Joined Raid #' + raidStateManager.getRaidDisplayId(updated) + '!').setDescription('You were detected inside the raid server and added to Live Helpers. Good luck!').setColor(0x57F287).setTimestamp();
@@ -917,14 +997,14 @@ async function processHelpMonitors(client) {
         }
     }
     const now = Date.now();
-    for (const [userId, rec] of pendingHelpMonitors) {
+    for (const [key, rec] of pendingHelpMonitors) {
         if (rec.expiresAt <= now) {
             try {
                 const dmEmbed = new EmbedBuilder().setTitle('⏰ Raid Check Expired').setDescription('We could not detect you joining the raid server within 10 minutes. Please ensure your Roblox privacy settings allow joins for **Everyone**, then press Help again.').setColor(0xED4245).setTimestamp();
-                const discordUser = await client.users.fetch(userId).catch(() => null);
+                const discordUser = await client.users.fetch(rec.discordUserId || key.split(':').pop()).catch(() => null);
                 if (discordUser) await discordUser.send({ embeds: [dmEmbed] }).catch(() => null);
             } catch (e) { /* ignore */ }
-            pendingHelpMonitors.delete(userId);
+            pendingHelpMonitors.delete(key);
         }
     }
 }
@@ -1668,24 +1748,29 @@ module.exports = {
                 return;
             }
             // GLOBAL link lookup (same shared service as raid requests): a link
-            // made in any Kakuzu server works here. DB outage -> temporary
-            // message, never "not linked"; cached data is never deleted.
+            // made in any Kakuzu server works here. Field shapes differ between
+            // stores (global: `verified`/`roblox_user_id`, legacy sqlite:
+            // `is_verified`/`roblox_user_id`), so normalize before checking —
+            // the old inline `vdata.is_verified || vdata.verified` check treated
+            // valid global rows as unlinked whenever only one flag was set.
+            // DB outage with a usable cached/global row still admits the helper;
+            // only a hard outage with NO link data shows the retry message.
+            // Legacy per-guild row is a fallback mirror when global has no row.
             let vdata = null;
             try {
                 const found = await robloxLinks.getGlobalRobloxLink(interaction.user.id);
-                if (!found.ok) {
+                let legacyRow = null;
+                try { legacyRow = await verificationDb.getVerificationData(interaction.user.id, guildId); } catch (e) { /* ignore */ }
+                vdata = normalizeLinkForRaid(found && found.link ? found.link : null, legacyRow);
+                if (!vdata && found && found.ok === false && !found.link && !legacyRow) {
                     await interaction.reply({ content: 'Kakuzu cannot check your Roblox link right now because the database is temporarily unavailable. Please try again shortly.', flags: 64 }).catch(() => null);
                     return;
-                }
-                vdata = found.link;
-                if (!vdata) {
-                    try { vdata = await verificationDb.getVerificationData(interaction.user.id, guildId); } catch (e) { /* ignore */ }
                 }
             } catch (e) {
                 await interaction.reply({ content: 'Kakuzu cannot check your Roblox link right now because the database is temporarily unavailable. Please try again shortly.', flags: 64 }).catch(() => null);
                 return;
             }
-            const isLinked = vdata && (vdata.is_verified || vdata.verified) && vdata.roblox_user_id && String(vdata.roblox_user_id) !== '1';
+            const isLinked = Boolean(vdata && vdata.roblox_user_id && String(vdata.roblox_user_id) !== '1');
             if (!isLinked) {
                 const settings = raidStateManager.loadSettings(guildId);
                 const channelId = settings && settings.verificationChannel;
@@ -1695,8 +1780,9 @@ module.exports = {
                 await interaction.reply({ embeds: [embed], components: [row], flags: 64 }).catch(() => null);
                 return;
             }
-            if (pendingHelpMonitors.has(interaction.user.id)) {
-                const rec = pendingHelpMonitors.get(interaction.user.id);
+            const monitorKey = helpMonitorKey(guildId, raidId, interaction.user.id);
+            if (pendingHelpMonitors.has(monitorKey)) {
+                const rec = pendingHelpMonitors.get(monitorKey);
                 const remaining = Math.max(0, Math.ceil((rec.expiresAt - Date.now()) / 60000));
                 await interaction.reply({ content: '⏳ We are already checking whether you joined the server. Please enter the raid and wait — the check expires in ' + remaining + ' minute(s).', flags: 64 }).catch(() => null);
                 return;
@@ -1706,7 +1792,7 @@ module.exports = {
             const joinRow = serverLink ? new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Join Raid Server').setURL(serverLink)) : null;
             const embed = new EmbedBuilder().setTitle('🎮 Raid #' + raidStateManager.getRaidDisplayId(raid) + ' — Join Server').setDescription('Click the button below to join the raid server. Once you are in-game, the bot will automatically detect you and add you to the Live Helpers list.').addFields([{ name: 'Game', value: gameLabel, inline: true }, { name: 'Region', value: raid.region || 'Unknown', inline: true }, { name: 'Raid ID', value: '#' + raidStateManager.getRaidDisplayId(raid), inline: true }]).setColor(0x57F287).setFooter({ text: 'You have 10 minutes to join the server.', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) }).setTimestamp();
             await interaction.reply({ embeds: [embed], components: joinRow ? [joinRow] : [], flags: 64 }).catch(() => null);
-            pendingHelpMonitors.set(interaction.user.id, { guildId, raidId, robloxUserId: String(vdata.roblox_user_id), robloxUsername: vdata.roblox_username, displayName: vdata.roblox_display_name || vdata.roblox_username, avatarUrl: vdata.roblox_avatar_url || null, expiresAt: Date.now() + HELP_MONITOR_TTL_MS });
+            pendingHelpMonitors.set(monitorKey, { guildId, raidId, discordUserId: interaction.user.id, robloxUserId: String(vdata.roblox_user_id), robloxUsername: vdata.roblox_username, displayName: vdata.roblox_display_name || vdata.roblox_username, avatarUrl: vdata.roblox_avatar_url || null, expiresAt: Date.now() + HELP_MONITOR_TTL_MS });
             console.log('[help-monitor] <@' + interaction.user.id + '> (' + vdata.roblox_username + ') pressing help on raid #' + raidId + ' — monitoring started');
             return;
         }

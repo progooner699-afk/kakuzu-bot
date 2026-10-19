@@ -7,6 +7,8 @@ const PRESENCE_FETCH_TIMEOUT_MS = 8000;
 const { EmbedBuilder, ChannelType } = require('discord.js');
 const leaderboardDb = require('./leaderboardDb');
 const robloxApi = require('./robloxApi');
+// Pure verification core: tiered server matching + helper active/idle transitions.
+const { evaluateHelperMatch, noteHelperActiveState, normalizeId } = require('./helperVerification');
 
 const baseDataDir = path.join(__dirname, '..', 'data');
 const guildsDataDir = path.join(baseDataDir, 'guilds');
@@ -621,50 +623,122 @@ function setRaidMvp(raidId, mvpUserId, guildId) {
 }
 
 
+/**
+ * Rewrites a raid's recorded Roblox server (job) id — the dynamic refresh that
+ * public servers require. `raid.serverId` is captured once at createRaid, but
+ * instances churn (fill → close → teleport, requester reconnects) and that id
+ * dies. Callers that re-resolve a live id MUST persist it through here, because
+ * the helper/auto-join paths then call addHelper(), which RELOADS raids from
+ * disk and would otherwise discard an in-memory mutation.
+ * @returns {object|null} the updated raid, or null when not found.
+ */
+function setRaidServerId(raidId, serverId, guildId) {
+    const raids = loadRaids(guildId);
+    const raid = raids.raids.find(item => item.raidId === raidId);
+    if (!raid) return null;
+    const next = serverId == null ? '' : String(serverId).trim();
+    if (raid.serverId === next) return raid;
+    raid.serverId = next;
+    saveRaids(guildId, raids);
+    return raid;
+}
+
+/**
+ * Polls Roblox presence for every helper in the guild's active raids and applies
+ * active/idle transitions.
+ *
+ * A helper's clock only runs while Roblox confirms them in THE RAID'S SERVER —
+ * being InGame in some unrelated experience no longer banks time. The requester
+ * is polled in the SAME batch so matching runs against a LIVE reference jobId,
+ * and a stale `raid.serverId` is rewritten when the requester has moved to a new
+ * instance (the dynamic refresh public servers require).
+ *
+ * @returns {Promise<Array<object>>} the raids whose helper state CHANGED, so
+ * callers re-render exactly those alerts. Change-detection keeps us off Discord's
+ * rate limit; previously a leave was never rendered at all.
+ */
 async function pollHelperPresences(client, guildId) {
+    const changed = [];
     const apiKey = process.env.ROBLOX_API_KEY;
-    if (!apiKey) return;
+    if (!apiKey) return changed;
     const raids = loadRaids(guildId);
     const activeRaids = raids.raids.filter(r => r.status !== 'CLOSED' && Array.isArray(r.helpers) && r.helpers.length > 0);
-    if (activeRaids.length === 0) return;
-    const helperUserIds = [];
-    const helperMap = new Map();
+    if (activeRaids.length === 0) return changed;
+
+    // One batch carries helpers AND requesters: the requester's current jobId is
+    // the authoritative reference for exact instance matching.
+    const idsToFetch = new Set();
+    const helperEntries = new Map(); // robloxUserId -> [{ raid, helper }]
     for (const raid of activeRaids) {
+        const requesterRobloxId = normalizeId(raid.robloxUserId);
+        if (requesterRobloxId && requesterRobloxId !== '1') idsToFetch.add(requesterRobloxId);
         for (const helper of raid.helpers) {
             if (typeof helper === 'object' && helper.robloxUserId && helper.robloxUserId !== '1') {
-                helperUserIds.push(helper.robloxUserId);
-                helperMap.set(helper.robloxUserId, { raid, helper });
+                const key = String(helper.robloxUserId);
+                idsToFetch.add(key);
+                if (!helperEntries.has(key)) helperEntries.set(key, []);
+                helperEntries.get(key).push({ raid, helper });
             }
         }
     }
-    if (helperUserIds.length === 0) return;
+    if (helperEntries.size === 0) return changed;
+
+    const presenceByRobloxId = new Map();
     try {
-        const response = await fetchWithTimeout('https://presence.roblox.com/v1/presence/users', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-            body: JSON.stringify({ userIds: helperUserIds })
-        }, PRESENCE_FETCH_TIMEOUT_MS);
-        if (!response.ok) return;
-        const data = await response.json();
-        for (const user of (data.userPresences || data.data || [])) {
-            const info = helperMap.get(String(user.userId));
-            if (!info) continue;
-            const helper = info.helper;
-            // Roblox presence API returns INTEGERS: 0 Offline, 1 Online,
-            // 2 InGame, 3 InStudio, 4 Invisible. (The old string 'InGame'
-            // comparison never matched, so time tracking never fired.)
-            if (user.userPresenceType === 2 && !helper.lastSeenTime) {
-                helper.lastSeenTime = Date.now();
-            } else if (user.userPresenceType !== 2 && helper.lastSeenTime) {
-                const elapsed = Math.floor((Date.now() - helper.lastSeenTime) / 1000);
-                helper.timeSpentSeconds = (helper.timeSpentSeconds || 0) + elapsed;
-                helper.lastSeenTime = null;
+        const allIds = [...idsToFetch];
+        for (let i = 0; i < allIds.length; i += 100) {
+            const chunk = allIds.slice(i, i + 100);
+            const response = await fetchWithTimeout('https://presence.roblox.com/v1/presence/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+                body: JSON.stringify({ userIds: chunk })
+            }, PRESENCE_FETCH_TIMEOUT_MS);
+            if (!response.ok) return changed;
+            const data = await response.json();
+            for (const record of (data.userPresences || data.data || [])) {
+                presenceByRobloxId.set(String(record.userId), record);
             }
         }
-        saveRaids(guildId, raids);
     } catch (error) {
         console.warn('Presence polling error:', error?.message || error);
+        return changed;
     }
+
+    const changedRaidIds = new Set();
+    let persisted = false;
+
+    for (const [robloxId, entries] of helperEntries) {
+        const helperPresence = presenceByRobloxId.get(robloxId);
+        // Absent from the payload = no data (partial/odd response), NOT "left".
+        // Transitioning on missing data would silently corrupt time tracking.
+        if (!helperPresence) continue;
+
+        for (const entry of entries) {
+            const { raid, helper } = entry;
+            const requesterPresence = presenceByRobloxId.get(normalizeId(raid.robloxUserId)) || null;
+            const verdict = evaluateHelperMatch({ raid, helperPresence, requesterPresence });
+
+            // Self-heal: the requester moved to a new instance → adopt it so every
+            // later poll (and the join link) targets the LIVE server, not a ghost.
+            if (verdict.refreshServerId && raid.serverId !== verdict.refreshServerId) {
+                raid.serverId = verdict.refreshServerId;
+                persisted = true;
+                console.log(`[helper-verify] raid #${raid.raidId} serverId refreshed from stale id (requester moved instances)`);
+            }
+
+            const transition = noteHelperActiveState(helper, verdict.matched, Date.now());
+            if (transition.changed) {
+                persisted = true;
+                changedRaidIds.add(raid.raidId);
+            }
+        }
+    }
+
+    if (persisted) saveRaids(guildId, raids);
+    for (const raid of activeRaids) {
+        if (changedRaidIds.has(raid.raidId)) changed.push(raid);
+    }
+    return changed;
 }
 
 function getTopEntries(ranking, max = 5) {
@@ -1050,5 +1124,6 @@ module.exports = {
     normalizeInGameHelpersList,
     formatInGameHelpersDisplay,
     setRaidMvp,
+    setRaidServerId,
     pollHelperPresences
 };
