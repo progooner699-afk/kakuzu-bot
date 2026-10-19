@@ -21,6 +21,68 @@ const { fetchWithTimeout } = require('./fetchTimeout');
 const GAMEJOIN_FETCH_TIMEOUT_MS = 10000;
 const GAMEJOIN_URL = 'https://gamejoin.roblox.com/v1/join-game-instance';
 
+// ---------------------------------------------------------------------------
+// Optional egress proxy for the AUTHENTICATED gamejoin POST.
+//
+// Native fetch() has NO `httpsAgent` property — that is the axios / Node
+// https.request model, where a proxy agent is handed to the request layer.
+// undici's fetch (what global fetch is on Node 18+) binds the agent through the
+// `dispatcher` option instead, so handing it a `HttpsProxyAgent` object would be
+// silently IGNORED and the request would egress direct with no error. The
+// construct that actually tunnels here is undici's ProxyAgent -> dispatcher.
+//
+// undici is only guaranteed today via discord.js's dependency tree, so require
+// it defensively: if it ever disappears we warn once and run direct rather than
+// crashing the boot.
+// ---------------------------------------------------------------------------
+let ProxyAgentCtor = null;
+try { ProxyAgentCtor = require('undici').ProxyAgent; } catch (_) { ProxyAgentCtor = null; }
+
+let gameJoinDispatcher;        // undefined = not resolved yet, null = direct
+let gameJoinProxyWarned = false;
+
+/**
+ * Resolves (and caches) the undici dispatcher used for the gamejoin POST.
+ * Reads process.env.ROBLOSECURITY_PROXY_URL and reuses ONE agent so sockets are
+ * pooled across the 15s presence loop instead of being rebuilt per request.
+ * NEVER logs the raw value — it may embed `user:pass@` credentials.
+ * @returns {object|null} a ProxyAgent to bind as `dispatcher`, or null = direct
+ */
+function resolveGameJoinDispatcher() {
+  if (gameJoinDispatcher !== undefined) return gameJoinDispatcher;
+
+  const raw = (process.env.ROBLOSECURITY_PROXY_URL || '').trim();
+  if (!raw) {
+    gameJoinDispatcher = null;
+    if (!gameJoinProxyWarned) {
+      gameJoinProxyWarned = true;
+      console.warn('[gamejoin] proxy disabled: ROBLOSECURITY_PROXY_URL is not set - egressing directly (local fallback).');
+    }
+    return null;
+  }
+  if (!ProxyAgentCtor) {
+    gameJoinDispatcher = null;
+    console.warn('[gamejoin] proxy requested but the undici package is unavailable - egressing directly.');
+    return null;
+  }
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('unsupported proxy scheme');
+    gameJoinDispatcher = new ProxyAgentCtor(raw);
+    console.log(`[gamejoin] proxy enabled scheme=${parsed.protocol} auth=${parsed.username || parsed.password ? 'true' : 'false'} (proxy URL never logged).`);
+  } catch (_) {
+    gameJoinDispatcher = null;
+    console.warn('[gamejoin] proxy disabled: ROBLOSECURITY_PROXY_URL failed to parse - egressing directly (value never logged).');
+  }
+  return gameJoinDispatcher;
+}
+
+/** Test seam: forget the cached dispatcher + one-shot warning state. */
+function _resetProxyForTests() {
+  gameJoinDispatcher = undefined;
+  gameJoinProxyWarned = false;
+}
+
 let botCookie = process.env.BOT_ROBLOSECURITY || '';
 // Env value that was active when we last adopted a rotated cookie. Used by
 // refreshCookieFromEnv() so a stale env var does not clobber a fresher rotated
@@ -315,11 +377,19 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}) {
     return headers;
   };
 
-  const post = (csrfToken) => fetchWithTimeout(GAMEJOIN_URL, {
-    method: 'POST',
-    headers: buildHeaders(csrfToken),
-    body: bodyJson
-  }, GAMEJOIN_FETCH_TIMEOUT_MS);
+  const post = (csrfToken) => {
+    const reqOptions = {
+      method: 'POST',
+      headers: buildHeaders(csrfToken),
+      body: bodyJson
+    };
+    // Bind the optional ROBLOSECURITY_PROXY_URL egress proxy. `dispatcher` is
+    // native fetch's equivalent of axios's `httpsAgent`; omitting it entirely
+    // (rather than passing null) keeps the direct path byte-identical.
+    const dispatcher = resolveGameJoinDispatcher();
+    if (dispatcher) reqOptions.dispatcher = dispatcher;
+    return fetchWithTimeout(GAMEJOIN_URL, reqOptions, GAMEJOIN_FETCH_TIMEOUT_MS);
+  };
 
   // Attempt the join. A pre-fetched CSRF token is sent up front (skips the
   // handshake round-trip); otherwise the first POST goes out without a token
@@ -390,6 +460,7 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}) {
       joinScript: joinScriptFound,
       csrfPresent: Boolean(usedCsrf),
       csrfRetried,
+      proxyEnabled: Boolean(resolveGameJoinDispatcher()),
       replacementCookieReceived: replacement.received,
       challengeType: parsed.challengeType || null,
       challengeHeadersPresent: Boolean(parsed.challengeType),
@@ -444,7 +515,10 @@ async function getServerIp(placeId, serverId, context = {}) {
     // fetchRobloxGameInstance throws only on 401 (revoked/expired cookie) with
     // an explicit, secret-free message. Log it and keep the null contract so
     // callers (detectGameAndRegion) degrade to Unknown instead of throwing.
-    console.warn(`[gamejoin] ${err && err.message ? err.message : 'request failed'} (guild=${diagGuildId} raidId=${diagRaidId})`);
+    // When a proxy is in play, name it so a dead proxy is distinguishable from
+    // a Roblox-side failure (the proxy URL itself is never logged).
+    const proxyNote = resolveGameJoinDispatcher() ? ' proxyEnabled=true' : '';
+    console.warn(`[gamejoin] ${err && err.message ? err.message : 'request failed'}${proxyNote} (guild=${diagGuildId} raidId=${diagRaidId})`);
     return null;
   }
 
@@ -574,7 +648,7 @@ function logGameJoinAttempt({ attempt, httpStatus, csrfPresent, csrfRetried, rep
 
 // Live binding: callers reading `BOT_COOKIE` after an in-memory rotation still
 // see the cookie actually in use (a plain property would snapshot the value).
-const robloxAuthExports = { getCsrfToken, getServerIp, fetchRobloxGameInstance, checkRobloxCookieAuth, getLastGameJoinAttempt, classifyGameJoinBlocker, isCookieConfigured };
+const robloxAuthExports = { getCsrfToken, getServerIp, fetchRobloxGameInstance, checkRobloxCookieAuth, getLastGameJoinAttempt, classifyGameJoinBlocker, isCookieConfigured, _resetProxyForTests };
 Object.defineProperty(robloxAuthExports, 'BOT_COOKIE', {
     enumerable: true,
     get() { return botCookie; }

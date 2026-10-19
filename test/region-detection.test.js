@@ -769,3 +769,197 @@ test('getServerIp: 401 returns null and logs the explicit revoked-cookie error',
         restoreFetch();
     }
 });
+
+// ---------------------------------------------------------------------------
+// ROBLOSECURITY_PROXY_URL: dispatcher binding (native fetch's httpsAgent equiv).
+// ---------------------------------------------------------------------------
+
+test('fetchRobloxGameInstance: ROBLOSECURITY_PROXY_URL binds a dispatcher on BOTH CSRF attempts', async () => {
+    const COOKIE_SECRET = 'TEST_COOKIE_SECRET_proxy';
+    const PRE_TOKEN = 'FAKE-CSRF-PRE-PROBE-proxy';
+    const HANDSHAKE_TOKEN = 'FAKE-CSRF-403-proxy';
+    const ROTATED_COOKIE = 'TEST_COOKIE_SECRET_proxy_rotated';
+    const PROXY_SECRET = 'http://user:pass@127.0.0.1:9999';
+    const prevCookie = process.env.BOT_ROBLOSECURITY;
+    const prevProxy = process.env.ROBLOSECURITY_PROXY_URL;
+    process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
+    process.env.ROBLOSECURITY_PROXY_URL = PROXY_SECRET;
+    realRobloxAuth._resetProxyForTests();
+
+    const calls = [];
+    logs = [];
+    try {
+        global.fetch = async (url, options) => {
+            const u = String(url);
+            if (u.includes('users.roblox.com')) {
+                return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 1 }) };
+            }
+            if (u.includes('auth.roblox.com/v2/logout')) {
+                return { ok: true, status: 403, headers: makeMockHeaders({ csrf: PRE_TOKEN }), json: async () => ({}) };
+            }
+            if (u.includes('gamejoin.roblox.com')) {
+                calls.push(options || {});
+                if (calls.length === 1) {
+                    return {
+                        ok: false, status: 403, statusMessage: 'Forbidden',
+                        headers: makeMockHeaders({ csrf: HANDSHAKE_TOKEN, contentType: 'application/json' }),
+                        json: async () => ({ errorMessage: 'Token Validation Failed' })
+                    };
+                }
+                return {
+                    ok: true, status: 200, statusMessage: 'OK',
+                    headers: makeMockHeaders({
+                        contentType: 'application/json',
+                        setCookie: [`.ROBLOSECURITY=${ROTATED_COOKIE}; path=/`]
+                    }),
+                    json: async () => ({ joinScript: { MachineAddress: '10.0.0.5', DataCenterId: 'dc-9', UdmuxEndpoints: [{ Address: '203.0.113.9' }] } })
+                };
+            }
+            throw new Error(`unexpected fetch in test: ${u}`);
+        };
+
+        const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-PROXY', { guildId: GUILD_ID, raidId: 42 });
+
+        // Core proxy assertions: the agent is bound on the initial POST AND the
+        // 403 retry, and it is a single cached instance (socket pooling).
+        assert.equal(calls.length, 2, 'expected initial POST + one CSRF retry');
+        assert.ok(calls[0].dispatcher, 'dispatcher must be bound when ROBLOSECURITY_PROXY_URL is set');
+        assert.ok(calls[1].dispatcher, 'the CSRF retry must reuse the proxy dispatcher');
+        assert.equal(calls[0].dispatcher, calls[1].dispatcher, 'one agent instance must be reused, not rebuilt per request');
+
+        // Core logic intact alongside the proxy: headers, retry token, payload.
+        assert.equal(calls[0].headers['Cookie'], `.ROBLOSECURITY=${COOKIE_SECRET}`);
+        assert.equal(calls[0].headers['User-Agent'], 'Roblox/WinInet');
+        assert.equal(calls[0].headers['Content-Type'], 'application/json');
+        assert.equal(calls[0].headers['X-CSRF-TOKEN'], PRE_TOKEN);
+        assert.equal(calls[1].headers['X-CSRF-TOKEN'], HANDSHAKE_TOKEN, 'CSRF 403 retry must still fire through the proxy');
+        assert.equal(result.machineAddress, '10.0.0.5');
+        assert.equal(result.dataCenterId, 'dc-9');
+
+        // Set-Cookie rotation must still be adopted through the proxy.
+        assert.equal(realRobloxAuth.BOT_COOKIE, ROTATED_COOKIE, 'in-memory cookie rotation must still apply');
+
+        // The proxy URL (which embeds user:pass) must never be logged.
+        const serialized = JSON.stringify(logs);
+        assert.ok(!serialized.includes('user:pass'), 'proxy credentials must never be logged');
+        assert.ok(!serialized.includes(PROXY_SECRET), 'proxy URL must never be logged');
+        assert.ok(findLog(/proxy enabled scheme=http: auth=true/), 'a sanitized proxy-enabled line must be logged');
+
+        const rec = realRobloxAuth.getLastGameJoinAttempt();
+        assert.ok(rec);
+        assert.equal(rec.proxyEnabled, true, 'diagnostics must record that the proxied path was used');
+        assert.equal(rec.csrfRetried, true);
+    } finally {
+        if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
+        else process.env.BOT_ROBLOSECURITY = prevCookie;
+        if (prevProxy === undefined) delete process.env.ROBLOSECURITY_PROXY_URL;
+        else process.env.ROBLOSECURITY_PROXY_URL = prevProxy;
+        realRobloxAuth._resetProxyForTests();
+        restoreFetch();
+    }
+});
+
+test('fetchRobloxGameInstance: no ROBLOSECURITY_PROXY_URL falls back to direct with ONE warning', async () => {
+    const COOKIE_SECRET = 'TEST_COOKIE_SECRET_noproxy';
+    const prevCookie = process.env.BOT_ROBLOSECURITY;
+    const prevProxy = process.env.ROBLOSECURITY_PROXY_URL;
+    process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
+    delete process.env.ROBLOSECURITY_PROXY_URL;
+    realRobloxAuth._resetProxyForTests();
+
+    const calls = [];
+    logs = [];
+    try {
+        global.fetch = async (url, options) => {
+            const u = String(url);
+            if (u.includes('users.roblox.com')) {
+                return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 1 }) };
+            }
+            if (u.includes('auth.roblox.com/v2/logout')) {
+                return { ok: true, status: 403, headers: makeMockHeaders({ csrf: 'FAKE-CSRF-NO-PROXY' }), json: async () => ({}) };
+            }
+            if (u.includes('gamejoin.roblox.com')) {
+                calls.push(options || {});
+                return {
+                    ok: true, status: 200, statusMessage: 'OK',
+                    headers: makeMockHeaders({ contentType: 'application/json' }),
+                    json: async () => ({ joinScript: { MachineAddress: '10.0.0.6', DataCenterId: 'dc-10', UdmuxEndpoints: [{ Address: '203.0.113.10' }] } })
+                };
+            }
+            throw new Error(`unexpected fetch in test: ${u}`);
+        };
+
+        const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-NO-PROXY', { guildId: GUILD_ID, raidId: 42 });
+
+        assert.ok(result, 'direct path must keep working');
+        assert.ok(calls.length >= 1);
+        // No `dispatcher` key at all => byte-identical direct egress.
+        assert.equal('dispatcher' in calls[0], false, 'dispatcher must be omitted entirely when no proxy is configured');
+
+        // The warning must be emitted exactly once, not per request/resolution.
+        const warns = logs.filter(l => /ROBLOSECURITY_PROXY_URL is not set/.test(l.args.join(' ')));
+        assert.equal(warns.length, 1, 'missing-proxy warning must be logged exactly once');
+
+        const rec = realRobloxAuth.getLastGameJoinAttempt();
+        assert.ok(rec);
+        assert.equal(rec.proxyEnabled, false, 'diagnostics must record direct egress');
+    } finally {
+        if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
+        else process.env.BOT_ROBLOSECURITY = prevCookie;
+        if (prevProxy === undefined) delete process.env.ROBLOSECURITY_PROXY_URL;
+        else process.env.ROBLOSECURITY_PROXY_URL = prevProxy;
+        realRobloxAuth._resetProxyForTests();
+        restoreFetch();
+    }
+});
+
+test('fetchRobloxGameInstance: an unparseable proxy URL degrades to direct and never logs the value', async () => {
+    const COOKIE_SECRET = 'TEST_COOKIE_SECRET_badproxy';
+    const BAD_PROXY = 'definitely-not-a-valid-proxy-url';
+    const prevCookie = process.env.BOT_ROBLOSECURITY;
+    const prevProxy = process.env.ROBLOSECURITY_PROXY_URL;
+    process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
+    process.env.ROBLOSECURITY_PROXY_URL = BAD_PROXY;
+    realRobloxAuth._resetProxyForTests();
+
+    const calls = [];
+    logs = [];
+    try {
+        global.fetch = async (url, options) => {
+            const u = String(url);
+            if (u.includes('users.roblox.com')) {
+                return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 1 }) };
+            }
+            if (u.includes('auth.roblox.com/v2/logout')) {
+                return { ok: true, status: 403, headers: makeMockHeaders({ csrf: 'FAKE-CSRF-BAD-PROXY' }), json: async () => ({}) };
+            }
+            if (u.includes('gamejoin.roblox.com')) {
+                calls.push(options || {});
+                return {
+                    ok: true, status: 200, statusMessage: 'OK',
+                    headers: makeMockHeaders({ contentType: 'application/json' }),
+                    json: async () => ({ joinScript: { MachineAddress: '10.0.0.7', DataCenterId: 'dc-11', UdmuxEndpoints: [{ Address: '203.0.113.11' }] } })
+                };
+            }
+            throw new Error(`unexpected fetch in test: ${u}`);
+        };
+
+        const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-BAD-PROXY', { guildId: GUILD_ID, raidId: 42 });
+
+        assert.ok(result, 'an invalid proxy config must not break the join');
+        assert.equal('dispatcher' in calls[0], false, 'invalid proxy must degrade to direct egress');
+        assert.ok(findLog(/ROBLOSECURITY_PROXY_URL failed to parse/), 'the parse failure must be surfaced');
+        assert.ok(!JSON.stringify(logs).includes(BAD_PROXY), 'the invalid value must never be logged');
+
+        const rec = realRobloxAuth.getLastGameJoinAttempt();
+        assert.ok(rec);
+        assert.equal(rec.proxyEnabled, false);
+    } finally {
+        if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
+        else process.env.BOT_ROBLOSECURITY = prevCookie;
+        if (prevProxy === undefined) delete process.env.ROBLOSECURITY_PROXY_URL;
+        else process.env.ROBLOSECURITY_PROXY_URL = prevProxy;
+        realRobloxAuth._resetProxyForTests();
+        restoreFetch();
+    }
+});

@@ -229,6 +229,24 @@
   `getServerIp` delegates to it (keeping the pre-probe CSRF token + queue-status-22
   retry loop + challenge detection), and `refreshCookieFromEnv` no longer clobbers
   a rotated cookie with the stale env value. Tests: `test/region-detection.test.js`.
+* **Optional gamejoin egress proxy (`ROBLOSECURITY_PROXY_URL`):**
+  `resolveGameJoinDispatcher()` reads `process.env.ROBLOSECURITY_PROXY_URL` and
+  builds **ONE cached** undici `ProxyAgent`, bound as the fetch **`dispatcher`**
+  on the gamejoin POST — `dispatcher` is native fetch's equivalent of axios's
+  `httpsAgent` (native `fetch` has no `httpsAgent` property, so an
+  `HttpsProxyAgent` object would be silently ignored and traffic would egress
+  direct with no error). Undici is a **direct** dependency (`^6.24.1`) and is
+  `require`d defensively; if unavailable, or if the URL fails `new URL()`, it
+  logs a warning and degrades to direct egress instead of crashing. Only
+  `gamejoin.roblox.com` is tunneled (presence/users/thumbnails stay direct);
+  the CSRF 403 retry, `User-Agent`/`Cookie` headers and `Set-Cookie` rotation
+  all still apply through the proxy. The proxy URL **is never logged** (it may
+  embed `user:pass@`); only `scheme=`/`auth=` booleans appear, and `proxyEnabled`
+  is recorded on the `/raiddebug` attempt record. Missing env logs exactly one
+  warning (not per request). Test seam: `_resetProxyForTests()`.
+  Verified end-to-end against a local CONNECT proxy: `CONNECT
+  gamejoin.roblox.com:443` observed, real 401 payload returned through the
+  tunnel, `proxyEnabled=true` recorded.
 * **Network hardening (`handlers/fetchTimeout.js`):** every Roblox HTTP call
   (`handlers/robloxApi.js`, `handlers/robloxAuth.js` gamejoin + cookie probes,
   the `pollHelperPresences` / `pollAutoJoin` / help-monitor presence chunks, and
