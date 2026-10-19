@@ -216,6 +216,19 @@
   The alert embed shows the human-readable `Country` name (from
   `raidStateManager.countryCodeToName`, e.g. `IN` → `India`) directly under
   `Region`, or `Unknown` when undetected.
+* **GameJoin helper (`handlers/robloxAuth.js` `fetchRobloxGameInstance`):** the
+  single dedicated `gamejoin.roblox.com/v1/join-game-instance` POST helper.
+  Sends `Cookie`/`Content-Type`/`User-Agent`(+`Referer`); on a PLAIN (non-challenge)
+  `403` it reads `x-csrf-token` from the response headers and retries the exact
+  same POST once with that token appended (a Roblox CHALLENGE 403 is NEVER
+  retried); adopts a rotated `.ROBLOSECURITY` from `Set-Cookie` in memory only
+  (never logged/persisted) when the join authenticates, and an optional
+  `onCookieRotated` callback can persist it; throws `[Roblox Auth Error] The
+  .ROBLOSECURITY cookie has been revoked or expired.` on `401`; returns the
+  parsed payload (`joinScript.UdmuxEndpoints` / `MachineAddress` / `DataCenterId`).
+  `getServerIp` delegates to it (keeping the pre-probe CSRF token + queue-status-22
+  retry loop + challenge detection), and `refreshCookieFromEnv` no longer clobbers
+  a rotated cookie with the stale env value. Tests: `test/region-detection.test.js`.
 * **Network hardening (`handlers/fetchTimeout.js`):** every Roblox HTTP call
   (`handlers/robloxApi.js`, `handlers/robloxAuth.js` gamejoin + cookie probes,
   the `pollHelperPresences` / `pollAutoJoin` / help-monitor presence chunks, and

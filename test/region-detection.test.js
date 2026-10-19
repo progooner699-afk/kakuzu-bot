@@ -623,3 +623,149 @@ test('getServerIp: malformed (non-JSON) response body sets bodyJsonValid=false',
         restoreFetch();
     }
 });
+
+// ---------------------------------------------------------------------------
+// fetchRobloxGameInstance: CSRF handshake (403 -> x-csrf-token -> one retry)
+// + dynamic .ROBLOSECURITY refresh from Set-Cookie.
+// ---------------------------------------------------------------------------
+
+test('getServerIp: plain 403 with x-csrf-token retries once with the NEW token and adopts a rotated cookie', async () => {
+    const COOKIE_SECRET = 'TEST_COOKIE_SECRET_handshake';
+    const PRE_TOKEN = 'FAKE-CSRF-PRE-PROBE';
+    const HANDSHAKE_TOKEN = 'FAKE-CSRF-FROM-403-RESPONSE';
+    const ROTATED_COOKIE = 'TEST_COOKIE_SECRET_rotated_never_log';
+    const prevCookie = process.env.BOT_ROBLOSECURITY;
+    process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
+
+    const gamejoinCalls = [];
+    logs = [];
+    try {
+        global.fetch = async (url, options) => {
+            const u = String(url);
+            if (u.includes('users.roblox.com')) {
+                return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
+            }
+            if (u.includes('auth.roblox.com/v2/logout')) {
+                // Pre-probe hands out a token that is deliberately DIFFERENT from
+                // the one the 403 will rotate to, proving the retry uses the
+                // extracted header value and not the stale pre-fetched one.
+                return { ok: true, status: 403, headers: makeMockHeaders({ csrf: PRE_TOKEN }), json: async () => ({}) };
+            }
+            if (u.includes('gamejoin.roblox.com')) {
+                gamejoinCalls.push({ headers: (options && options.headers) || {} });
+                if (gamejoinCalls.length === 1) {
+                    // PLAIN 403 (no challenge header, no challenge message) with a
+                    // rotated CSRF token -> must trigger exactly one retry.
+                    return {
+                        ok: false,
+                        status: 403,
+                        statusMessage: 'Forbidden',
+                        headers: makeMockHeaders({ csrf: HANDSHAKE_TOKEN, contentType: 'application/json' }),
+                        json: async () => ({ errorMessage: 'Token Validation Failed' })
+                    };
+                }
+                // Retry succeeds and rotates .ROBLOSECURITY via Set-Cookie.
+                return {
+                    ok: true,
+                    status: 200,
+                    statusMessage: 'OK',
+                    headers: makeMockHeaders({
+                        csrf: HANDSHAKE_TOKEN,
+                        contentType: 'application/json',
+                        setCookie: [`.ROBLOSECURITY=${ROTATED_COOKIE}; domain=.roblox.com; path=/`]
+                    }),
+                    json: async () => ({
+                        joinScript: { MachineAddress: '10.0.0.9', DataCenterId: 'dc-777', UdmuxEndpoints: [{ Address: '203.0.113.77' }] }
+                    })
+                };
+            }
+            throw new Error(`unexpected fetch in test: ${u}`);
+        };
+
+        const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-HANDSHAKE', { guildId: GUILD_ID, raidId: 42 });
+        assert.ok(result, 'the retried join must succeed');
+        assert.equal(result.machineAddress, '10.0.0.9');
+        assert.equal(result.publicAddress, '203.0.113.77');
+        assert.equal(result.dataCenterId, 'dc-777');
+
+        // Exactly one retry: the second POST must carry the token extracted from
+        // the 403 response headers, not the pre-probed one.
+        assert.equal(gamejoinCalls.length, 2, 'a plain 403 with a token must be retried exactly once');
+        assert.equal(gamejoinCalls[0].headers['X-CSRF-TOKEN'], PRE_TOKEN);
+        assert.equal(gamejoinCalls[1].headers['X-CSRF-TOKEN'], HANDSHAKE_TOKEN, 'retry must append the extracted x-csrf-token');
+        // Cookie/Content-Type/User-Agent are always present on the gamejoin POST.
+        for (const call of gamejoinCalls) {
+            assert.equal(call.headers['Cookie'], `.ROBLOSECURITY=${COOKIE_SECRET}`);
+            assert.equal(call.headers['Content-Type'], 'application/json');
+            assert.equal(call.headers['User-Agent'], 'Roblox/WinInet');
+        }
+
+        const rec = realRobloxAuth.getLastGameJoinAttempt();
+        assert.ok(rec);
+        assert.equal(rec.csrfRetried, true, 'the handshake retry must be recorded for /raiddebug');
+        assert.equal(rec.httpStatus, 200);
+        assert.equal(rec.joinScript, true);
+        assert.equal(rec.blocker, null);
+
+        // Requirement: the rotated token is retained for future requests.
+        assert.equal(realRobloxAuth.BOT_COOKIE, ROTATED_COOKIE, 'rotated .ROBLOSECURITY must be adopted in memory');
+        // ...and the rotated value must never leak into logs or diagnostics.
+        const serialized = JSON.stringify(rec) + JSON.stringify(logs);
+        assert.ok(!serialized.includes(COOKIE_SECRET), 'original cookie must never be logged');
+        assert.ok(!serialized.includes(ROTATED_COOKIE), 'rotated cookie must never be logged');
+        assert.ok(!serialized.includes(HANDSHAKE_TOKEN), 'CSRF token must never be logged');
+    } finally {
+        if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
+        else process.env.BOT_ROBLOSECURITY = prevCookie;
+        restoreFetch();
+    }
+});
+
+// ---------------------------------------------------------------------------
+// fetchRobloxGameInstance: 401 must surface the explicit auth error.
+// ---------------------------------------------------------------------------
+
+test('getServerIp: 401 returns null and logs the explicit revoked-cookie error', async () => {
+    const COOKIE_SECRET = 'TEST_COOKIE_SECRET_unauthorized';
+    const prevCookie = process.env.BOT_ROBLOSECURITY;
+    process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
+
+    logs = [];
+    try {
+        global.fetch = async (url) => {
+            const u = String(url);
+            if (u.includes('users.roblox.com')) {
+                return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
+            }
+            if (u.includes('auth.roblox.com/v2/logout')) {
+                return { ok: true, status: 403, headers: makeMockHeaders({ csrf: 'FAKE-CSRF-401' }), json: async () => ({}) };
+            }
+            if (u.includes('gamejoin.roblox.com')) {
+                return {
+                    ok: false,
+                    status: 401,
+                    statusMessage: 'Unauthorized',
+                    headers: makeMockHeaders({ contentType: 'application/json' }),
+                    json: async () => ({ errorMessage: 'Unauthorized' })
+                };
+            }
+            throw new Error(`unexpected fetch in test: ${u}`);
+        };
+
+        const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-401', { guildId: GUILD_ID, raidId: 42 });
+        assert.equal(result, null, 'getServerIp must keep its null-on-failure contract');
+
+        const err = findLog(/\[Roblox Auth Error\] The \.ROBLOSECURITY cookie has been revoked or expired\./);
+        assert.ok(err, 'the explicit revoked-cookie error must be logged');
+
+        const rec = realRobloxAuth.getLastGameJoinAttempt();
+        assert.ok(rec);
+        assert.equal(rec.httpStatus, 401);
+        assert.equal(rec.blocker, 'unauthorized_cookie');
+        assert.ok(!JSON.stringify(rec).includes(COOKIE_SECRET), 'record must never contain the cookie value');
+    } finally {
+        if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
+        else process.env.BOT_ROBLOSECURITY = prevCookie;
+        restoreFetch();
+    }
+});
