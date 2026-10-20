@@ -139,7 +139,7 @@
   traffic is the freshest liveness proof.
 * **Tests:** `test/gatewayGuard.test.js` (18 tests) drives the watchdog with
   explicit clocks — grace window, spacing gate, shutdown no-op, fatal budget,
-  REST-down hold, zombie-ping escalation, arm/disarm. The whole suite is **172
+  REST-down hold, zombie-ping escalation, arm/disarm. The whole suite is **177
   tests, all green** (`npm test`).
 * **Credential hygiene:** `SUPABASE_DASHBOARD_URL` must be a **public project
   link only** (`https://<ref>.supabase.co`); the connection string belongs in
@@ -461,7 +461,13 @@ Refactored the linking → request → join → close loop per the spec:
      `handlers/raidResultCard.js` (`buildResultCardPayload`),
      with the region-role ping sent as a separate message first (V2 disables
      `content`); if the V2 send fails it falls back to a classic embed
-     (`buildResultFallbackEmbed`). The **3 card types** share one layout with
+     (`buildResultFallbackEmbed`). When a rally/proof screenshot exists it is
+     attached DIRECTLY in that SAME single message payload
+     (`files: [raid-proof.png]` + `.setImage('attachment://raid-proof.png')`)
+     so image + embed collapse under one bot header — never a second
+     `send()`; a failed/oversized download degrades to the previous hotlinked
+     image (tests: `test/raid-result-embed-attachment.test.js`).
+     The **3 card types** share one layout with
      different title emojis: Win `🏆 RAID WON <:won:…>` , Whooped `💀 RAID
      WHOOPED`, Loss `❌ RAID LOST` (emoji map:
      `raidResultCard.OUTCOME_STYLES`).

@@ -8,6 +8,7 @@ const {
     PermissionsBitField,
     EmbedBuilder,
     ChannelType,
+    AttachmentBuilder,
     StringSelectMenuBuilder,
     StringSelectMenuOptionBuilder
 } = require("discord.js");
@@ -698,6 +699,75 @@ async function markRaidAlertClosed(interaction, raid) {
     raidStateManager.scheduleRaidAlertChannelDeletion(interaction.client, raid.raidId, interaction.guild.id);
 }
 
+// ===== RAID RESULT IMAGE DELIVERY (classic embed path) ===================
+// The rally/proof screenshot is delivered as a DIRECT file attachment inside
+// the SAME single message payload as the result embed ({ embeds, files }), so
+// image + embed collapse under ONE "Kakuzu [BOT]" header instead of being a
+// hotlinked URL or a second message. Nothing else about the embed (fields,
+// text, color, timestamp) is touched — only its image reference.
+const PROOF_FETCH_TIMEOUT_MS = 10000;
+// 8MB — safe under every Discord guild upload tier; oversized screenshots
+// degrade to the previous hotlinked image instead of failing the whole send.
+const MAX_PROOF_BYTES = 8 * 1024 * 1024;
+const PROOF_ATTACHMENT_NAME = 'raid-proof.png';
+
+/**
+ * Downloads a raid proof/screenshot into an in-memory buffer for direct
+ * attachment (`files: [attachment]` + `.setImage('attachment://raid-proof.png')`).
+ * Returns null on ANY failure (non-OK response, non-image content, oversized,
+ * timeout) so the caller simply keeps the current hotlinked behaviour — a
+ * failed download can never drop the result post or trigger a second message.
+ * @param {string} url
+ * @param {Function} [fetchImpl] test seam; defaults to the repo's bounded fetch
+ * @returns {Promise<import('discord.js').AttachmentBuilder|null>}
+ */
+async function buildRaidProofAttachment(url, fetchImpl = fetchWithTimeout) {
+    if (!url) return null;
+    try {
+        const res = await fetchImpl(url, { method: 'GET' }, PROOF_FETCH_TIMEOUT_MS);
+        if (!res || !res.ok) return null;
+        const headers = res.headers || null;
+        const contentType = String(headers && typeof headers.get === 'function' ? (headers.get('content-type') || '') : '').toLowerCase();
+        if (!contentType.startsWith('image/')) return null;
+        const declaredLength = headers && typeof headers.get === 'function' ? Number(headers.get('content-length')) : 0;
+        if (declaredLength > MAX_PROOF_BYTES) return null;
+        const buffer = Buffer.from(await res.arrayBuffer());
+        if (!buffer.length || buffer.length > MAX_PROOF_BYTES) return null;
+        return new AttachmentBuilder(buffer, { name: PROOF_ATTACHMENT_NAME });
+    } catch (err) {
+        console.warn('[raid result] proof attachment download failed:', err?.message || err);
+        return null;
+    }
+}
+
+/**
+ * Posts the classic fallback result embed with the raid proof attached as a
+ * SINGLE message payload (embeds + files together — never two sends). The
+ * embed object comes from raidResultCard.buildResultFallbackEmbed completely
+ * untouched; only its image reference is pointed at the attached file, and
+ * only when the download actually succeeded.
+ * @param {object} opts
+ * @param {import('discord.js').TextChannel} opts.channel
+ * @param {object} opts.cardOpts         unchanged raidResultCard options
+ * @param {string|null} opts.proofSourceUrl rally pic or first proof screenshot
+ * @param {{mention?: string|null, allowedMentions?: object}} opts.regionRoleInfo
+ * @param {Function} [opts.fetchImpl]     test seam
+ */
+async function sendFallbackResultEmbed({ channel, cardOpts, proofSourceUrl, regionRoleInfo, fetchImpl }) {
+    const resultEmbed = raidResultCard.buildResultFallbackEmbed(cardOpts);
+    const proofAttachment = proofSourceUrl ? await buildRaidProofAttachment(proofSourceUrl, fetchImpl) : null;
+    if (proofAttachment) {
+        // Same image slot as before — now served from the attached file.
+        resultEmbed.setImage('attachment://' + PROOF_ATTACHMENT_NAME);
+    }
+    await channel.send({
+        content: regionRoleInfo.mention || undefined,
+        embeds: [resultEmbed],
+        files: proofAttachment ? [proofAttachment] : [],
+        allowedMentions: regionRoleInfo.allowedMentions
+    }).catch(e2 => console.warn('Failed to send raid result embed:', e2?.message || e2));
+}
+
 async function finalizeRaidOutcome(interaction, raid, outcome) {
     const settings = raidStateManager.loadSettings(interaction.guild.id);
     const raidsData = raidStateManager.loadRaids(interaction.guild.id);
@@ -757,11 +827,16 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             });
         } catch (err) {
             console.warn('[raid result] V2 card failed, falling back to embed:', err?.message || err);
-            await targetResultChannel.send({
-                content: regionRoleInfo.mention || undefined,
-                embeds: [raidResultCard.buildResultFallbackEmbed(cardOpts)],
-                allowedMentions: regionRoleInfo.allowedMentions
-            }).catch(e2 => console.warn('Failed to send raid result embed:', e2?.message || e2));
+            // Image delivery ONLY: the rally/proof screenshot rides in the
+            // SAME single payload as the embed ({ embeds, files } — one
+            // message, one bot header). win / whooped / loss all share this
+            // one send path; nothing else about the embed changes.
+            await sendFallbackResultEmbed({
+                channel: targetResultChannel,
+                cardOpts,
+                proofSourceUrl: rallyPicUrl || attachments[0] || null,
+                regionRoleInfo
+            });
         }
     };
 
@@ -1053,6 +1128,8 @@ module.exports = {
     processHelpMonitors,
     canCloseRaid,
     guardRaidAction,
+    buildRaidProofAttachment,
+    sendFallbackResultEmbed,
     async execute(interaction) {
         // --- Interaction diagnostics (safe: ids + names only, never secrets).
         // Logged FIRST so a hung handler still leaves a breadcrumb in Render.
