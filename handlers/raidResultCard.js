@@ -323,5 +323,9 @@ module.exports = {
     DEFAULT_BANNER_IMAGE: DEFAULT_BANNER_IMAGE,
     buildResultCardPayload: buildResultCardPayload,
     buildResultFallbackEmbed: buildResultFallbackEmbed,
-    buildNoResultEmbed: buildNoResultEmbed
+    buildNoResultEmbed: buildNoResultEmbed,
+    // Purely additive re-export (no embed/handler behaviour changed): the
+    // SAME timestamp formatter the result card uses, shared with the
+    // /testing-embed-2 code-block dump.
+    formatDayTime: formatDayTime
 };

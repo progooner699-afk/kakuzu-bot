@@ -34,16 +34,23 @@ function loadCommands(client) {
     return commands;
 }
 
-function getCommandDataArray() {
+function getCommandDataArray(guildId) {
     const commandsPath = path.join(__dirname, '..', 'commands');
     const data = [];
 
     for (const file of listCommandFiles()) {
         try {
             const command = require(path.join(commandsPath, file));
-            if (command.data) {
-                data.push(command.data.toJSON());
+            if (!command.data) continue;
+            // Guild-RESTRICTED commands (e.g. testing-embed-2 -> Kakuzu Support
+            // server only) declare an exported `guildIds` allowlist. They are
+            // serialized ONLY when the caller passes an allowlisted guildId and
+            // are always EXCLUDED when no guildId is given — so they can never
+            // leak into a global registration payload or an unrelated guild.
+            if (Array.isArray(command.guildIds) && command.guildIds.length > 0) {
+                if (!guildId || !command.guildIds.includes(String(guildId))) continue;
             }
+            data.push(command.data.toJSON());
         } catch (err) {
             console.error(`[commandHandler] Skipping invalid command file ${file}:`, (err && err.message) || err);
         }
