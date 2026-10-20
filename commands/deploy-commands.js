@@ -8,10 +8,6 @@ const config = require('../config.json');
 const commandHandler = require('../handlers/commandHandler');
 
 async function run() {
-    // Global-capable payload: guild-RESTRICTED commands (exported `guildIds`,
-    // e.g. testing-embed-2 → Kakuzu Support server only) are deliberately
-    // EXCLUDED here — getCommandDataArray() with no argument includes them
-    // for NO guild, so they can never reach Routes.applicationCommands.
     const commands = commandHandler.getCommandDataArray();
 
     // Grabs the token that was just loaded from your root .env file
@@ -53,12 +49,7 @@ async function run() {
         let ok = 0;
         for (const g of guilds) {
             try {
-                // Per-guild payload — the ONLY path guild-restricted commands
-                // (testing-embed-2) travel: exclusively through
-                // applicationGuildCommands(clientId, g.id), and only when g.id
-                // appears in the command's `guildIds` allowlist.
-                const guildCommands = commandHandler.getCommandDataArray(g.id);
-                await rest.put(Routes.applicationGuildCommands(config.clientId, g.id), { body: guildCommands });
+                await rest.put(Routes.applicationGuildCommands(config.clientId, g.id), { body: commands });
                 ok++;
             } catch (err) {
                 console.warn(`⚠️ Failed to register commands for guild ${g.name || g.id}:`, (err && err.message) || err);
@@ -84,11 +75,7 @@ if (require.main === module) {
 // Guild-scoped commands appear INSTANTLY (no propagation delay) and are the
 // recommended way to make commands available in a server the bot is in.
 async function registerGuildCommands(guildId) {
-    // Guild-scoped payload: includes guild-restricted commands ONLY when this
-    // guildId is in their `guildIds` allowlist (testing-embed-2 → support
-    // server 1536031049774010408 only). This is the path used by ready.js for
-    // every guild the bot is in — non-allowlisted guilds never receive it.
-    const commands = commandHandler.getCommandDataArray(guildId);
+    const commands = commandHandler.getCommandDataArray();
     const token = process.env.DISCORD_TOKEN;
     if (!token) {
         throw new Error('No DISCORD_TOKEN found in environment (.env file).');

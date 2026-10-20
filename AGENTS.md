@@ -550,35 +550,10 @@ authorized by ONE primitive: `isRaidAdmin(member, guildId)` in
 | `commands/pingsetup.js` | Ephemeral interactive `/pingsetup` builder (country/region ping roles, draft → UPSERT). |
 | `handlers/raidAdminRoles.js` | STRICT per-guild raid-admin authorization: `isRaidAdmin(member, guildId)`, cached `guild_configs.raid_admin_roles` reads (30s TTL / 1.5s bound / fail-closed / 5-min stale grace), `saveRaidAdminRoles` upsert keyed by `guild_id`, `buildRaidAccessDeniedMessage`. |
 | `commands/adminsetup.js` | Ephemeral `/adminsetup` builder (Administrator): RoleSelect + two-step clear for this guild's raid-admin roles; `handleAdminSetupComponent` routed from the interaction hub (`adminsetup_` customIds). |
-| `handlers/commandHandler.js` | Loads commands from `commands/` into `client.commands`; `getCommandDataArray(guildId)` serializes per-guild payloads and EXCLUDES guild-restricted commands (exported `guildIds`) unless the passed guildId is allowlisted — no guildId ⇒ excluded (so they can never reach a global payload). |
+| `handlers/commandHandler.js` | Loads commands from `commands/` into `client.commands`. |
 | `commands/deploy-commands.js` | `registerGuildCommands(guildId)` — used by `ready.js`; also a standalone CLI (`npm run deploy-commands`). |
 | `commands/announcement.js` | **Interactive Components V2 announcement builder** (`/announcement`, Manage Messages): ephemeral builder panel (Title / Description / **Thumbnail upload collector** / **Webhook Icon upload collector** / **Color** / Ping / **Webhook name** / **Field 1-8** / Clear Fields / Preview / Publish / Cancel). Up to **8 fields**, each separated by a native V2 `Separator` (`type: 14`). The thumbnail is a **wide full-width MediaGallery (`type: 12`) TOP banner**. The **Color** modal (hex) sets the Container accent bar — the vertical "embed line". The **Icon** collector stores the image bytes and applies them as the webhook avatar on publish; when no icon is chosen, a bundled `assets/transparent-avatar.png` (a 1x1 fully-transparent PNG) is applied so Discord's grey default icon stays **invisible**. Publishing asks for a target channel, then finds/creates a **webhook with the user-typed name** in that channel and posts the V2 card through it (the ping, if set, is sent as a separate message first because the V2 flag disables `content`). Exposes `buildAnnouncementPayload`, `buildBuilderComponents`, `handleAnnouncementComponent`, `getInvisibleAvatarBuffer`, `ANNOUNCEMENT_V2_FLAGS`, `MAX_FIELDS`, `DEFAULT_ACCENT_COLOR`; wired into `events/interactionCreate.js` via an early `annb_` customId dispatch. |
-| `commands/testingEmbed2.js` | `/testing-embed-2` — support-server-only debug dump of raid result data (placeId, jobId, region, timestamps, stats, requester, helpers, MVP) inside ONE ` ```text ` code block (2000-char safe). `guildIds: ['1536031049774010408']` allowlist; never global. |
 | `commands/*.js` | Slash commands (backuppanel, close-raid, setchannels, unsetchannels, setlockedpingrole, botinfo, announcement, forceshutallraids, etc.). |
-
-## 🧪 SUPPORT-SERVER-ONLY COMMANDS (`/testing-embed-2`)
-
-* `/testing-embed-2 raid_id:<int> [guild_id:<snowflake>]` dumps a raid's
-  RESULT data (same `getRaidById` fetch + field extraction as
-  `raidResultCard.buildResultCardPayload` — placeId, serverId/jobId,
-  region/country, timestamps, duration, stats, requester, helpers, MVP;
-  shares `formatTimeSpent` / `GAME_CONFIG` / `countryCodeToName` /
-  `formatDayTime`) as `Key: value` lines inside ONE ` ```text ` code block,
-  hard-capped at Discord's 2000-char limit (helper lines drop first with an
-  explicit omission note; values are backtick-sanitized so data can never
-  break the fence). `guild_id` selects the source guild's raid store (raids
-  live in member servers, not the support server) and is digits-only
-  validated before reaching any data path.
-* **Registration:** a command may export `guildIds: [GUILD_ID]` →
-  `commandHandler.getCommandDataArray(guildId)` includes it ONLY for an
-  allowlisted guild and EXCLUDES it entirely when no guildId is passed, so
-  `deploy-commands.js` never puts it on `Routes.applicationCommands` (global)
-  — only on `Routes.applicationGuildCommands(clientId, guildId)`, the path
-  `ready.js → registerGuildCommands()` already uses for every guild.
-  `testing-embed-2` is allowlisted to `1536031049774010408` (Kakuzu Support).
-* The existing raid result embed/V2 card code, its buttons and modal handlers
-  are NOT modified by this feature (only `formatDayTime` was re-exported,
-  purely additively, from `handlers/raidResultCard.js`).
 
 ## 🗑️ REMOVED COMMANDS (this session)
 
