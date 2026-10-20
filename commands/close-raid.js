@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const raidStateManager = require('../handlers/raidStateManager');
 const raidV2 = require('../handlers/raidV2');
+const raidAdminRoles = require('../handlers/raidAdminRoles');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -26,13 +27,16 @@ module.exports = {
         }
 
         const member = interaction.member;
-        const canClose = member && (
+        // STRICT PER-GUILD GATE: the original requester, or a raid admin of
+        // THIS guild (Discord Administrator / /adminsetup-assigned role of
+        // interaction.guildId). Role NAMES are never matched and staff status
+        // in another server grants nothing here.
+        const canClose = Boolean(member) && (
             member.id === raid.requesterId ||
-            member.permissions?.has(PermissionFlagsBits.Administrator) ||
-            member.roles.cache.some(role => ['Administrator', 'Management Supervisor', 'Community Manager', 'Senior Moderator', '💣 ‖ SUPREME LEADER'].includes(role.name))
+            await raidAdminRoles.isRaidAdmin(member, interaction.guild.id)
         );
         if (!canClose) {
-            return interaction.editReply({ content: 'Access Denied: Only the Raid Leader or an Administrator can close this.', ephemeral: true });
+            return interaction.editReply({ content: raidAdminRoles.buildRaidAccessDeniedMessage(raid), ephemeral: true });
         }
 
         const updatedRaid = raidStateManager.closeRaid(raidId, {

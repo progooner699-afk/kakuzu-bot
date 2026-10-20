@@ -24,6 +24,9 @@ const guildAccess = require("../handlers/guildAccess");
 const gatewayGuard = require("../handlers/gatewayGuard");
 // Pure tiered server matcher (shared with auto-join + helper time tracking).
 const helperVerification = require("../handlers/helperVerification");
+// Per-guild RAID ADMIN roles (/adminsetup) — strict guild-isolated staff
+// authorization for the edit / close / end raid actions.
+const raidAdminRoles = require("../handlers/raidAdminRoles");
 // Commands that bypass the normal per-guild premium-access guard so support
 // moderators can manage access from the support server. They still enforce
 // their own support-server + role + password checks.
@@ -138,17 +141,46 @@ function getVerificationStaffPing(guildId) {
     };
 }
 
+// SYNC visibility gate for the Edit / Close buttons on the raid alert.
+// Mirrors the async guardRaidAction authorization (requester | Discord
+// Administrator | this guild's raid-admin roles from /adminsetup) using only
+// the in-memory cache, because button RENDERING cannot await a database read.
+// The authoritative async check runs again at click time (guardRaidAction).
+// STRICT PER-GUILD ISOLATION: roles are read for member.guild.id ONLY — a
+// staff role configured in another server never shows or grants anything here.
+// (The old RAID_CLOSE_ROLES name-based fallback and the legacy
+// verificationAdminRoles setting were retired for raid actions; staff must now
+// be Discord Administrators or assigned via /adminsetup in THIS server.)
 function canCloseRaid(member, raid) {
     if (!member || !raid) return false;
     if (member.id === raid.requesterId) return true;
     if (member.permissions.has(PermissionsBitField.Flags.Administrator)) return true;
     const guildId = member.guild && member.guild.id;
-    if (guildId) {
-        // Users granted the configured verification/admin role (per guild settings).
-        const roleIds = getVerificationAdminRoleIds(guildId);
-        if (roleIds.some(id => member.roles.cache.has(id))) return true;
-    }
-    return member.roles.cache.some(role => RAID_CLOSE_ROLES.includes(role.name));
+    if (!guildId) return false;
+    const adminRoleIds = raidAdminRoles.getCachedRaidAdminRoles(guildId);
+    return adminRoleIds.some(id => member.roles.cache.has(id));
+}
+
+/**
+ * STRICT PER-GUILD RAID ACTION GUARD — used by every raid action entry point
+ * (raid_edit_ / raid_editmodal_ / close_raid_ / raid_close_ / raid_outcome_ /
+ * raid_mvp_select_). A raid action is allowed only when the clicker is the
+ * ORIGINAL requester of that raid, OR holds raid-admin rights in THIS guild
+ * (Discord Administrator or a /adminsetup-assigned role of interaction.guildId).
+ * Every check reads interaction.guildId / interaction.member ONLY — staff
+ * status in another server never grants anything here.
+ * @returns {Promise<boolean>} true = proceed; false = denial already replied.
+ */
+async function guardRaidAction(interaction, raid) {
+    if (!raid) return true; // caller has already answered "raid not found"
+    if (interaction.user && interaction.user.id === raid.requesterId) return true;
+    const guildId = interaction.guildId || (interaction.guild && interaction.guild.id);
+    if (await raidAdminRoles.isRaidAdmin(interaction.member, guildId)) return true;
+    await interaction.reply({
+        content: raidAdminRoles.buildRaidAccessDeniedMessage(raid),
+        flags: 64
+    }).catch(() => null);
+    return false;
 }
 
 function canModerateVerification(member) {
@@ -1019,6 +1051,8 @@ module.exports = {
     pendingHelpMonitors,
     cleanupExpiredMonitors,
     processHelpMonitors,
+    canCloseRaid,
+    guardRaidAction,
     async execute(interaction) {
         // --- Interaction diagnostics (safe: ids + names only, never secrets).
         // Logged FIRST so a hung handler still leaves a breadcrumb in Render.
@@ -1155,6 +1189,29 @@ module.exports = {
             const handled = await pingSetupCmd.handlePingSetupComponent(interaction).catch((err) => {
                 console.error('[pingsetup] dispatch error:', err);
                 const errText = '❌ Ping setup error: `' + String((err && err.message) || err).slice(0, 300) + '`';
+                try {
+                    if (interaction.deferred || interaction.replied) {
+                        interaction.followUp({ content: errText, flags: 64 }).catch(() => null);
+                    } else {
+                        interaction.reply({ content: errText, flags: 64 }).catch(() => null);
+                    }
+                } catch (e) { /* swallow */ }
+                return true;
+            });
+            if (handled) return;
+        }
+
+        // ===== RAID ADMIN SETUP (/adminsetup) =====
+        // Any role-select / button with an `adminsetup_` customId belongs to the
+        // /adminsetup builder (per-guild raid-admin roles, stored permanently in
+        // the Supabase `guild_configs` table). Routed through the SAME
+        // interaction system — no second listener. Required lazily to keep
+        // startup light (mirrors the pingsetup / announcement pattern).
+        if (interaction.customId && typeof interaction.customId === 'string' && interaction.customId.startsWith('adminsetup_')) {
+            const adminSetupCmd = require('../commands/adminsetup');
+            const handled = await adminSetupCmd.handleAdminSetupComponent(interaction).catch((err) => {
+                console.error('[adminsetup] dispatch error:', err);
+                const errText = '❌ Admin setup error: `' + String((err && err.message) || err).slice(0, 300) + '`';
                 try {
                     if (interaction.deferred || interaction.replied) {
                         interaction.followUp({ content: errText, flags: 64 }).catch(() => null);
@@ -1807,6 +1864,8 @@ module.exports = {
                 await interaction.reply({ content: 'Raid not found.', flags: 64 }).catch(() => null);
                 return;
             }
+            // STRICT PER-GUILD GATE: requester or a raid admin of THIS guild only.
+            if (!(await guardRaidAction(interaction, raid))) return;
             const editModal = new ModalBuilder()
                 .setCustomId(`raid_editmodal_${raidId}`)
                 .setTitle('Edit Raid Fields');
@@ -1903,10 +1962,8 @@ module.exports = {
                 await interaction.reply({ content: 'Raid not found.', flags: 64 }).catch(() => null);
                 return;
             }
-            if (!canCloseRaid(interaction.member, raid)) {
-                await interaction.reply({ content: 'Only the raid requester or an authorized staff member can close this raid.', flags: 64 }).catch(() => null);
-                return;
-            }
+            // STRICT PER-GUILD GATE: requester or a raid admin of THIS guild only.
+            if (!(await guardRaidAction(interaction, raid))) return;
             const outcomeRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(`raid_outcome_win_${raidId}`).setLabel('🏆 Win').setStyle(ButtonStyle.Success),
                 new ButtonBuilder().setCustomId(`raid_outcome_whooped_${raidId}`).setLabel('🔥 Whooped').setStyle(ButtonStyle.Danger),
@@ -1931,6 +1988,8 @@ module.exports = {
                 await interaction.reply({ content: '❌ This raid record has already been locked.', flags: 64 }).catch(() => null);
                 return;
             }
+            // STRICT PER-GUILD GATE: requester or a raid admin of THIS guild only.
+            if (!(await guardRaidAction(interaction, raid))) return;
 
             // 🚫 No Result — close the raid WITHOUT a result card, streaks or
             // metrics. A simple "no results recorded" note embed is posted to
@@ -1998,6 +2057,8 @@ module.exports = {
                 await interaction.reply({ content: '❌ This raid has already been finalized.', flags: 64 }).catch(() => null);
                 return;
             }
+            // STRICT PER-GUILD GATE: requester or a raid admin of THIS guild only.
+            if (!(await guardRaidAction(interaction, raid))) return;
             const actualOutcome = outcome || raid.outcome;
             if (!actualOutcome) {
                 await interaction.reply({ content: '❌ Could not determine the raid outcome.', flags: 64 }).catch(() => null);
@@ -2026,6 +2087,8 @@ module.exports = {
                 await interaction.reply({ content: 'Raid not found.', flags: 64 }).catch(() => null);
                 return;
             }
+            // STRICT PER-GUILD GATE: requester or a raid admin of THIS guild only.
+            if (!(await guardRaidAction(interaction, raid))) return;
             const enemyCount = safeGetTextInputValue(interaction.fields, 'editEnemyCount', raid.enemyCount);
             const newTarget = safeGetTextInputValue(interaction.fields, 'editTarget', raid.robloxUsername);
             const newClan = safeGetTextInputValue(interaction.fields, 'editEnemyClan', raid.enemyClanNames);

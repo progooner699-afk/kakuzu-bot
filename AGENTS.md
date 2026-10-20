@@ -139,7 +139,7 @@
   traffic is the freshest liveness proof.
 * **Tests:** `test/gatewayGuard.test.js` (18 tests) drives the watchdog with
   explicit clocks — grace window, spacing gate, shutdown no-op, fatal budget,
-  REST-down hold, zombie-ping escalation, arm/disarm. The whole suite is **136
+  REST-down hold, zombie-ping escalation, arm/disarm. The whole suite is **172
   tests, all green** (`npm test`).
 * **Credential hygiene:** `SUPABASE_DASHBOARD_URL` must be a **public project
   link only** (`https://<ref>.supabase.co`); the connection string belongs in
@@ -351,9 +351,11 @@ Refactored the linking → request → join → close loop per the spec:
 * **Presence polling** lowered to **15s** (`PRESENCE_POLL_INTERVAL` in ready.js).
 * **Auto-MVP:** on close/outcome the helper with the highest `timeSpentSeconds`
   is set as MVP automatically (manual picker removed).
-* **Raid closure** restricted to the requester, Discord Administrator, the
-  configured verification/admin roles, or the hardcoded names in
-  `RAID_CLOSE_ROLES`.
+* **Raid closure / edit / end** restricted to the original requester, a Discord
+  Administrator, or a raid-admin role assigned in THAT guild via `/adminsetup`
+  (strict per-guild isolation — see the RAID ADMIN SYSTEM section). The old
+  `RAID_CLOSE_ROLES` name check and the legacy `verificationAdminRoles` setting
+  no longer grant raid actions.
 * **Roblox API cleanup:** `handlers/robloxApi.js` had duplicated
   `validateAndGetAvatar` / `getUserPresence` / `detectGameAndRegion` (from
   overlapping edits). Deduplicated to single definitions; `detectGameAndRegion`
@@ -445,7 +447,8 @@ Refactored the linking → request → join → close loop per the spec:
         pending status. The monitor is a temporary internal record only.
    * `[ 🔒 CLOSE RAID ]` — `ButtonStyle.Secondary` (`close_raid_<id>`,
      handled alongside the legacy `raid_close_<id>`). Executable **only** by the
-     raid requester or an authorized staff role (see `canCloseRaid`).
+     raid requester or a raid admin of THIS guild (`guardRaidAction` →
+     `isRaidAdmin`; button visibility via `canCloseRaid`).
 5. **Session Tracking & Results:**
    * `events/ready.js` starts a 15s interval → `raidStateManager.pollHelperPresences`
      tracks helper time. If no `ROBLOX_API_KEY` is set it no-ops and falls back
@@ -475,6 +478,55 @@ Refactored the linking → request → join → close loop per the spec:
      posts a simple "🚫 NO RAID RESULTS RECORDED" note embed
      (`buildNoResultEmbed`) to the configured result channel.
 
+## 🛡️ RAID ADMIN SYSTEM (`/adminsetup` — strict per-guild staff roles)
+
+Raid actions (`raid_edit_` / `raid_editmodal_`, `close_raid_` / `raid_close_`,
+`raid_outcome_*`, `raid_mvp_select_`, plus the `/close-raid` slash command) are
+authorized by ONE primitive: `isRaidAdmin(member, guildId)` in
+`handlers/raidAdminRoles.js`.
+
+* **Strict per-guild isolation:** every query is keyed by exactly one
+  `guild_id`; role IDs are matched ONLY against `interaction.member.roles.cache`
+  (the member's roles in the CURRENT guild); `isRaidAdmin` rejects a member
+  whose `member.guild.id !== guildId` before anything else. Staff status in
+  guild A grants NOTHING in guild B.
+* **Authorization rule:** the original raid requester OR Discord Administrator
+  OR a role listed in that SAME guild's `guild_configs.raid_admin_roles`.
+  Denials reply ephemerally with the exact `buildRaidAccessDeniedMessage` text
+  ("❌ **Access Denied:** Only the original Raid Requester (<@id>) or a
+  designated Admin in this server can edit or end this raid.").
+* **Button guard:** `guardRaidAction(interaction, raid)` in
+  `events/interactionCreate.js` runs in ALL five raid-action handlers before
+  any modal or DB write. `canCloseRaid` is the SYNC cache-only mirror used for
+  button RENDERING (the async check always re-runs at click time). Both are
+  exported for tests.
+* **Legacy gates retired for raid actions:** the `RAID_CLOSE_ROLES` name-based
+  fallback and the `verificationAdminRoles` setting no longer grant edit/close/
+  end (verification moderation via `canModerateVerification` still honors
+  `verificationAdminRoles`). Existing servers must run `/adminsetup` once — or
+  rely on Discord Administrator — to keep non-admin staff closing raids.
+* **Table:** `guild_configs (guild_id TEXT PK, raid_admin_roles TEXT[] NOT NULL
+  DEFAULT '{}', updated_at TIMESTAMPTZ)` — created lazily and idempotently
+  (`CREATE TABLE IF NOT EXISTS`; the read path KICKS but never awaits DDL, with
+  a 60s retry backoff; explicit writes await it) and documented in
+  `migrations/005_guild_configs.sql` (the migration runner is not invoked at
+  runtime — run that SQL manually in Supabase if you want the table pre-created).
+* **Ack-safety / outage behaviour:** reads are bounded to 1.5s so button guards
+  answer inside Discord's 3s window; cache-first with a 30s TTL; a DB outage
+  falls back to the last CONFIRMED roles for up to 5 minutes, then FAILS CLOSED.
+  Writes rethrow sanitized errors (never a fake success) and refresh the cache
+  only after the UPSERT succeeds.
+* **`/adminsetup`** (Administrator, guild-only, ephemeral): shows the current
+  roles, attaches a native RoleSelect (defaults pre-filled, max 10;
+  `@everyone` and deleted roles are dropped on save) plus a two-step Clear
+  button. EVERY component press re-verifies Administrator against the current
+  member of the current guild (`canManageRaidAdmins`). Routed through the same
+  interaction hub via `adminsetup_` customIds.
+* **Tests:** `test/raid-admin-roles.test.js` (17 tests: isolation, fail-closed,
+  stale grace, upsert keying, exact denial text, guard flows, component
+  re-check); Supabase is faked by patching `handlers/supabaseDb` so the suite
+  is hermetic.
+
 ## 📂 KEY FILES
 
 | Path | Purpose |
@@ -496,6 +548,8 @@ Refactored the linking → request → join → close loop per the spec:
 | `handlers/gatewayGuard.js` | Gateway lifecycle logging + **self-heal watchdog** (`evaluateGateway`/`runWatchdogTick`/`probeRestGateway`) + shutdown-safe `markShuttingDown`/`markActivity` + `getGatewayDiagnostics`. |
 | `handlers/apiServer.js` | Express dashboard/API: `/`, `/api/stats`, `/api/action/restart`, `/api/health/discord` (gateway diagnostics) and the bearer-protected `/api/guilds/:guildId/roles`. |
 | `commands/pingsetup.js` | Ephemeral interactive `/pingsetup` builder (country/region ping roles, draft → UPSERT). |
+| `handlers/raidAdminRoles.js` | STRICT per-guild raid-admin authorization: `isRaidAdmin(member, guildId)`, cached `guild_configs.raid_admin_roles` reads (30s TTL / 1.5s bound / fail-closed / 5-min stale grace), `saveRaidAdminRoles` upsert keyed by `guild_id`, `buildRaidAccessDeniedMessage`. |
+| `commands/adminsetup.js` | Ephemeral `/adminsetup` builder (Administrator): RoleSelect + two-step clear for this guild's raid-admin roles; `handleAdminSetupComponent` routed from the interaction hub (`adminsetup_` customIds). |
 | `handlers/commandHandler.js` | Loads commands from `commands/` into `client.commands`. |
 | `commands/deploy-commands.js` | `registerGuildCommands(guildId)` — used by `ready.js`; also a standalone CLI (`npm run deploy-commands`). |
 | `commands/announcement.js` | **Interactive Components V2 announcement builder** (`/announcement`, Manage Messages): ephemeral builder panel (Title / Description / **Thumbnail upload collector** / **Webhook Icon upload collector** / **Color** / Ping / **Webhook name** / **Field 1-8** / Clear Fields / Preview / Publish / Cancel). Up to **8 fields**, each separated by a native V2 `Separator` (`type: 14`). The thumbnail is a **wide full-width MediaGallery (`type: 12`) TOP banner**. The **Color** modal (hex) sets the Container accent bar — the vertical "embed line". The **Icon** collector stores the image bytes and applies them as the webhook avatar on publish; when no icon is chosen, a bundled `assets/transparent-avatar.png` (a 1x1 fully-transparent PNG) is applied so Discord's grey default icon stays **invisible**. Publishing asks for a target channel, then finds/creates a **webhook with the user-typed name** in that channel and posts the V2 card through it (the ping, if set, is sent as a separate message first because the V2 flag disables `content`). Exposes `buildAnnouncementPayload`, `buildBuilderComponents`, `handleAnnouncementComponent`, `getInvisibleAvatarBuffer`, `ANNOUNCEMENT_V2_FLAGS`, `MAX_FIELDS`, `DEFAULT_ACCENT_COLOR`; wired into `events/interactionCreate.js` via an early `annb_` customId dispatch. |
