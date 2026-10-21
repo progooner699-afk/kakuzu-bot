@@ -21,6 +21,7 @@ const robloxLinks = require("../handlers/robloxLinks");
 const { formatRobloxProfileValue } = require("../handlers/verificationHelpers");
 const sharedPingDb = require("../handlers/sharedPingDb");
 const { withTimeout, fetchWithTimeout } = require("../handlers/fetchTimeout");
+const imageHost = require("../handlers/imageHost");
 const guildAccess = require("../handlers/guildAccess");
 const gatewayGuard = require("../handlers/gatewayGuard");
 // Pure tiered server matcher (shared with auto-join + helper time tracking).
@@ -781,6 +782,46 @@ async function sendFallbackResultEmbed({ channel, cardOpts, proofSourceUrl, regi
     }).catch(e2 => console.warn('Failed to send raid result embed:', e2?.message || e2));
 }
 
+/**
+ * Re-hosts a list of Discord CDN image URLs on a PERMANENT public host.
+ *
+ * Discord attachment URLs carry an EXPIRING signature (?ex=...&is=...&hm=...).
+ * A "Raid Proof: Image 1" link built from one of those dies within hours and
+ * then returns a blank page / 403 in Chrome and in the Discord mobile app.
+ * Every picture is therefore re-hosted (Supabase Storage when configured,
+ * otherwise catbox.moe) so the link NEVER expires.
+ *
+ * Failure of a single picture never breaks the card: that entry falls back to
+ * the host-normalised Discord URL, and the list keeps its original order and
+ * length so the caller can still slice proof vs. rally URLs reliably.
+ *
+ * @param {string[]} urls
+ * @param {object} [opts]
+ * @param {Function} [opts.fetchImpl]  test seam for the download
+ * @param {Function} [opts.uploader]   test seam for the upload
+ * @returns {Promise<string[]>} same length as `urls`
+ */
+async function makePermanentUrls(urls, opts = {}) {
+    const list = Array.isArray(urls) ? urls : [];
+    if (list.length === 0) return [];
+    const results = [];
+    // Position-preserving: the caller slices this array into "proof URLs" and
+    // the "rally URL", so a dropped/shortened entry would swap the two.
+    for (const url of list) {
+        if (typeof url !== 'string' || !url) {
+            results.push(url);
+            continue;
+        }
+        try {
+            results.push(await imageHost.makePermanentImageUrl(url, opts));
+        } catch (err) {
+            console.warn('[raid result] permanent URL conversion failed:', err?.message || err);
+            results.push(url);
+        }
+    }
+    return results;
+}
+
 async function finalizeRaidOutcome(interaction, raid, outcome) {
     const settings = raidStateManager.loadSettings(interaction.guild.id);
     const raidsData = raidStateManager.loadRaids(interaction.guild.id);
@@ -814,12 +855,30 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
         const targetResultChannel = await interaction.client.channels.fetch(settings.resultChannel).catch(() => null);
         if (!targetResultChannel || !targetResultChannel.isTextBased()) return;
         const regionRoleInfo = await getRaidPingInfo(interaction.client, interaction.guild.id, { countryCode: raid.countryCode || null, region: raid.region });
+
+        // ===== PERMANENT IMAGE URLs =====================================
+        // The collected URLs are Discord CDN attachment links with an EXPIRING
+        // signature (?ex=...&is=...&hm=...). A Raid Proof link built from one
+        // of those returns a blank page / 403 in Chrome and in the Discord
+        // mobile app once the signature dies. Re-host every picture on a
+        // permanent public host (Supabase Storage when configured, otherwise
+        // catbox.moe) so "Image 1" always opens the full-resolution picture.
+        // Failures degrade gracefully — the original (normalised) URL is kept.
+        const permanentUrls = await makePermanentUrls([
+            ...(attachments || []),
+            ...(rallyPicUrl ? [rallyPicUrl] : [])
+        ]);
+        const permanentProofUrls = permanentUrls.slice(0, (attachments || []).length);
+        const permanentRallyUrl = rallyPicUrl
+            ? permanentUrls[(attachments || []).length] || null
+            : null;
+
         const cardOpts = {
             raid,
             outcome,
             submitterId: interaction.user.id,
-            rallyPicUrl,
-            proofUrls: attachments,
+            rallyPicUrl: permanentRallyUrl,
+            proofUrls: permanentProofUrls,
             streakMessage,
             endedAtMs: raid.closedAt || Date.now()
         };
@@ -847,7 +906,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             await sendFallbackResultEmbed({
                 channel: targetResultChannel,
                 cardOpts,
-                proofSourceUrl: rallyPicUrl || attachments[0] || null,
+                proofSourceUrl: permanentRallyUrl || permanentProofUrls[0] || null,
                 regionRoleInfo
             });
         }
@@ -1142,6 +1201,7 @@ module.exports = {
     canCloseRaid,
     guardRaidAction,
     buildRaidProofAttachment,
+    makePermanentUrls,
     sendFallbackResultEmbed,
     async execute(interaction) {
         // --- Interaction diagnostics (safe: ids + names only, never secrets).

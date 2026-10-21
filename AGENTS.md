@@ -326,9 +326,13 @@ The repo was **already clean & pushed** (`HEAD == origin/main`) at commit
    close, diff 0**, and `node --check events\interactionCreate.js` → **exit 0**.
 2. The raid report card had **mangled emoji** (lossy `?? MVP:` + `U+FFFD`
    replacement chars). Fixed to `🏆 MVP:` / `✅` / `⏱️ Time Spent`.
-3. Files under `scripts/` are **disposable patch fragments** from the recovery —
-   several do **not** parse on purpose (they are search/replace snippets). Ignore
-   them; they are not runtime code and are git-ignored/stale.
+3. Files under `scripts/` were **disposable patch fragments** from the recovery —
+   several did **not** parse on purpose (they were search/replace snippets).
+   They have since been deleted. The only files that remain are
+   `scripts/require_test.js` (a boot check that `node --test` picks up because
+   of its `*_test.js` name) and `scripts/migrate-legacy-roblox-links.js` (a
+   real one-off data migration). `scripts/` stays git-ignored and is **not**
+   runtime code — never `require()` anything from it.
 
 ## ✅ VERIFICATION PIPELINE REFACTOR (this commit)
 
@@ -537,6 +541,58 @@ authorized by ONE primitive: `isRaidAdmin(member, guildId)` in
   re-check); Supabase is faked by patching `handlers/supabaseDb` so the suite
   is hermetic.
 
+## 🖼️ PERMANENT RAID PROOF LINKS (re-hosting Discord CDN URLs)
+
+> **Problem:** `MessageAttachment.url` is
+> `https://cdn.discordapp.com/attachments/<ch>/<id>/raid-proof.png?ex=<ts>&is=..&hm=..`.
+> The signature **EXPIRES**, so a `Raid Proof: [Image 1](…)` link dies within
+> hours and then renders as a **blank page / 403** in Chrome and in the Discord
+> mobile app. Rewriting the host to `media.discordapp.net` does **NOT** fix it —
+> the signed query string is still required and still expires.
+
+* **Helper:** `handlers/imageHost.js` —
+  `makePermanentImageUrl(url, opts)` returns a permanent, publicly hotlinkable
+  URL. Discord CDN URLs are downloaded (bounded, 8MB ceiling) and **re-hosted**;
+  already-permanent hosts (catbox / imgur / supabase / GCS) are returned
+  untouched; unknown hosts are left alone. On ANY failure it degrades to the
+  host-normalised Discord URL so the link is **never dropped**.
+  * **Hosts (first that works wins):**
+    1. **Supabase Storage** — env `SUPABASE_URL`,
+       `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET` (default
+       `raid-proofs`). The bucket MUST be **public**; a private bucket 404s on
+       the public URL and is rejected by the probe.
+    2. **catbox.moe** — zero-config default, already used for the default
+       raid-card banner.
+  * **`probeImageUrl(url)`** — a URL is only shipped when the request succeeds
+    **AND the body is a non-empty real image**. It rejects: 404s, HTML error
+    pages served with `200`, `content-length: 0` (catbox's rate-limit
+    response), private Supabase buckets, and anything whose bytes do not match
+    an image signature (`looksLikeImage` checks PNG/JPEG/GIF/WEBP/BMP/AVIF/SVG
+    magic bytes). A **missing** `content-length` (chunked encoding) is fine —
+    only an explicit `0` is rejected.
+  * **catbox rate-limit handling:** catbox answers a throttled upload with
+    `HTTP 200` and an **empty body**, and can hand back a URL that serves a
+    **0-byte file**. `uploadToCatbox` therefore (a) rejects an empty body,
+    (b) rejects a non-URL error body (`"File type is not permitted"`), and
+    (c) **probes** the returned URL before trusting it. It retries **3×** with
+    linear backoff (1.5s, 3s) and then gives up gracefully.
+  * **`qu.ax` is deliberately NOT used** — it requires a `Referer` header for
+    direct image access, so Discord/desktop hotlinking of the raw URL fails.
+* **Caller:** `makePermanentUrls(urls, opts)` in
+  `events/interactionCreate.js` re-hosts the whole proof list **positionally**
+  (array length and order are always preserved, so `Image 1` / `Image 2`
+  numbering never shifts). It never throws.
+* **Rendering:** `handlers/raidResultCard.js` `buildProofLinks(proofUrls)`
+  renders clickable `[Image N](url)` markdown links, capped at **8** links and
+  trimmed to Discord's **1024-character** field limit by **dropping whole
+  links** (a markdown link is never cut in half). Used by BOTH the native
+  Components V2 card and the classic-embed fallback.
+* **Tests:** `test/image-host.test.js` (20 tests) pins the zero-byte rejection,
+  the empty-body retry, the non-URL error body, the chunked-response case, the
+  magic-byte detector, the position-preserving conversion, the download gate
+  (non-image / oversize bodies refused before re-hosting), and the proof-link
+  truncation. The whole suite is **197 tests, all green** (`npm test`).
+
 ## 📂 KEY FILES
 
 | Path | Purpose |
@@ -546,7 +602,7 @@ authorized by ONE primitive: `isRaidAdmin(member, guildId)` in
 | `events/interactionCreate.js` | **Main interaction hub** (buttons, modals, selects). Contains verification decision helpers, link flow, raid application step 1, `open_raid_application` modal launcher, and the RAID OPERATIONS section (`raid_accept_`, `raid_leave_`, `raid_close_`, `raid_outcome_`, `raid_mvp_select_`). |
 | `handlers/raidStateManager.js` | Raid CRUD + persistence + presence polling. |
 | `handlers/raidV2.js` | Native Components V2 raid alert builder (`buildRaidAlertPayload`, `markAlertV2`). |
-| `handlers/raidResultCard.js` | Native Components V2 raid RESULT card: `buildResultCardPayload` (win/whooped/loss title styles, rally-pic TOP banner), `buildResultFallbackEmbed` (classic-embed fallback), `buildNoResultEmbed` (🚫 No Result note). |
+| `handlers/raidResultCard.js` | Native Components V2 raid RESULT card: `buildResultCardPayload` (win/whooped/loss title styles, rally-pic TOP banner), `buildResultFallbackEmbed` (classic-embed fallback), `buildNoResultEmbed` (🚫 No Result note), `buildProofLinks` (clickable `[Image N](url)` links, 8-link cap, 1024-char field limit). |
 | `handlers/robloxApi.js` | Roblox API/Presence calls, username validation, deep-links. |
 | `handlers/robloxAuth.js` | `.ROBLOSECURITY` handling: safe cookie-auth diagnostic that runs once at startup (`index.js`, `force`) and before each gamejoin (`getServerIp`); logs ONLY `cookieConfigured/cookieLength/authCheck/httpStatus/replacementCookieReceived` — never the value. In-memory rotation adoption on authenticated requests. |
 | `handlers/verificationDb.js` | sql.js persistence for verification records. |
@@ -559,6 +615,7 @@ authorized by ONE primitive: `isRaidAdmin(member, guildId)` in
 | `handlers/apiServer.js` | Express dashboard/API: `/`, `/api/stats`, `/api/action/restart`, `/api/health/discord` (gateway diagnostics) and the bearer-protected `/api/guilds/:guildId/roles`. |
 | `commands/pingsetup.js` | Ephemeral interactive `/pingsetup` builder (country/region ping roles, draft → UPSERT). |
 | `handlers/raidAdminRoles.js` | STRICT per-guild raid-admin authorization: `isRaidAdmin(member, guildId)`, cached `guild_configs.raid_admin_roles` reads (30s TTL / 1.5s bound / fail-closed / 5-min stale grace), `saveRaidAdminRoles` upsert keyed by `guild_id`, `buildRaidAccessDeniedMessage`. |
+| `handlers/imageHost.js` | PERMANENT raid-proof image hosting: `makePermanentImageUrl` (Discord CDN → Supabase Storage / catbox), `probeImageUrl` + `looksLikeImage` (reject 404s, HTML pages, 0-byte and non-image bodies), `uploadToCatbox` (3× retry with backoff), `uploadToSupabaseStorage`. |
 | `commands/adminsetup.js` | Ephemeral `/adminsetup` builder (Administrator): RoleSelect + two-step clear for this guild's raid-admin roles; `handleAdminSetupComponent` routed from the interaction hub (`adminsetup_` customIds). |
 | `handlers/commandHandler.js` | Loads commands from `commands/` into `client.commands`. |
 | `commands/deploy-commands.js` | `registerGuildCommands(guildId)` — used by `ready.js`; also a standalone CLI (`npm run deploy-commands`). |

@@ -89,6 +89,36 @@ function formatDayTime(ms) {
 }
 
 /**
+ * Builds the "Raid Proof" markdown link list.
+ *
+ * Every entry is a CLICKABLE `[Image N](url)` link. The URLs are expected to
+ * be PERMANENT public URLs (re-hosted by handlers/imageHost.js) so the link
+ * never dies like an expiring Discord CDN attachment URL does.
+ *
+ * The result respects Discord's 1024-char embed-field limit by dropping WHOLE
+ * links — a link is never cut in half, which would render as broken markdown.
+ *
+ * @param {string[]} urls
+ * @param {number} [maxLinks=8]
+ * @returns {string}
+ */
+function buildProofLinks(urls, maxLinks = 8) {
+    const list = (Array.isArray(urls) ? urls : [])
+        .filter(u => typeof u === 'string' && u)
+        .slice(0, maxLinks);
+    if (list.length === 0) return 'No raid pictures uploaded.';
+
+    const parts = list.map((url, index) => '[Image ' + (index + 1) + '](' + url + ')');
+    let value = '';
+    for (const part of parts) {
+        const candidate = value ? value + ' • ' + part : part;
+        if (candidate.length > 1024) break;
+        value = candidate;
+    }
+    return value || parts[0];
+}
+
+/**
  * Builds the native Components V2 result card payload.
  * @param {object} opts
  * @param {object} opts.raid            Closed raid record (raidStateManager).
@@ -185,11 +215,7 @@ function buildResultCardPayload(opts) {
     const gameLabel = rsm.GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
     const enemiesText = raid.enemyNames || 'None';
 
-    const proofLinks = proofUrls.length > 0
-        ? proofUrls.slice(0, 8)
-            .map(function (url, index) { return '[Image ' + (index + 1) + '](' + url + ')'; })
-            .join(' \u2022 ')
-        : 'No raid pictures uploaded.';
+    const proofLinks = buildProofLinks(proofUrls);
 
     contents.push(text(
         DOT + ' **Enemy Clan:** `' + (raid.enemyClanNames || 'None') + '`' + NL +
@@ -292,8 +318,14 @@ function buildResultFallbackEmbed(opts) {
     ]);
 
     if (proofUrls.length > 0) {
-        const picsValue = proofUrls.slice(0, 8).map((url, index) => (index + 1) + '. ' + url).join('\n');
-        embed.addFields({ name: 'Raid Proof', value: picsValue.length > 1024 ? picsValue.slice(0, 1020) + '...' : picsValue, inline: false });
+        // Clickable markdown links, NOT bare URLs. The URLs handed in here are
+        // already PERMANENT (see handlers/imageHost.js) so clicking "Image 1"
+        // opens the full-resolution picture in Chrome / the mobile browser
+        // instead of a blank page or a 403 from an expired Discord CDN link.
+        // The field value is capped at 1024 chars by Discord — the cap is
+        // applied on WHOLE LINKS (never mid-link) so nothing is ever broken.
+        const picsValue = buildProofLinks(proofUrls);
+        embed.addFields({ name: 'Raid Proof', value: picsValue, inline: false });
     } else {
         embed.addFields({ name: 'Raid Proof', value: 'No raid pictures uploaded.', inline: false });
     }
@@ -331,5 +363,6 @@ module.exports = {
     DEFAULT_BANNER_IMAGE: DEFAULT_BANNER_IMAGE,
     buildResultCardPayload: buildResultCardPayload,
     buildResultFallbackEmbed: buildResultFallbackEmbed,
+    buildProofLinks: buildProofLinks,
     buildNoResultEmbed: buildNoResultEmbed
 };
