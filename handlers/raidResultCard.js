@@ -241,12 +241,17 @@ function buildResultCardPayload(opts) {
 /**
  * Classic-embed fallback used ONLY when Discord rejects the V2 payload
  * (Components V2 is a beta that must be enabled for the bot).
+ *
+ * The returned embed deliberately carries NO image: a classic embed with an
+ * image collapses to the image's width. The caller delivers the rally/proof
+ * screenshot as a STANDALONE file attachment in the same message payload.
+ * `opts.rallyPicUrl` is therefore not consumed here (it is still used by the
+ * V2 card builder for the TOP banner).
  */
 function buildResultFallbackEmbed(opts) {
     const raid = opts.raid || {};
     const outcome = opts.outcome || 'win';
     const submitterId = opts.submitterId || raid.closedBy || null;
-    const rallyPicUrl = opts.rallyPicUrl || null;
     const proofUrls = Array.isArray(opts.proofUrls) ? opts.proofUrls : [];
     const streakMessage = opts.streakMessage || null;
     const endedAtMs = opts.endedAtMs || raid.closedAt || Date.now();
@@ -259,7 +264,10 @@ function buildResultFallbackEmbed(opts) {
         .setColor(RESULT_NEUTRAL_COLOR)
         .setTimestamp(new Date(endedAtMs));
 
-    if (rallyPicUrl) embed.setImage(rallyPicUrl);
+    // NO setImage() here on purpose: an image inside a classic embed forces
+    // the embed container to shrink to the image's width. The rally/proof
+    // screenshot is delivered by the caller as a STANDALONE file attachment
+    // in the same message payload, so this embed stays FULL WIDTH.
     if (streakMessage) embed.setDescription(streakMessage);
 
     const rosterValue = Array.isArray(raid.helpers) && raid.helpers.length > 0

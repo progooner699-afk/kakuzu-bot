@@ -4,16 +4,17 @@
  * raid-result-embed-attachment.test.js — pins the image-delivery change on the
  * classic raid RESULT embed (win / whooped / loss all share this send path):
  *
- *  1. The rally/proof screenshot is attached directly (files: [attachment])
- *     and referenced via .setImage('attachment://raid-proof.png').
+ *  1. The rally/proof screenshot is attached directly (files: [attachment]) as
+ *     a STANDALONE image next to the embed — the embed itself carries NO
+ *     .setImage(), so its container expands to FULL WIDTH.
  *  2. Image + embed go out in ONE single channel.send() payload — never two
  *     messages — so they collapse under a single bot header.
  *  3. Everything else on the embed (fields, text, color, timestamp, footer)
  *     is byte-identical to the untouched raidResultCard output.
  *
  * Plus the degradation contract: any failed download (HTTP error, non-image,
- * oversized, thrown fetch) yields null → the embed still sends, hotlinked,
- * in exactly one message.
+ * oversized, thrown fetch) yields null → the embed still sends, hotlinked as a
+ * markdown link, in exactly one message.
  */
 
 const test = require('node:test');
@@ -84,7 +85,7 @@ function makeChannel() {
 
 const REGION = { mention: '<@&999>', allowedMentions: { roles: ['999'] } };
 
-test('proof image + embed go out in ONE payload with the attachment:// image reference', async () => {
+test('proof image + embed go out in ONE payload; the embed has NO image so it stays full width', async () => {
     const channel = makeChannel();
     await interactionCreate.sendFallbackResultEmbed({
         channel,
@@ -97,10 +98,11 @@ test('proof image + embed go out in ONE payload with the attachment:// image ref
     assert.strictEqual(channel.sends.length, 1, 'must be a SINGLE channel.send — never two messages');
     const payload = channel.sends[0];
     assert.strictEqual(payload.embeds.length, 1, 'exactly one embed in the payload');
-    assert.strictEqual(payload.embeds[0].data.image.url, 'attachment://raid-proof.png');
+    assert.strictEqual(payload.embeds[0].data.image, undefined,
+        'the embed must carry NO image, otherwise its container shrinks to the image width');
     assert.ok(Array.isArray(payload.files) && payload.files.length === 1, 'files must carry the proof attachment');
     assert.ok(payload.files[0] instanceof AttachmentBuilder);
-    assert.strictEqual(payload.files[0].name, 'raid-proof.png', 'attachment name must match the attachment:// reference');
+    assert.strictEqual(payload.files[0].name, 'raid-proof.png', 'attachment name identifies the standalone file');
     assert.deepStrictEqual(Buffer.from(payload.files[0].attachment), FAKE_PNG, 'the downloaded bytes ride along');
     assert.strictEqual(payload.content, REGION.mention, 'the region ping stays in the SAME message');
 });
@@ -118,16 +120,17 @@ test('everything except the image reference is byte-identical to the untouched b
 
     const control = raidResultCard.buildResultFallbackEmbed(cardOpts).toJSON();
     const sent = channel.sends[0].embeds[0].toJSON();
-    delete control.image;
-    delete sent.image;
+    // The builder itself no longer sets an image (full-width embed), so the
+    // sent embed must match the control EXACTLY — no image added anywhere.
     assert.deepStrictEqual(sent, control, 'fields, text, color, timestamp and footer must not change');
+    assert.strictEqual(sent.image, undefined, 'no image may be present on the sent embed');
 });
 
-test('no proof source -> single message, no files, builder image untouched', async () => {
+test('no proof source -> single message, no files, image-free embed', async () => {
     const channel = makeChannel();
     await interactionCreate.sendFallbackResultEmbed({
         channel,
-        cardOpts: makeCardOpts({ rallyPicUrl: null }),
+        cardOpts: makeCardOpts(),
         proofSourceUrl: null,
         regionRoleInfo: REGION,
         fetchImpl: fakeFetch() // must never be called
@@ -138,7 +141,7 @@ test('no proof source -> single message, no files, builder image untouched', asy
     assert.strictEqual(payload.embeds[0].data.image, undefined, 'no proof -> no image, exactly like before');
 });
 
-test('degraded downloads fall back to the hotlinked image — still ONE message, embed never dropped', async () => {
+test('degraded downloads keep the screenshot as a LINK — still ONE message, embed never dropped', async () => {
     const scenarios = [
         { label: 'HTTP error', opts: { ok: false } },
         { label: 'non-image body', opts: { contentType: 'text/html' } },
@@ -156,8 +159,10 @@ test('degraded downloads fall back to the hotlinked image — still ONE message,
         assert.strictEqual(channel.sends.length, 1, scenario.label + ': exactly one send');
         const payload = channel.sends[0];
         assert.deepStrictEqual(payload.files, [], scenario.label + ': no file attached');
-        assert.strictEqual(payload.embeds[0].data.image.url, 'https://cdn.example/rally.png',
-            scenario.label + ': keeps the hotlinked rally image');
+        assert.strictEqual(payload.embeds[0].data.image, undefined,
+            scenario.label + ': the embed must stay image-free (full width)');
+        assert.ok(payload.embeds[0].data.fields.some(f => f.value.includes('https://cdn.example/rally.png')),
+            scenario.label + ': keeps the rally screenshot reachable as a link');
     }
 
     // A thrown fetch (timeout / network) must behave the same way.
@@ -171,7 +176,9 @@ test('degraded downloads fall back to the hotlinked image — still ONE message,
     });
     assert.strictEqual(channel.sends.length, 1, 'thrown fetch: still exactly one send');
     assert.deepStrictEqual(channel.sends[0].files, []);
-    assert.strictEqual(channel.sends[0].embeds[0].data.image.url, 'https://cdn.example/rally.png');
+    assert.strictEqual(channel.sends[0].embeds[0].data.image, undefined);
+    assert.ok(channel.sends[0].embeds[0].data.fields.some(f => f.value.includes('https://cdn.example/rally.png')),
+        'thrown fetch: the rally screenshot stays reachable as a link');
 });
 
 test('buildRaidProofAttachment: success and failure contracts', async () => {

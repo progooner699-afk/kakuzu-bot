@@ -713,7 +713,8 @@ const PROOF_ATTACHMENT_NAME = 'raid-proof.png';
 
 /**
  * Downloads a raid proof/screenshot into an in-memory buffer for direct
- * attachment (`files: [attachment]` + `.setImage('attachment://raid-proof.png')`).
+ * attachment (`files: [attachment]` — a STANDALONE image next to the embed,
+ * never `.setImage()`, which would collapse the embed to the image width).
  * Returns null on ANY failure (non-OK response, non-image content, oversized,
  * timeout) so the caller simply keeps the current hotlinked behaviour — a
  * failed download can never drop the result post or trigger a second message.
@@ -744,8 +745,9 @@ async function buildRaidProofAttachment(url, fetchImpl = fetchWithTimeout) {
  * Posts the classic fallback result embed with the raid proof attached as a
  * SINGLE message payload (embeds + files together — never two sends). The
  * embed object comes from raidResultCard.buildResultFallbackEmbed completely
- * untouched; only its image reference is pointed at the attached file, and
- * only when the download actually succeeded.
+ * untouched — in particular it carries NO .setImage(), so the embed container
+ * expands to its FULL WIDTH. The screenshot travels as a standalone file
+ * attachment in the very same payload.
  * @param {object} opts
  * @param {import('discord.js').TextChannel} opts.channel
  * @param {object} opts.cardOpts         unchanged raidResultCard options
@@ -756,9 +758,20 @@ async function buildRaidProofAttachment(url, fetchImpl = fetchWithTimeout) {
 async function sendFallbackResultEmbed({ channel, cardOpts, proofSourceUrl, regionRoleInfo, fetchImpl }) {
     const resultEmbed = raidResultCard.buildResultFallbackEmbed(cardOpts);
     const proofAttachment = proofSourceUrl ? await buildRaidProofAttachment(proofSourceUrl, fetchImpl) : null;
-    if (proofAttachment) {
-        // Same image slot as before — now served from the attached file.
-        resultEmbed.setImage('attachment://' + PROOF_ATTACHMENT_NAME);
+    // NOTE: no .setImage() on the embed. An image inside a classic embed makes
+    // the embed container collapse to the image width. The proof screenshot
+    // rides along as a STANDALONE file attachment in this same payload, so
+    // the embed renders at FULL WIDTH and the image still posts under one
+    // single bot header.
+    if (!proofAttachment && proofSourceUrl) {
+        // The download failed (HTTP error / non-image / oversized / timeout).
+        // Keep the picture reachable WITHOUT shrinking the embed: a plain
+        // markdown link instead of .setImage().
+        resultEmbed.addFields({
+            name: 'Raid Screenshot',
+            value: '[Open the raid screenshot](' + proofSourceUrl + ')',
+            inline: false
+        });
     }
     await channel.send({
         content: regionRoleInfo.mention || undefined,

@@ -461,12 +461,16 @@ Refactored the linking → request → join → close loop per the spec:
      `handlers/raidResultCard.js` (`buildResultCardPayload`),
      with the region-role ping sent as a separate message first (V2 disables
      `content`); if the V2 send fails it falls back to a classic embed
-     (`buildResultFallbackEmbed`). When a rally/proof screenshot exists it is
-     attached DIRECTLY in that SAME single message payload
-     (`files: [raid-proof.png]` + `.setImage('attachment://raid-proof.png')`)
-     so image + embed collapse under one bot header — never a second
-     `send()`; a failed/oversized download degrades to the previous hotlinked
-     image (tests: `test/raid-result-embed-attachment.test.js`).
+     (`buildResultFallbackEmbed`). The fallback embed carries **NO
+     `.setImage()`** — an image inside a classic embed collapses the embed
+     container to the image width. Instead the rally/proof screenshot rides
+     along as a **STANDALONE file attachment** in that SAME single message
+     payload (`files: [raid-proof.png]`, embed untouched) so the embed
+     expands to FULL WIDTH while image + embed still collapse under one bot
+     header — never a second `send()`; a failed/oversized download degrades
+     to a plain markdown link field (never `.setImage()`, which would shrink
+     the embed again) so the picture stays reachable
+     (tests: `test/raid-result-embed-attachment.test.js`).
      The **3 card types** share one layout with
      different title emojis: Win `🏆 RAID WON <:won:…>` , Whooped `💀 RAID
      WHOOPED`, Loss `❌ RAID LOST` (emoji map:
