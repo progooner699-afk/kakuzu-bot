@@ -697,7 +697,7 @@ test('getServerIp: plain 403 with x-csrf-token retries once with the NEW token a
         for (const call of gamejoinCalls) {
             assert.equal(call.headers['Cookie'], `.ROBLOSECURITY=${COOKIE_SECRET}`);
             assert.equal(call.headers['Content-Type'], 'application/json');
-            assert.equal(call.headers['User-Agent'], 'Roblox/WinInet');
+            assert.equal(call.headers['User-Agent'], 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         }
 
         const rec = realRobloxAuth.getLastGameJoinAttempt();
@@ -774,17 +774,20 @@ test('getServerIp: 401 returns null and logs the explicit revoked-cookie error',
 // ROBLOSECURITY_PROXY_URL: dispatcher binding (native fetch's httpsAgent equiv).
 // ---------------------------------------------------------------------------
 
-test('fetchRobloxGameInstance: ROBLOSECURITY_PROXY_URL binds a dispatcher on BOTH CSRF attempts', async () => {
+test('fetchRobloxGameInstance: CLOUDFLARE_WORKER_URL routes through the worker with X-Kakuzu-Auth + Roblox browser headers', async () => {
     const COOKIE_SECRET = 'TEST_COOKIE_SECRET_proxy';
     const PRE_TOKEN = 'FAKE-CSRF-PRE-PROBE-proxy';
     const HANDSHAKE_TOKEN = 'FAKE-CSRF-403-proxy';
     const ROTATED_COOKIE = 'TEST_COOKIE_SECRET_proxy_rotated';
-    const PROXY_SECRET = 'http://user:pass@127.0.0.1:9999';
+    const WORKER_URL = 'https://kakuzu-gamejoin.anon-worker.workers.dev';
+    const AUTH_KEY = 'whsec_abc123';
     const prevCookie = process.env.BOT_ROBLOSECURITY;
-    const prevProxy = process.env.ROBLOSECURITY_PROXY_URL;
+    const prevWorker = process.env.CLOUDFLARE_WORKER_URL;
+    const prevAuth = process.env.PROXY_AUTH_KEY;
     process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
-    process.env.ROBLOSECURITY_PROXY_URL = PROXY_SECRET;
-    realRobloxAuth._resetProxyForTests();
+    process.env.CLOUDFLARE_WORKER_URL = WORKER_URL;
+    process.env.PROXY_AUTH_KEY = AUTH_KEY;
+    realRobloxAuth._resetGameJoinTargetForTests();
 
     const calls = [];
     logs = [];
@@ -797,8 +800,8 @@ test('fetchRobloxGameInstance: ROBLOSECURITY_PROXY_URL binds a dispatcher on BOT
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: PRE_TOKEN }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roblox.com')) {
-                calls.push(options || {});
+            if (u.includes('kakuzu-gamejoin.anon-worker.workers.dev')) {
+                calls.push({ url: String(url), options: options || {} });
                 if (calls.length === 1) {
                     return {
                         ok: false, status: 403, statusMessage: 'Forbidden',
@@ -820,52 +823,57 @@ test('fetchRobloxGameInstance: ROBLOSECURITY_PROXY_URL binds a dispatcher on BOT
 
         const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-PROXY', { guildId: GUILD_ID, raidId: 42 });
 
-        // Core proxy assertions: the agent is bound on the initial POST AND the
-        // 403 retry, and it is a single cached instance (socket pooling).
+        // The Worker is a full fetch target, so the request goes to the worker host
+        // and no `dispatcher` key is needed.
         assert.equal(calls.length, 2, 'expected initial POST + one CSRF retry');
-        assert.ok(calls[0].dispatcher, 'dispatcher must be bound when ROBLOSECURITY_PROXY_URL is set');
-        assert.ok(calls[1].dispatcher, 'the CSRF retry must reuse the proxy dispatcher');
-        assert.equal(calls[0].dispatcher, calls[1].dispatcher, 'one agent instance must be reused, not rebuilt per request');
+        for (const call of calls) {
+            assert.equal(call.url, WORKER_URL, 'every POST must target the Cloudflare Worker');
+            assert.equal('dispatcher' in call.options, false, 'the worker is a full target; no dispatcher is bound');
+            assert.equal(call.options.headers['X-Kakuzu-Auth'], AUTH_KEY, 'X-Kakuzu-Auth must carry the worker auth key');
+            assert.equal(call.options.headers['Origin'], 'https://www.roblox.com', 'Origin must be the Roblox origin');
+            assert.equal(call.options.headers['User-Agent'], 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 'User-Agent must be a Roblox browser UA');
+            assert.equal(call.options.headers['Referer'], 'https://www.roblox.com/', 'Referer must be the Roblox root');
+            assert.equal(call.options.headers['Cookie'], `.ROBLOSECURITY=${COOKIE_SECRET}`, 'Roblox cookie must still be forwarded');
+            assert.equal(call.options.headers['Content-Type'], 'application/json', 'JSON content type must be preserved');
+        }
 
-        // Core logic intact alongside the proxy: headers, retry token, payload.
-        assert.equal(calls[0].headers['Cookie'], `.ROBLOSECURITY=${COOKIE_SECRET}`);
-        assert.equal(calls[0].headers['User-Agent'], 'Roblox/WinInet');
-        assert.equal(calls[0].headers['Content-Type'], 'application/json');
-        assert.equal(calls[0].headers['X-CSRF-TOKEN'], PRE_TOKEN);
-        assert.equal(calls[1].headers['X-CSRF-TOKEN'], HANDSHAKE_TOKEN, 'CSRF 403 retry must still fire through the proxy');
+        // Core logic intact alongside the worker: CSRF headers, retry token, payload.
+        assert.equal(calls[0].options.headers['X-CSRF-TOKEN'], PRE_TOKEN);
+        assert.equal(calls[1].options.headers['X-CSRF-TOKEN'], HANDSHAKE_TOKEN, 'CSRF 403 retry must still fire through the worker');
         assert.equal(result.machineAddress, '10.0.0.5');
         assert.equal(result.dataCenterId, 'dc-9');
 
-        // Set-Cookie rotation must still be adopted through the proxy.
+        // Set-Cookie rotation must still be adopted through the worker.
         assert.equal(realRobloxAuth.BOT_COOKIE, ROTATED_COOKIE, 'in-memory cookie rotation must still apply');
 
-        // The proxy URL (which embeds user:pass) must never be logged.
+        // The worker URL (which may embed auth/query pieces) must never be logged.
         const serialized = JSON.stringify(logs);
-        assert.ok(!serialized.includes('user:pass'), 'proxy credentials must never be logged');
-        assert.ok(!serialized.includes(PROXY_SECRET), 'proxy URL must never be logged');
-        assert.ok(findLog(/proxy enabled scheme=http: auth=true/), 'a sanitized proxy-enabled line must be logged');
+        assert.ok(!serialized.includes('whsec_abc123'), 'auth key must never be logged');
+        assert.ok(!serialized.includes('anon-worker.workers.dev'), 'worker host must never be logged');
 
         const rec = realRobloxAuth.getLastGameJoinAttempt();
         assert.ok(rec);
-        assert.equal(rec.proxyEnabled, true, 'diagnostics must record that the proxied path was used');
+        assert.equal(rec.proxyEnabled, true, 'diagnostics must record that the worker path was used');
         assert.equal(rec.csrfRetried, true);
     } finally {
         if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
         else process.env.BOT_ROBLOSECURITY = prevCookie;
-        if (prevProxy === undefined) delete process.env.ROBLOSECURITY_PROXY_URL;
-        else process.env.ROBLOSECURITY_PROXY_URL = prevProxy;
-        realRobloxAuth._resetProxyForTests();
+        if (prevWorker === undefined) delete process.env.CLOUDFLARE_WORKER_URL;
+        else process.env.CLOUDFLARE_WORKER_URL = prevWorker;
+        if (prevAuth === undefined) delete process.env.PROXY_AUTH_KEY;
+        else process.env.PROXY_AUTH_KEY = prevAuth;
+        realRobloxAuth._resetGameJoinTargetForTests();
         restoreFetch();
     }
 });
 
-test('fetchRobloxGameInstance: no ROBLOSECURITY_PROXY_URL falls back to direct with ONE warning', async () => {
+test('fetchRobloxGameInstance: no CLOUDFLARE_WORKER_URL falls back to direct with ONE warning', async () => {
     const COOKIE_SECRET = 'TEST_COOKIE_SECRET_noproxy';
     const prevCookie = process.env.BOT_ROBLOSECURITY;
-    const prevProxy = process.env.ROBLOSECURITY_PROXY_URL;
+    const prevWorker = process.env.CLOUDFLARE_WORKER_URL;
     process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
-    delete process.env.ROBLOSECURITY_PROXY_URL;
-    realRobloxAuth._resetProxyForTests();
+    delete process.env.CLOUDFLARE_WORKER_URL;
+    realRobloxAuth._resetGameJoinTargetForTests();
 
     const calls = [];
     logs = [];
@@ -892,13 +900,13 @@ test('fetchRobloxGameInstance: no ROBLOSECURITY_PROXY_URL falls back to direct w
         const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-NO-PROXY', { guildId: GUILD_ID, raidId: 42 });
 
         assert.ok(result, 'direct path must keep working');
-        assert.ok(calls.length >= 1);
-        // No `dispatcher` key at all => byte-identical direct egress.
-        assert.equal('dispatcher' in calls[0], false, 'dispatcher must be omitted entirely when no proxy is configured');
+        assert.equal(calls.length, 1, 'direct path is a single POST');
+        // No `dispatcher` key at all => direct egress.
+        assert.equal('dispatcher' in calls[0], false, 'dispatcher must be omitted entirely when no worker is configured');
 
         // The warning must be emitted exactly once, not per request/resolution.
-        const warns = logs.filter(l => /ROBLOSECURITY_PROXY_URL is not set/.test(l.args.join(' ')));
-        assert.equal(warns.length, 1, 'missing-proxy warning must be logged exactly once');
+        const warns = logs.filter(l => /CLOUDFLARE_WORKER_URL is not set/.test(l.args.join(' ')));
+        assert.equal(warns.length, 1, 'missing-worker warning must be logged exactly once');
 
         const rec = realRobloxAuth.getLastGameJoinAttempt();
         assert.ok(rec);
@@ -906,21 +914,21 @@ test('fetchRobloxGameInstance: no ROBLOSECURITY_PROXY_URL falls back to direct w
     } finally {
         if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
         else process.env.BOT_ROBLOSECURITY = prevCookie;
-        if (prevProxy === undefined) delete process.env.ROBLOSECURITY_PROXY_URL;
-        else process.env.ROBLOSECURITY_PROXY_URL = prevProxy;
-        realRobloxAuth._resetProxyForTests();
+        if (prevWorker === undefined) delete process.env.CLOUDFLARE_WORKER_URL;
+        else process.env.CLOUDFLARE_WORKER_URL = prevWorker;
+        realRobloxAuth._resetGameJoinTargetForTests();
         restoreFetch();
     }
 });
 
-test('fetchRobloxGameInstance: an unparseable proxy URL degrades to direct and never logs the value', async () => {
+test('fetchRobloxGameInstance: an unparseable worker URL degrades to direct and never logs the value', async () => {
     const COOKIE_SECRET = 'TEST_COOKIE_SECRET_badproxy';
-    const BAD_PROXY = 'definitely-not-a-valid-proxy-url';
+    const BAD_WORKER = 'definitely-not-a-valid-worker-url';
     const prevCookie = process.env.BOT_ROBLOSECURITY;
-    const prevProxy = process.env.ROBLOSECURITY_PROXY_URL;
+    const prevWorker = process.env.CLOUDFLARE_WORKER_URL;
     process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
-    process.env.ROBLOSECURITY_PROXY_URL = BAD_PROXY;
-    realRobloxAuth._resetProxyForTests();
+    process.env.CLOUDFLARE_WORKER_URL = BAD_WORKER;
+    realRobloxAuth._resetGameJoinTargetForTests();
 
     const calls = [];
     logs = [];
@@ -946,10 +954,10 @@ test('fetchRobloxGameInstance: an unparseable proxy URL degrades to direct and n
 
         const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-BAD-PROXY', { guildId: GUILD_ID, raidId: 42 });
 
-        assert.ok(result, 'an invalid proxy config must not break the join');
-        assert.equal('dispatcher' in calls[0], false, 'invalid proxy must degrade to direct egress');
-        assert.ok(findLog(/ROBLOSECURITY_PROXY_URL failed to parse/), 'the parse failure must be surfaced');
-        assert.ok(!JSON.stringify(logs).includes(BAD_PROXY), 'the invalid value must never be logged');
+        assert.ok(result, 'an invalid worker config must not break the join');
+        assert.equal('dispatcher' in calls[0], false, 'invalid worker must degrade to direct egress');
+        assert.ok(findLog(/CLOUDFLARE_WORKER_URL failed to parse/), 'the parse failure must be surfaced');
+        assert.ok(!JSON.stringify(logs).includes(BAD_WORKER), 'the invalid value must never be logged');
 
         const rec = realRobloxAuth.getLastGameJoinAttempt();
         assert.ok(rec);
@@ -957,9 +965,9 @@ test('fetchRobloxGameInstance: an unparseable proxy URL degrades to direct and n
     } finally {
         if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
         else process.env.BOT_ROBLOSECURITY = prevCookie;
-        if (prevProxy === undefined) delete process.env.ROBLOSECURITY_PROXY_URL;
-        else process.env.ROBLOSECURITY_PROXY_URL = prevProxy;
-        realRobloxAuth._resetProxyForTests();
+        if (prevWorker === undefined) delete process.env.CLOUDFLARE_WORKER_URL;
+        else process.env.CLOUDFLARE_WORKER_URL = prevWorker;
+        realRobloxAuth._resetGameJoinTargetForTests();
         restoreFetch();
     }
 });

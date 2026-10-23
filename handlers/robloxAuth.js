@@ -22,65 +22,77 @@ const GAMEJOIN_FETCH_TIMEOUT_MS = 10000;
 const GAMEJOIN_URL = 'https://gamejoin.roblox.com/v1/join-game-instance';
 
 // ---------------------------------------------------------------------------
-// Optional egress proxy for the AUTHENTICATED gamejoin POST.
+// Cloudflare Worker egress for the AUTHENTICATED gamejoin POST.
 //
-// Native fetch() has NO `httpsAgent` property — that is the axios / Node
-// https.request model, where a proxy agent is handed to the request layer.
-// undici's fetch (what global fetch is on Node 18+) binds the agent through the
-// `dispatcher` option instead, so handing it a `HttpsProxyAgent` object would be
-// silently IGNORED and the request would egress direct with no error. The
-// construct that actually tunnels here is undici's ProxyAgent -> dispatcher.
-//
-// undici is only guaranteed today via discord.js's dependency tree, so require
-// it defensively: if it ever disappears we warn once and run direct rather than
-// crashing the boot.
+// New security posture (replaces the old Webshare egress proxy):
+//   1. `process.env.CLOUDFLARE_WORKER_URL` is a full fetch target (e.g.
+//      https://kakuzu-gamejoin.<worker-subdomain>.workers.dev). Routing here
+//      replaces the opaque Webshare agent + dispatcher — a Cloudflare Worker is
+//      a first-class fetch target, so we bind the URL directly and never need a
+//      dispatcher at all.
+//   2. Every request to the worker carries the secret header
+//      `X-Kakuzu-Auth: process.env.PROXY_AUTH_KEY` for worker-side
+//      authentication. This header is only emitted on the worker path: it is a
+//      Kakuzu-specific secret that Roblox must never see.
+//   3. Roblox browser headers are included on every request:
+//      - User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36
+//      - Referer: https://www.roblox.com/
+//      - Origin: https://www.roblox.com
+//   4. Cookie authentication (.ROBLOSECURITY) and the CSRF handshake/retry
+//      logic inside fetchRobloxGameInstance() are untouched.
 // ---------------------------------------------------------------------------
-let ProxyAgentCtor = null;
-try { ProxyAgentCtor = require('undici').ProxyAgent; } catch (_) { ProxyAgentCtor = null; }
+// Resolves the Cloudflare Worker URL at call time, so tests and runtime
+// env var changes are reflected without reloading the module.
+const getCloudflareWorkerUrl = () => (process.env.CLOUDFLARE_WORKER_URL || '').trim();
+// Resolves the worker auth key at call time (never logged).
+const getProxyAuthKey = () => process.env.PROXY_AUTH_KEY || '';
+// Roblox browser headers applied to every gamejoin POST.
+const BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const BROWSER_REFERER = 'https://www.roblox.com/';
+const BROWSER_ORIGIN = 'https://www.roblox.com';
 
-let gameJoinDispatcher;        // undefined = not resolved yet, null = direct
-let gameJoinProxyWarned = false;
+// Resolved Cloudflare Worker target URL, or null = direct Roblox egress.
+let gameJoinTargetUrl;        // undefined = not resolved yet, null = direct
+let gameJoinTargetWarned = false;
 
 /**
- * Resolves (and caches) the undici dispatcher used for the gamejoin POST.
- * Reads process.env.ROBLOSECURITY_PROXY_URL and reuses ONE agent so sockets are
- * pooled across the 15s presence loop instead of being rebuilt per request.
- * NEVER logs the raw value — it may embed `user:pass@` credentials.
- * @returns {object|null} a ProxyAgent to bind as `dispatcher`, or null = direct
+ * Resolves (and caches) the Cloudflare Worker endpoint used for the gamejoin POST.
+ * Reads process.env.CLOUDFLARE_WORKER_URL, reuses ONE target so the worker
+ * session is reused across the 15s presence loop instead of being resolved per
+ * request, and never logs the raw value (it may embed auth/query pieces).
+ * @returns {string|null} the worker URL to fetch, or null = direct Roblox egress
  */
-function resolveGameJoinDispatcher() {
-  if (gameJoinDispatcher !== undefined) return gameJoinDispatcher;
+function resolveGameJoinTarget() {
+  if (gameJoinTargetUrl !== undefined) return gameJoinTargetUrl;
 
-  const raw = (process.env.ROBLOSECURITY_PROXY_URL || '').trim();
-  if (!raw) {
-    gameJoinDispatcher = null;
-    if (!gameJoinProxyWarned) {
-      gameJoinProxyWarned = true;
-      console.warn('[gamejoin] proxy disabled: ROBLOSECURITY_PROXY_URL is not set - egressing directly (local fallback).');
+  const workerUrl = getCloudflareWorkerUrl();
+  if (workerUrl) {
+    try {
+      const parsed = new URL(workerUrl);
+      // A Worker is a full fetch target; it needs an http/https scheme.
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('unsupported worker scheme');
+      gameJoinTargetUrl = workerUrl;
+      console.log(`[gamejoin] worker target scheme=${parsed.protocol} authKeySet=${Boolean(getProxyAuthKey())} (worker URL never logged).`);
+      return gameJoinTargetUrl;
+    } catch (_) {
+      gameJoinTargetUrl = null;
+      console.warn('[gamejoin] CLOUDFLARE_WORKER_URL failed to parse - egressing directly to Roblox (value never logged).');
+      return null;
     }
-    return null;
   }
-  if (!ProxyAgentCtor) {
-    gameJoinDispatcher = null;
-    console.warn('[gamejoin] proxy requested but the undici package is unavailable - egressing directly.');
-    return null;
+
+  gameJoinTargetUrl = null;
+  if (!gameJoinTargetWarned) {
+    gameJoinTargetWarned = true;
+    console.warn('[gamejoin] CLOUDFLARE_WORKER_URL is not set - egressing directly to Roblox.');
   }
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('unsupported proxy scheme');
-    gameJoinDispatcher = new ProxyAgentCtor(raw);
-    console.log(`[gamejoin] proxy enabled scheme=${parsed.protocol} auth=${parsed.username || parsed.password ? 'true' : 'false'} (proxy URL never logged).`);
-  } catch (_) {
-    gameJoinDispatcher = null;
-    console.warn('[gamejoin] proxy disabled: ROBLOSECURITY_PROXY_URL failed to parse - egressing directly (value never logged).');
-  }
-  return gameJoinDispatcher;
+  return null;
 }
 
-/** Test seam: forget the cached dispatcher + one-shot warning state. */
-function _resetProxyForTests() {
-  gameJoinDispatcher = undefined;
-  gameJoinProxyWarned = false;
+/** Test seam: forget the cached target + one-shot warning state. */
+function _resetGameJoinTargetForTests() {
+  gameJoinTargetUrl = undefined;
+  gameJoinTargetWarned = false;
 }
 
 let botCookie = process.env.BOT_ROBLOSECURITY || '';
@@ -366,29 +378,30 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}) {
     gameJoinAttemptId: serverId
   });
 
-  const buildHeaders = (csrfToken) => {
+  const buildHeaders = (csrfToken, sendAuth) => {
     const headers = {
       'Content-Type': 'application/json',
       'Cookie': `.ROBLOSECURITY=${botCookie}`,
-      'User-Agent': 'Roblox/WinInet',
-      'Referer': 'https://www.roblox.com/games/' + placeId
+      'User-Agent': BROWSER_USER_AGENT,
+      'Referer': BROWSER_REFERER,
+      'Origin': BROWSER_ORIGIN
     };
     if (csrfToken) headers['X-CSRF-TOKEN'] = csrfToken; // token value is NEVER logged
+    if (sendAuth && getProxyAuthKey()) headers['X-Kakuzu-Auth'] = getProxyAuthKey();
     return headers;
   };
 
   const post = (csrfToken) => {
+    const target = resolveGameJoinTarget();
     const reqOptions = {
       method: 'POST',
-      headers: buildHeaders(csrfToken),
+      headers: buildHeaders(csrfToken, Boolean(target)),
       body: bodyJson
     };
-    // Bind the optional ROBLOSECURITY_PROXY_URL egress proxy. `dispatcher` is
-    // native fetch's equivalent of axios's `httpsAgent`; omitting it entirely
-    // (rather than passing null) keeps the direct path byte-identical.
-    const dispatcher = resolveGameJoinDispatcher();
-    if (dispatcher) reqOptions.dispatcher = dispatcher;
-    return fetchWithTimeout(GAMEJOIN_URL, reqOptions, GAMEJOIN_FETCH_TIMEOUT_MS);
+    // Cloudflare Worker is a full fetch target, so the URL is bound directly
+    // instead of wiring a dispatcher. When no worker is configured we fall back
+    // to the direct Roblox endpoint byte-for-byte.
+    return fetchWithTimeout(target || GAMEJOIN_URL, reqOptions, GAMEJOIN_FETCH_TIMEOUT_MS);
   };
 
   // Attempt the join. A pre-fetched CSRF token is sent up front (skips the
@@ -460,7 +473,7 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}) {
       joinScript: joinScriptFound,
       csrfPresent: Boolean(usedCsrf),
       csrfRetried,
-      proxyEnabled: Boolean(resolveGameJoinDispatcher()),
+       proxyEnabled: Boolean(resolveGameJoinTarget()),
       replacementCookieReceived: replacement.received,
       challengeType: parsed.challengeType || null,
       challengeHeadersPresent: Boolean(parsed.challengeType),
@@ -515,9 +528,10 @@ async function getServerIp(placeId, serverId, context = {}) {
     // fetchRobloxGameInstance throws only on 401 (revoked/expired cookie) with
     // an explicit, secret-free message. Log it and keep the null contract so
     // callers (detectGameAndRegion) degrade to Unknown instead of throwing.
-    // When a proxy is in play, name it so a dead proxy is distinguishable from
-    // a Roblox-side failure (the proxy URL itself is never logged).
-    const proxyNote = resolveGameJoinDispatcher() ? ' proxyEnabled=true' : '';
+    // When the Cloudflare Worker is in play, name it so a dead worker is
+    // distinguishable from a Roblox-side failure (the worker URL itself is
+    // never logged, and PROXY_AUTH_KEY is never logged).
+    const proxyNote = resolveGameJoinTarget() ? ' proxyEnabled=true' : '';
     console.warn(`[gamejoin] ${err && err.message ? err.message : 'request failed'}${proxyNote} (guild=${diagGuildId} raidId=${diagRaidId})`);
     return null;
   }
@@ -648,7 +662,7 @@ function logGameJoinAttempt({ attempt, httpStatus, csrfPresent, csrfRetried, rep
 
 // Live binding: callers reading `BOT_COOKIE` after an in-memory rotation still
 // see the cookie actually in use (a plain property would snapshot the value).
-const robloxAuthExports = { getCsrfToken, getServerIp, fetchRobloxGameInstance, checkRobloxCookieAuth, getLastGameJoinAttempt, classifyGameJoinBlocker, isCookieConfigured, _resetProxyForTests };
+const robloxAuthExports = { getCsrfToken, getServerIp, fetchRobloxGameInstance, checkRobloxCookieAuth, getLastGameJoinAttempt, classifyGameJoinBlocker, isCookieConfigured, _resetGameJoinTargetForTests };
 Object.defineProperty(robloxAuthExports, 'BOT_COOKIE', {
     enumerable: true,
     get() { return botCookie; }
