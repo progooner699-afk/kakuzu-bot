@@ -371,8 +371,10 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}) {
   };
 
   // The EXACT same body is used for the initial request and any CSRF retry.
+  // placeId is coerced to Number so Roblox always receives a numeric place ID
+  // (Roblox's gamejoin API rejects string placeIds with responseStatus 12).
   const bodyJson = JSON.stringify({
-    placeId: placeId,
+    placeId: Number(placeId),
     isTeleport: false,
     gameId: serverId,
     gameJoinAttemptId: serverId
@@ -388,6 +390,11 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}) {
     };
     if (csrfToken) headers['X-CSRF-TOKEN'] = csrfToken; // token value is NEVER logged
     if (sendAuth && getProxyAuthKey()) headers['X-Kakuzu-Auth'] = getProxyAuthKey();
+    // Cloudflare Workers can strip the standard `Cookie` header on outbound
+    // fetches. Carry the session cookie on a Kakuzu-namespaced custom header as
+    // well so the Worker has a reliable carrier to forward to Roblox. The value
+    // is already present in the standard `Cookie` header; this is not a leak.
+    if (botCookie) headers['X-Kakuzu-Roblox-Cookie'] = `.ROBLOSECURITY=${botCookie}`;
     return headers;
   };
 

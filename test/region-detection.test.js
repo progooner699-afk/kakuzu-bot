@@ -834,6 +834,7 @@ test('fetchRobloxGameInstance: CLOUDFLARE_WORKER_URL routes through the worker w
             assert.equal(call.options.headers['User-Agent'], 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 'User-Agent must be a Roblox browser UA');
             assert.equal(call.options.headers['Referer'], 'https://www.roblox.com/', 'Referer must be the Roblox root');
             assert.equal(call.options.headers['Cookie'], `.ROBLOSECURITY=${COOKIE_SECRET}`, 'Roblox cookie must still be forwarded');
+            assert.equal(call.options.headers['X-Kakuzu-Roblox-Cookie'], `.ROBLOSECURITY=${COOKIE_SECRET}`, 'Kakuzu cookie header must be present for Worker forwarding');
             assert.equal(call.options.headers['Content-Type'], 'application/json', 'JSON content type must be preserved');
         }
 
