@@ -18,7 +18,7 @@ async function validateRobloxUser(username) {
     try {
         // Use the dedicated username resolution endpoint for exact matches
         const response = await fetchWithTimeout(
-            `https://users.roblox.com/v1/usernames/users`,
+            `https://users.roproxy.com/v1/usernames/users`,
             {
                 method: 'POST',
                 headers: {
@@ -167,7 +167,7 @@ async function getUserPresence(userId) {
         }
 
         const universeResponse = await fetchWithTimeout(
-            `https://games.roblox.com/v1/games?universeIds=${presence.universeId}`,
+            `https://games.roproxy.com/v1/games?universeIds=${presence.universeId}`,
             {},
             ROBLOX_FETCH_TIMEOUT_MS
         );
@@ -183,7 +183,7 @@ async function getUserPresence(userId) {
         let joinScript = '';
         if (gameId) {
             const serverResponse = await fetchWithTimeout(
-                `https://games.roblox.com/v1/games/${placeId}/servers/${gameId}`,
+                `https://games.roproxy.com/v1/games/${placeId}/servers/${gameId}`,
                 {},
                 ROBLOX_FETCH_TIMEOUT_MS
             );

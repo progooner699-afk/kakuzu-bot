@@ -19,7 +19,7 @@ const { fetchWithTimeout } = require('./fetchTimeout');
 // the slowest call on the request_backup path (cookie probe + gamejoin +
 // presence + RoValra + ip-api) and would blow the 3s Discord ack window.
 const GAMEJOIN_FETCH_TIMEOUT_MS = 10000;
-const GAMEJOIN_URL = 'https://gamejoin.roblox.com/v1/join-game-instance';
+const GAMEJOIN_URL = 'https://gamejoin.roproxy.com/v1/join-game-instance';
 
 // ---------------------------------------------------------------------------
 // Cloudflare Worker egress for the AUTHENTICATED gamejoin POST.
@@ -197,7 +197,7 @@ async function checkRobloxCookieAuth(context, force) {
     let replacementCookieReceived = false;
     let success = false;
     try {
-        const res = await fetchWithTimeout('https://users.roblox.com/v1/users/authenticated', {
+        const res = await fetchWithTimeout('https://users.roproxy.com/v1/users/authenticated', {
             headers: {
                 'Cookie': `.ROBLOSECURITY=${botCookie}`,
                 'User-Agent': 'Roblox/WinInet'

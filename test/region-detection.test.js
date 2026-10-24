@@ -91,10 +91,10 @@ function stubPresence(presencePayload) {
                 })
             };
         }
-        if (u.includes('games.roblox.com/v1/games?universeIds=')) {
+        if (u.includes('games.roproxy.com/v1/games?universeIds=')) {
             return { ok: true, json: async () => ({ data: [{ name: presencePayload.gameName }] }) };
         }
-        if (u.includes('games.roblox.com/v1/games/') && u.includes('/servers/')) {
+        if (u.includes('games.roproxy.com/v1/games/') && u.includes('/servers/')) {
             return { ok: true, json: async () => ({ joinScript: '' }) };
         }
         if (u.includes('thumbnails.roblox.com')) {
@@ -314,13 +314,13 @@ test('real getServerIp on a live-shape 403 challenge records a safe attempt and 
     try {
         global.fetch = async (url) => {
             const u = String(url);
-            if (u.includes('users.roblox.com')) {
+            if (u.includes('users.roproxy.com')) {
                 return { ok: true, status: 200, headers: makeHeaders({}), json: async () => ({ id: 424242 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeHeaders({ csrf: CSRF_TOKEN }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roblox.com')) {
+            if (u.includes('gamejoin.roproxy.com')) {
                 // Live-shape body: NO `status: 403` field, only errorCode/errorMessage.
                 return {
                     ok: false,
@@ -405,13 +405,13 @@ test('getServerIp: 403 with rblx-challenge-type header fires challenge branch an
     try {
         global.fetch = async (url) => {
             const u = String(url);
-            if (u.includes('users.roblox.com')) {
+            if (u.includes('users.roproxy.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: CSRF_TOKEN }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roblox.com')) {
+            if (u.includes('gamejoin.roproxy.com')) {
                 return {
                     ok: false,
                     status: 403,
@@ -476,13 +476,13 @@ test('getServerIp: 403 without challenge headers and no challenge message is for
     try {
         global.fetch = async (url) => {
             const u = String(url);
-            if (u.includes('users.roblox.com')) {
+            if (u.includes('users.roproxy.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: CSRF_TOKEN }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roblox.com')) {
+            if (u.includes('gamejoin.roproxy.com')) {
                 return {
                     ok: false,
                     status: 403,
@@ -529,13 +529,13 @@ test('getServerIp: successful GameJoin with joinScript returns machine/public ad
     try {
         global.fetch = async (url) => {
             const u = String(url);
-            if (u.includes('users.roblox.com')) {
+            if (u.includes('users.roproxy.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: CSRF_TOKEN }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roblox.com')) {
+            if (u.includes('gamejoin.roproxy.com')) {
                 return {
                     ok: true,
                     status: 200,
@@ -588,13 +588,13 @@ test('getServerIp: malformed (non-JSON) response body sets bodyJsonValid=false',
     try {
         global.fetch = async (url) => {
             const u = String(url);
-            if (u.includes('users.roblox.com')) {
+            if (u.includes('users.roproxy.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: CSRF_TOKEN }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roblox.com')) {
+            if (u.includes('gamejoin.roproxy.com')) {
                 return {
                     ok: false,
                     status: 403,
@@ -642,7 +642,7 @@ test('getServerIp: plain 403 with x-csrf-token retries once with the NEW token a
     try {
         global.fetch = async (url, options) => {
             const u = String(url);
-            if (u.includes('users.roblox.com')) {
+            if (u.includes('users.roproxy.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
@@ -651,7 +651,7 @@ test('getServerIp: plain 403 with x-csrf-token retries once with the NEW token a
                 // extracted header value and not the stale pre-fetched one.
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: PRE_TOKEN }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roblox.com')) {
+            if (u.includes('gamejoin.roproxy.com')) {
                 gamejoinCalls.push({ headers: (options && options.headers) || {} });
                 if (gamejoinCalls.length === 1) {
                     // PLAIN 403 (no challenge header, no challenge message) with a
@@ -734,13 +734,13 @@ test('getServerIp: 401 returns null and logs the explicit revoked-cookie error',
     try {
         global.fetch = async (url) => {
             const u = String(url);
-            if (u.includes('users.roblox.com')) {
+            if (u.includes('users.roproxy.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: 'FAKE-CSRF-401' }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roblox.com')) {
+            if (u.includes('gamejoin.roproxy.com')) {
                 return {
                     ok: false,
                     status: 401,
@@ -794,7 +794,7 @@ test('fetchRobloxGameInstance: CLOUDFLARE_WORKER_URL routes through the worker w
     try {
         global.fetch = async (url, options) => {
             const u = String(url);
-            if (u.includes('users.roblox.com')) {
+            if (u.includes('users.roproxy.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 1 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
@@ -881,13 +881,13 @@ test('fetchRobloxGameInstance: no CLOUDFLARE_WORKER_URL falls back to direct wit
     try {
         global.fetch = async (url, options) => {
             const u = String(url);
-            if (u.includes('users.roblox.com')) {
+            if (u.includes('users.roproxy.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 1 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: 'FAKE-CSRF-NO-PROXY' }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roblox.com')) {
+            if (u.includes('gamejoin.roproxy.com')) {
                 calls.push(options || {});
                 return {
                     ok: true, status: 200, statusMessage: 'OK',
@@ -936,13 +936,13 @@ test('fetchRobloxGameInstance: an unparseable worker URL degrades to direct and 
     try {
         global.fetch = async (url, options) => {
             const u = String(url);
-            if (u.includes('users.roblox.com')) {
+            if (u.includes('users.roproxy.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 1 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: 'FAKE-CSRF-BAD-PROXY' }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roblox.com')) {
+            if (u.includes('gamejoin.roproxy.com')) {
                 calls.push(options || {});
                 return {
                     ok: true, status: 200, statusMessage: 'OK',
