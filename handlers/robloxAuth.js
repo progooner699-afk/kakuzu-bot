@@ -393,11 +393,15 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}) {
   // The EXACT same body is used for the initial request and any CSRF retry.
   // placeId is coerced to Number so Roblox always receives a numeric place ID
   // (Roblox's gamejoin API rejects string placeIds with responseStatus 12).
+  // browserTrackerId is a per-request 11–13 digit numeric ID that Roblox uses
+  // to correlate the join attempt with a browser session.
+  const browserTrackerId = Math.floor(100000000000 + Math.random() * 900000000000);
   const bodyJson = JSON.stringify({
     placeId: Number(placeId),
     gameId: String(serverId).trim(),
     gameJoinAttemptId: String(serverId).trim(),
     gameJoinContext: "GameFinder",
+    browserTrackerId: browserTrackerId,
     isTeleport: false
   });
 
