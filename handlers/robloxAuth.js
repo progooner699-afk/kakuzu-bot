@@ -95,7 +95,22 @@ function _resetGameJoinTargetForTests() {
   gameJoinTargetWarned = false;
 }
 
-let botCookie = process.env.BOT_ROBLOSECURITY || '';
+// Resolves the Roblox .ROBLOSECURITY cookie from the environment, honoring the
+// canonical name plus the documented typo/alias fallbacks, and sanitizes it so
+// leading/trailing whitespace, surrounding quotes and a duplicated
+// `.ROBLOSECURITY=` prefix can never produce an "invalid header value" error.
+function readRobloxCookieFromEnv() {
+  const rawCookie = process.env.ROBLOSECURITY
+    || process.env.ROBLOESECUIRTY
+    || process.env.BOT_ROBLOSECURITY
+    || "";
+  return rawCookie
+    .trim()
+    .replace(/^["']|["']$/g, "") // Remove surrounding quotes
+    .replace(/^\.ROBLOSECURITY=/, ""); // Prevent duplicated prefix
+}
+
+let botCookie = readRobloxCookieFromEnv();
 // Env value that was active when we last adopted a rotated cookie. Used by
 // refreshCookieFromEnv() so a stale env var does not clobber a fresher rotated
 // token on the next call (see requirement: "retain the new token for future
@@ -137,9 +152,14 @@ function adoptReplacementCookieIfAuthenticated(replacement, authenticated) {
     if (authenticated && replacement.received && replacement.value) {
         // Remember which env value we are rotating away from so a later
         // refreshCookieFromEnv() does not resurrect the stale cookie.
-        rotatedFromEnvCookie = process.env.BOT_ROBLOSECURITY || null;
+        rotatedFromEnvCookie = readRobloxCookieFromEnv();
         try { botCookie = decodeURIComponent(replacement.value); }
         catch (_) { botCookie = replacement.value; } // value is NEVER logged
+        // Sanitize the adopted value the same way as the env-sourced cookie.
+        botCookie = String(botCookie)
+          .trim()
+          .replace(/^["']|["']$/g, "")
+          .replace(/^\.ROBLOSECURITY=/, "");
         console.log('[robloxAuth] rotated .ROBLOSECURITY adopted in memory from Set-Cookie (value never logged).');
     }
 }
@@ -212,7 +232,7 @@ function getLastGameJoinAttempt() {
 }
 
 function refreshCookieFromEnv() {
-  const fromEnv = process.env.BOT_ROBLOSECURITY || '';
+  const fromEnv = readRobloxCookieFromEnv();
   if (!fromEnv || fromEnv === botCookie) return;
   // If we already rotated away from THIS exact env value, keep the rotation:
   // the env var is now stale and clobbering it back would undo the Set-Cookie
@@ -669,9 +689,19 @@ function logGameJoinAttempt({ attempt, httpStatus, csrfPresent, csrfRetried, rep
 
 // Live binding: callers reading `BOT_COOKIE` after an in-memory rotation still
 // see the cookie actually in use (a plain property would snapshot the value).
-const robloxAuthExports = { getCsrfToken, getServerIp, fetchRobloxGameInstance, checkRobloxCookieAuth, getLastGameJoinAttempt, classifyGameJoinBlocker, isCookieConfigured, _resetGameJoinTargetForTests };
+const robloxAuthExports = { getCsrfToken, getServerIp, fetchRobloxGameInstance, checkRobloxCookieAuth, getLastGameJoinAttempt, classifyGameJoinBlocker, isCookieConfigured, readRobloxCookieFromEnv, _resetGameJoinTargetForTests };
 Object.defineProperty(robloxAuthExports, 'BOT_COOKIE', {
     enumerable: true,
     get() { return botCookie; }
+});
+Object.defineProperty(robloxAuthExports, 'cookieHeaderValue', {
+    enumerable: true,
+    get() {
+        const cleanCookie = String(botCookie || '')
+            .trim()
+            .replace(/^["']|["']$/g, "")
+            .replace(/^\.ROBLOSECURITY=/, "");
+        return `.ROBLOSECURITY=${cleanCookie}`;
+    }
 });
 module.exports = robloxAuthExports;
