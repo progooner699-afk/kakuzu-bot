@@ -397,6 +397,7 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}) {
     placeId: Number(placeId),
     gameId: String(serverId),
     gameJoinAttemptId: String(serverId),
+    gameJoinContext: "GameFinder",
     isTeleport: false
   });
 
