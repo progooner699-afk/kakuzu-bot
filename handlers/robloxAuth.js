@@ -21,84 +21,13 @@ const { fetchWithTimeout } = require('./fetchTimeout');
 const GAMEJOIN_FETCH_TIMEOUT_MS = 10000;
 const GAMEJOIN_URL = 'https://gamejoin.roblox.com/v1/play-with-user';
 
-// ---------------------------------------------------------------------------
-// Cloudflare Worker egress for the AUTHENTICATED gamejoin POST.
-//
-// New security posture (replaces the old Webshare egress proxy):
-//   1. `process.env.CLOUDFLARE_WORKER_URL` is a full fetch target (e.g.
-//      https://kakuzu-gamejoin.<worker-subdomain>.workers.dev). Routing here
-//      replaces the opaque Webshare agent + dispatcher — a Cloudflare Worker is
-//      a first-class fetch target, so we bind the URL directly and never need a
-//      dispatcher at all.
-//   2. Every request to the worker carries the secret header
-//      `X-Kakuzu-Auth: process.env.PROXY_AUTH_KEY` for worker-side
-//      authentication. This header is only emitted on the worker path: it is a
-//      Kakuzu-specific secret that Roblox must never see.
-//   3. Roblox browser headers are included on every request:
-//      - User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36
-//      - Referer: https://www.roblox.com/
-//      - Origin: https://www.roblox.com
-//   4. Cookie authentication (.ROBLOSECURITY) and the CSRF handshake/retry
-//      logic inside fetchRobloxGameInstance() are untouched.
-// ---------------------------------------------------------------------------
-// Resolves the Cloudflare Worker URL at call time, so tests and runtime
-// env var changes are reflected without reloading the module.
-const getCloudflareWorkerUrl = () => (process.env.CLOUDFLARE_WORKER_URL || '').trim();
-// Resolves the worker auth key at call time (never logged).
-const getProxyAuthKey = () => process.env.PROXY_AUTH_KEY || '';
-// Roblox browser headers applied to every gamejoin POST.
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const BROWSER_REFERER = 'https://www.roblox.com/';
 const BROWSER_ORIGIN = 'https://www.roblox.com';
 
-// Resolved Cloudflare Worker target URL, or null = direct Roblox egress.
-let gameJoinTargetUrl;        // undefined = not resolved yet, null = direct
-let gameJoinTargetWarned = false;
+// Direct egress only: no worker/proxy. Kept as a harmless no-op test seam.
+function _resetGameJoinTargetForTests() { /* no-op */ }
 
-/**
- * Resolves (and caches) the Cloudflare Worker endpoint used for the gamejoin POST.
- * Reads process.env.CLOUDFLARE_WORKER_URL, reuses ONE target so the worker
- * session is reused across the 15s presence loop instead of being resolved per
- * request, and never logs the raw value (it may embed auth/query pieces).
- * @returns {string|null} the worker URL to fetch, or null = direct Roblox egress
- */
-function resolveGameJoinTarget() {
-  if (gameJoinTargetUrl !== undefined) return gameJoinTargetUrl;
-
-  const workerUrl = getCloudflareWorkerUrl();
-  if (workerUrl) {
-    try {
-      const parsed = new URL(workerUrl);
-      // A Worker is a full fetch target; it needs an http/https scheme.
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('unsupported worker scheme');
-      gameJoinTargetUrl = workerUrl;
-      console.log(`[gamejoin] worker target scheme=${parsed.protocol} authKeySet=${Boolean(getProxyAuthKey())} (worker URL never logged).`);
-      return gameJoinTargetUrl;
-    } catch (_) {
-      gameJoinTargetUrl = null;
-      console.warn('[gamejoin] CLOUDFLARE_WORKER_URL failed to parse - egressing directly to Roblox (value never logged).');
-      return null;
-    }
-  }
-
-  gameJoinTargetUrl = null;
-  if (!gameJoinTargetWarned) {
-    gameJoinTargetWarned = true;
-    console.warn('[gamejoin] CLOUDFLARE_WORKER_URL is not set - egressing directly to Roblox.');
-  }
-  return null;
-}
-
-/** Test seam: forget the cached target + one-shot warning state. */
-function _resetGameJoinTargetForTests() {
-  gameJoinTargetUrl = undefined;
-  gameJoinTargetWarned = false;
-}
-
-// Resolves the Roblox .ROBLOSECURITY cookie from the environment, honoring the
-// canonical name plus the documented typo/alias fallbacks, and sanitizes it so
-// leading/trailing whitespace, surrounding quotes and a duplicated
-// `.ROBLOSECURITY=` prefix can never produce an "invalid header value" error.
 function readRobloxCookieFromEnv() {
   const rawCookie = process.env.ROBLOSECURITY
     || process.env.ROBLOESECUIRTY
@@ -106,15 +35,11 @@ function readRobloxCookieFromEnv() {
     || "";
   return rawCookie
     .trim()
-    .replace(/^["']|["']$/g, "") // Remove surrounding quotes
-    .replace(/^\.ROBLOSECURITY=/, ""); // Prevent duplicated prefix
+    .replace(/^[\"']|[\"']$/g, "")
+    .replace(/^\.ROBLOSECURITY=/, "");
 }
 
 let botCookie = readRobloxCookieFromEnv();
-// Env value that was active when we last adopted a rotated cookie. Used by
-// refreshCookieFromEnv() so a stale env var does not clobber a fresher rotated
-// token on the next call (see requirement: "retain the new token for future
-// requests"). It only re-applies env when the OPERATOR changes the env value.
 let rotatedFromEnvCookie = null;
 
 /**
@@ -409,7 +334,7 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}, robloxUs
     isTeleport: false
   });
 
-  const buildHeaders = (csrfToken, sendAuth) => {
+  const buildHeaders = (csrfToken) => {
     const headers = {
       'Content-Type': 'application/json',
       'Cookie': `.ROBLOSECURITY=${botCookie}`,
@@ -418,26 +343,16 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}, robloxUs
       'Origin': BROWSER_ORIGIN
     };
     if (csrfToken) headers['X-CSRF-TOKEN'] = csrfToken; // token value is NEVER logged
-    if (sendAuth && getProxyAuthKey()) headers['X-Kakuzu-Auth'] = getProxyAuthKey();
-    // Cloudflare Workers can strip the standard `Cookie` header on outbound
-    // fetches. Carry the session cookie on a Kakuzu-namespaced custom header as
-    // well so the Worker has a reliable carrier to forward to Roblox. The value
-    // is already present in the standard `Cookie` header; this is not a leak.
-    if (botCookie) headers['X-Kakuzu-Roblox-Cookie'] = `.ROBLOSECURITY=${botCookie}`;
     return headers;
   };
 
   const post = (csrfToken) => {
-    const target = resolveGameJoinTarget();
     const reqOptions = {
       method: 'POST',
-      headers: buildHeaders(csrfToken, Boolean(target)),
+      headers: buildHeaders(csrfToken),
       body: bodyJson
     };
-    // Cloudflare Worker is a full fetch target, so the URL is bound directly
-    // instead of wiring a dispatcher. When no worker is configured we fall back
-    // to the direct Roblox endpoint byte-for-byte.
-    return fetchWithTimeout(target || GAMEJOIN_URL, reqOptions, GAMEJOIN_FETCH_TIMEOUT_MS);
+    return fetchWithTimeout(GAMEJOIN_URL, reqOptions, GAMEJOIN_FETCH_TIMEOUT_MS);
   };
 
   // Attempt the join. A pre-fetched CSRF token is sent up front (skips the
@@ -509,7 +424,7 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}, robloxUs
       joinScript: joinScriptFound,
       csrfPresent: Boolean(usedCsrf),
       csrfRetried,
-       proxyEnabled: Boolean(resolveGameJoinTarget()),
+       proxyEnabled: false,
       replacementCookieReceived: replacement.received,
       challengeType: parsed.challengeType || null,
       challengeHeadersPresent: Boolean(parsed.challengeType),
@@ -573,8 +488,7 @@ async function getServerIp(placeId, serverId, context = {}, robloxUserIdArg) {
     // When the Cloudflare Worker is in play, name it so a dead worker is
     // distinguishable from a Roblox-side failure (the worker URL itself is
     // never logged, and PROXY_AUTH_KEY is never logged).
-    const proxyNote = resolveGameJoinTarget() ? ' proxyEnabled=true' : '';
-    console.warn(`[gamejoin] ${err && err.message ? err.message : 'request failed'}${proxyNote} (guild=${diagGuildId} raidId=${diagRaidId})`);
+    console.warn(`[gamejoin] ${err && err.message ? err.message : 'request failed'} (guild=${diagGuildId} raidId=${diagRaidId})`);
     return null;
   }
 
