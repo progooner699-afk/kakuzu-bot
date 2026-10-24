@@ -395,9 +395,9 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}) {
   // (Roblox's gamejoin API rejects string placeIds with responseStatus 12).
   const bodyJson = JSON.stringify({
     placeId: Number(placeId),
-    isTeleport: false,
-    gameId: serverId,
-    gameJoinAttemptId: serverId
+    gameId: String(serverId),
+    gameJoinAttemptId: String(serverId),
+    isTeleport: false
   });
 
   const buildHeaders = (csrfToken, sendAuth) => {
