@@ -19,7 +19,7 @@ const { fetchWithTimeout } = require('./fetchTimeout');
 // the slowest call on the request_backup path (cookie probe + gamejoin +
 // presence + RoValra + ip-api) and would blow the 3s Discord ack window.
 const GAMEJOIN_FETCH_TIMEOUT_MS = 10000;
-const GAMEJOIN_URL = 'https://gamejoin.roblox.com/v1/play-with-user';
+const GAMEJOIN_URL = 'https://gamejoin.roblox.com/v1/join-game-instance';
 
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const BROWSER_REFERER = 'https://www.roblox.com/';
@@ -327,8 +327,8 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}, robloxUs
   // placeId and targetUserId are coerced to Number so Roblox always receives
   // numeric IDs. gameJoinAttemptId is trimmed.
   const bodyJson = JSON.stringify({
-    targetUserId: Number(resolvedRobloxUserId),
     placeId: Number(placeId),
+    gameId: String(serverId).trim(),
     gameJoinAttemptId: String(serverId).trim(),
     gameJoinContext: "GameFinder",
     isTeleport: false
