@@ -19,7 +19,7 @@ const { fetchWithTimeout } = require('./fetchTimeout');
 // the slowest call on the request_backup path (cookie probe + gamejoin +
 // presence + RoValra + ip-api) and would blow the 3s Discord ack window.
 const GAMEJOIN_FETCH_TIMEOUT_MS = 10000;
-const GAMEJOIN_URL = 'https://gamejoin.roproxy.com/v1/join-game-instance';
+const GAMEJOIN_URL = 'https://gamejoin.roproxy.com/v1/play-with-user';
 
 // ---------------------------------------------------------------------------
 // Cloudflare Worker egress for the AUTHENTICATED gamejoin POST.
@@ -378,7 +378,7 @@ async function readGameJoinResponse(res) {
 //
 // Every request is deadline-bounded by fetchWithTimeout (GAMEJOIN_FETCH_TIMEOUT_MS).
 // ---------------------------------------------------------------------------
-async function fetchRobloxGameInstance(placeId, serverId, options = {}) {
+async function fetchRobloxGameInstance(placeId, serverId, options = {}, robloxUserIdArg) {
   const attempt = Number(options.attempt) > 0 ? Number(options.attempt) : 1;
   const preFetchedCsrf = (typeof options.csrfToken === 'string' && options.csrfToken) ? options.csrfToken : null;
   const onCookieRotated = typeof options.onCookieRotated === 'function' ? options.onCookieRotated : null;
@@ -386,22 +386,26 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}) {
   const diagGuildId = diag.guildId || 'unknown';
   const diagRaidId = (diag.raidId != null) ? String(diag.raidId) : 'n/a';
 
+  // Resolve the target user id for the play-with-user payload. Accept it from
+  // options (targetUserId / robloxUserId / userId) or a trailing positional arg.
+  const resolvedRobloxUserId = robloxUserIdArg != null
+    ? robloxUserIdArg
+    : (options.targetUserId != null ? options.targetUserId
+      : (options.robloxUserId != null ? options.robloxUserId
+        : (options.userId != null ? options.userId : null)));
+
   const noteAttempt = (info) => {
     lastGameJoinAttempt = Object.assign({ at: Date.now(), guildId: diagGuildId, raidId: diagRaidId }, info);
   };
 
   // The EXACT same body is used for the initial request and any CSRF retry.
-  // placeId is coerced to Number so Roblox always receives a numeric place ID
-  // (Roblox's gamejoin API rejects string placeIds with responseStatus 12).
-  // browserTrackerId is a per-request 11–13 digit numeric ID that Roblox uses
-  // to correlate the join attempt with a browser session.
-  const browserTrackerId = Math.floor(100000000000 + Math.random() * 900000000000);
+  // placeId and targetUserId are coerced to Number so Roblox always receives
+  // numeric IDs. gameJoinAttemptId is trimmed.
   const bodyJson = JSON.stringify({
+    targetUserId: Number(resolvedRobloxUserId),
     placeId: Number(placeId),
-    gameId: String(serverId).trim(),
     gameJoinAttemptId: String(serverId).trim(),
     gameJoinContext: "GameFinder",
-    browserTrackerId: browserTrackerId,
     isTeleport: false
   });
 
@@ -531,10 +535,15 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}) {
   return parsed.body;
 }
 
-async function getServerIp(placeId, serverId, context = {}) {
+async function getServerIp(placeId, serverId, context = {}, robloxUserIdArg) {
   refreshCookieFromEnv();
   const diagGuildId = (context && context.guildId) || 'unknown';
   const diagRaidId = (context && context.raidId != null) ? String(context.raidId) : 'n/a';
+  const resolvedRobloxUserId = robloxUserIdArg != null
+    ? robloxUserIdArg
+    : (context && (context.robloxUserId != null ? context.robloxUserId
+      : (context.targetUserId != null ? context.targetUserId
+        : (context.userId != null ? context.userId : null))));
   // Safe authenticated-cookie diagnostic BEFORE any gamejoin attempt.
   await checkRobloxCookieAuth('pre-gamejoin');
 
@@ -554,8 +563,9 @@ async function getServerIp(placeId, serverId, context = {}) {
     response = await fetchRobloxGameInstance(placeId, serverId, {
       attempt: 1,
       csrfToken: await getCsrfToken(),
-      diag
-    });
+      diag,
+      robloxUserId: resolvedRobloxUserId
+    }, resolvedRobloxUserId);
   } catch (err) {
     // fetchRobloxGameInstance throws only on 401 (revoked/expired cookie) with
     // an explicit, secret-free message. Log it and keep the null contract so

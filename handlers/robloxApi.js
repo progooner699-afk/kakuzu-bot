@@ -259,7 +259,8 @@ async function detectGameAndRegion(userId, context = {}) {
             const { getServerIp } = require('./robloxAuth');
             const ipResult = await getServerIp(presence.placeId, presence.serverId, {
                 guildId: detectGuildId || undefined,
-                raidId: detectRaidId || undefined
+                raidId: detectRaidId || undefined,
+                robloxUserId: userId
             });
             const hasServerLocationData = Boolean(ipResult && (ipResult.machineAddress || ipResult.publicAddress || ipResult.dataCenterId));
             // Guild context flows through the region pipeline for diagnostics.
