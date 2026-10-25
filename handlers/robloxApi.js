@@ -283,8 +283,15 @@ async function detectGameAndRegion(userId, context = {}) {
             // guess an IP, default to NA, or claim a provider succeeded. Set the
             // region to Unknown and stop the resolver chain.
             if (!ipResult || !hasServerLocationData) {
+                let blocker = 'unknown';
+                try {
+                    const { getLastGameJoinAttempt } = require('./robloxAuth');
+                    const rec = getLastGameJoinAttempt && getLastGameJoinAttempt();
+                    if (rec && rec.blocker) blocker = rec.blocker;
+                    else if (rec && rec.responseStatus != null) blocker = `roblox_status_${rec.responseStatus}`;
+                } catch (_) { /* diagnostic only */ }
                 const reason = !ipResult
-                    ? 'noServerLocationData=true'
+                    ? `noServerLocationData=true blocker=${blocker}`
                     : 'challenge_required=true';
                 console.warn(
                     `[KAKUZU:REGION] guild=${guildContext.guildId} guildName=${JSON.stringify(guildContext.guildName)} ` +

@@ -314,13 +314,13 @@ test('real getServerIp on a live-shape 403 challenge records a safe attempt and 
     try {
         global.fetch = async (url) => {
             const u = String(url);
-            if (u.includes('users.roproxy.com')) {
+            if (u.includes('users.roblox.com')) {
                 return { ok: true, status: 200, headers: makeHeaders({}), json: async () => ({ id: 424242 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeHeaders({ csrf: CSRF_TOKEN }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roproxy.com')) {
+            if (u.includes('/v1/join-game-instance')) {
                 // Live-shape body: NO `status: 403` field, only errorCode/errorMessage.
                 return {
                     ok: false,
@@ -405,13 +405,13 @@ test('getServerIp: 403 with rblx-challenge-type header fires challenge branch an
     try {
         global.fetch = async (url) => {
             const u = String(url);
-            if (u.includes('users.roproxy.com')) {
+            if (u.includes('users.roblox.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: CSRF_TOKEN }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roproxy.com')) {
+            if (u.includes('/v1/join-game-instance')) {
                 return {
                     ok: false,
                     status: 403,
@@ -476,13 +476,13 @@ test('getServerIp: 403 without challenge headers and no challenge message is for
     try {
         global.fetch = async (url) => {
             const u = String(url);
-            if (u.includes('users.roproxy.com')) {
+            if (u.includes('users.roblox.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: CSRF_TOKEN }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roproxy.com')) {
+            if (u.includes('/v1/join-game-instance')) {
                 return {
                     ok: false,
                     status: 403,
@@ -529,13 +529,13 @@ test('getServerIp: successful GameJoin with joinScript returns machine/public ad
     try {
         global.fetch = async (url) => {
             const u = String(url);
-            if (u.includes('users.roproxy.com')) {
+            if (u.includes('users.roblox.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: CSRF_TOKEN }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roproxy.com')) {
+            if (u.includes('/v1/join-game-instance')) {
                 return {
                     ok: true,
                     status: 200,
@@ -588,13 +588,13 @@ test('getServerIp: malformed (non-JSON) response body sets bodyJsonValid=false',
     try {
         global.fetch = async (url) => {
             const u = String(url);
-            if (u.includes('users.roproxy.com')) {
+            if (u.includes('users.roblox.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: CSRF_TOKEN }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roproxy.com')) {
+            if (u.includes('/v1/join-game-instance')) {
                 return {
                     ok: false,
                     status: 403,
@@ -642,7 +642,7 @@ test('getServerIp: plain 403 with x-csrf-token retries once with the NEW token a
     try {
         global.fetch = async (url, options) => {
             const u = String(url);
-            if (u.includes('users.roproxy.com')) {
+            if (u.includes('users.roblox.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
@@ -651,7 +651,7 @@ test('getServerIp: plain 403 with x-csrf-token retries once with the NEW token a
                 // extracted header value and not the stale pre-fetched one.
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: PRE_TOKEN }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roproxy.com')) {
+            if (u.includes('/v1/join-game-instance')) {
                 gamejoinCalls.push({ headers: (options && options.headers) || {} });
                 if (gamejoinCalls.length === 1) {
                     // PLAIN 403 (no challenge header, no challenge message) with a
@@ -697,7 +697,7 @@ test('getServerIp: plain 403 with x-csrf-token retries once with the NEW token a
         for (const call of gamejoinCalls) {
             assert.equal(call.headers['Cookie'], `.ROBLOSECURITY=${COOKIE_SECRET}`);
             assert.equal(call.headers['Content-Type'], 'application/json');
-            assert.equal(call.headers['User-Agent'], 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            assert.equal(call.headers['User-Agent'], 'Roblox/WinInet', 'gamejoin: User-Agent must be Roblox/WinInet');
         }
 
         const rec = realRobloxAuth.getLastGameJoinAttempt();
@@ -734,13 +734,13 @@ test('getServerIp: 401 returns null and logs the explicit revoked-cookie error',
     try {
         global.fetch = async (url) => {
             const u = String(url);
-            if (u.includes('users.roproxy.com')) {
+            if (u.includes('users.roblox.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 424242 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: 'FAKE-CSRF-401' }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roproxy.com')) {
+            if (u.includes('/v1/join-game-instance')) {
                 return {
                     ok: false,
                     status: 401,
@@ -771,22 +771,18 @@ test('getServerIp: 401 returns null and logs the explicit revoked-cookie error',
 });
 
 // ---------------------------------------------------------------------------
-// ROBLOSECURITY_PROXY_URL: dispatcher binding (native fetch's httpsAgent equiv).
-// ---------------------------------------------------------------------------
-
-test('fetchRobloxGameInstance: CLOUDFLARE_WORKER_URL routes through the worker with X-Kakuzu-Auth + Roblox browser headers', async () => {
+// ROBLOSECURITY_PROXY_URL: direct fetch only (worker routing removed from code).
+test('fetchRobloxGameInstance: new permanent URL is used directly, with no dispatcher', async () => {
     const COOKIE_SECRET = 'TEST_COOKIE_SECRET_proxy';
     const PRE_TOKEN = 'FAKE-CSRF-PRE-PROBE-proxy';
     const HANDSHAKE_TOKEN = 'FAKE-CSRF-403-proxy';
     const ROTATED_COOKIE = 'TEST_COOKIE_SECRET_proxy_rotated';
-    const WORKER_URL = 'https://kakuzu-gamejoin.anon-worker.workers.dev';
-    const AUTH_KEY = 'whsec_abc123';
     const prevCookie = process.env.BOT_ROBLOSECURITY;
     const prevWorker = process.env.CLOUDFLARE_WORKER_URL;
     const prevAuth = process.env.PROXY_AUTH_KEY;
     process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
-    process.env.CLOUDFLARE_WORKER_URL = WORKER_URL;
-    process.env.PROXY_AUTH_KEY = AUTH_KEY;
+    process.env.CLOUDFLARE_WORKER_URL = 'https://kakuzu-gamejoin.anon-worker.workers.dev';
+    process.env.PROXY_AUTH_KEY = 'whsec_abc123';
     realRobloxAuth._resetGameJoinTargetForTests();
 
     const calls = [];
@@ -794,13 +790,13 @@ test('fetchRobloxGameInstance: CLOUDFLARE_WORKER_URL routes through the worker w
     try {
         global.fetch = async (url, options) => {
             const u = String(url);
-            if (u.includes('users.roproxy.com')) {
+            if (u.includes('users.roblox.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 1 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: PRE_TOKEN }), json: async () => ({}) };
             }
-            if (u.includes('kakuzu-gamejoin.anon-worker.workers.dev')) {
+            if (u.includes('/v1/join-game-instance')) {
                 calls.push({ url: String(url), options: options || {} });
                 if (calls.length === 1) {
                     return {
@@ -811,10 +807,7 @@ test('fetchRobloxGameInstance: CLOUDFLARE_WORKER_URL routes through the worker w
                 }
                 return {
                     ok: true, status: 200, statusMessage: 'OK',
-                    headers: makeMockHeaders({
-                        contentType: 'application/json',
-                        setCookie: [`.ROBLOSECURITY=${ROTATED_COOKIE}; path=/`]
-                    }),
+                    headers: makeMockHeaders({ contentType: 'application/json', setCookie: [`.ROBLOSECURITY=${ROTATED_COOKIE}; path=/`] }),
                     json: async () => ({ joinScript: { MachineAddress: '10.0.0.5', DataCenterId: 'dc-9', UdmuxEndpoints: [{ Address: '203.0.113.9' }] } })
                 };
             }
@@ -823,38 +816,24 @@ test('fetchRobloxGameInstance: CLOUDFLARE_WORKER_URL routes through the worker w
 
         const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-PROXY', { guildId: GUILD_ID, raidId: 42 });
 
-        // The Worker is a full fetch target, so the request goes to the worker host
-        // and no `dispatcher` key is needed.
+        // No worker dispatcher is bound: native fetch has no httpsAgent equivalent.
         assert.equal(calls.length, 2, 'expected initial POST + one CSRF retry');
         for (const call of calls) {
-            assert.equal(call.url, WORKER_URL, 'every POST must target the Cloudflare Worker');
-            assert.equal('dispatcher' in call.options, false, 'the worker is a full target; no dispatcher is bound');
-            assert.equal(call.options.headers['X-Kakuzu-Auth'], AUTH_KEY, 'X-Kakuzu-Auth must carry the worker auth key');
-            assert.equal(call.options.headers['Origin'], 'https://www.roblox.com', 'Origin must be the Roblox origin');
-            assert.equal(call.options.headers['User-Agent'], 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 'User-Agent must be a Roblox browser UA');
-            assert.equal(call.options.headers['Referer'], 'https://www.roblox.com/', 'Referer must be the Roblox root');
-            assert.equal(call.options.headers['Cookie'], `.ROBLOSECURITY=${COOKIE_SECRET}`, 'Roblox cookie must still be forwarded');
-            assert.equal(call.options.headers['X-Kakuzu-Roblox-Cookie'], `.ROBLOSECURITY=${COOKIE_SECRET}`, 'Kakuzu cookie header must be present for Worker forwarding');
-            assert.equal(call.options.headers['Content-Type'], 'application/json', 'JSON content type must be preserved');
+            assert.equal(call.url, 'https://gamejoin.roblox.com/v1/join-game-instance', 'every POST must target the permanent gamejoin endpoint');
+            assert.equal('dispatcher' in call.options, false, 'no dispatcher is used with the new direct URL');
+            assert.equal(call.options.method, 'POST', 'the permanent endpoint is called with POST');
         }
-
-        // Core logic intact alongside the worker: CSRF headers, retry token, payload.
-        assert.equal(calls[0].options.headers['X-CSRF-TOKEN'], PRE_TOKEN);
-        assert.equal(calls[1].options.headers['X-CSRF-TOKEN'], HANDSHAKE_TOKEN, 'CSRF 403 retry must still fire through the worker');
         assert.equal(result.machineAddress, '10.0.0.5');
         assert.equal(result.dataCenterId, 'dc-9');
-
-        // Set-Cookie rotation must still be adopted through the worker.
         assert.equal(realRobloxAuth.BOT_COOKIE, ROTATED_COOKIE, 'in-memory cookie rotation must still apply');
 
-        // The worker URL (which may embed auth/query pieces) must never be logged.
         const serialized = JSON.stringify(logs);
         assert.ok(!serialized.includes('whsec_abc123'), 'auth key must never be logged');
         assert.ok(!serialized.includes('anon-worker.workers.dev'), 'worker host must never be logged');
 
         const rec = realRobloxAuth.getLastGameJoinAttempt();
         assert.ok(rec);
-        assert.equal(rec.proxyEnabled, true, 'diagnostics must record that the worker path was used');
+        assert.equal(rec.proxyEnabled, false, 'no proxy/dispatcher path is configured');
         assert.equal(rec.csrfRetried, true);
     } finally {
         if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
@@ -868,7 +847,60 @@ test('fetchRobloxGameInstance: CLOUDFLARE_WORKER_URL routes through the worker w
     }
 });
 
-test('fetchRobloxGameInstance: no CLOUDFLARE_WORKER_URL falls back to direct with ONE warning', async () => {
+
+test('fetchRobloxGameInstance: an unparseable worker URL degrades to direct', async () => {
+    const COOKIE_SECRET = 'TEST_COOKIE_SECRET_badproxy';
+    const BAD_WORKER = 'definitely-not-a-valid-worker-url';
+    const prevCookie = process.env.BOT_ROBLOSECURITY;
+    const prevWorker = process.env.CLOUDFLARE_WORKER_URL;
+    process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
+    process.env.CLOUDFLARE_WORKER_URL = BAD_WORKER;
+    realRobloxAuth._resetGameJoinTargetForTests();
+
+    const calls = [];
+    logs = [];
+    try {
+        global.fetch = async (url, options) => {
+            const u = String(url);
+            if (u.includes('users.roblox.com')) {
+                return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 1 }) };
+            }
+            if (u.includes('auth.roblox.com/v2/logout')) {
+                return { ok: true, status: 403, headers: makeMockHeaders({ csrf: 'FAKE-CSRF-BAD-PROXY' }), json: async () => ({}) };
+            }
+            if (u.includes('/v1/join-game-instance')) {
+                calls.push(options || {});
+                return {
+                    ok: true, status: 200, statusMessage: 'OK',
+                    headers: makeMockHeaders({ contentType: 'application/json' }),
+                    json: async () => ({ joinScript: { MachineAddress: '10.0.0.7', DataCenterId: 'dc-11', UdmuxEndpoints: [{ Address: '203.0.113.11' }] } })
+                };
+            }
+            throw new Error(`unexpected fetch in test: ${u}`);
+        };
+
+        const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-BAD-PROXY', { guildId: GUILD_ID, raidId: 42 });
+
+        assert.ok(result, 'an invalid worker config must not break the join');
+        assert.equal(calls.length, 1, 'invalid worker falls back to direct egress');
+        assert.equal('dispatcher' in calls[0], false, 'direct egress must not bind a dispatcher');
+        assert.ok(!JSON.stringify(logs).includes(BAD_WORKER), 'the invalid value must never be logged');
+
+        const rec = realRobloxAuth.getLastGameJoinAttempt();
+        assert.ok(rec);
+        assert.equal(rec.proxyEnabled, false);
+    } finally {
+        if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
+        else process.env.BOT_ROBLOSECURITY = prevCookie;
+        if (prevWorker === undefined) delete process.env.CLOUDFLARE_WORKER_URL;
+        else process.env.CLOUDFLARE_WORKER_URL = prevWorker;
+        realRobloxAuth._resetGameJoinTargetForTests();
+        restoreFetch();
+    }
+});
+
+
+test('fetchRobloxGameInstance: no worker falls back to direct', async () => {
     const COOKIE_SECRET = 'TEST_COOKIE_SECRET_noproxy';
     const prevCookie = process.env.BOT_ROBLOSECURITY;
     const prevWorker = process.env.CLOUDFLARE_WORKER_URL;
@@ -881,13 +913,13 @@ test('fetchRobloxGameInstance: no CLOUDFLARE_WORKER_URL falls back to direct wit
     try {
         global.fetch = async (url, options) => {
             const u = String(url);
-            if (u.includes('users.roproxy.com')) {
+            if (u.includes('users.roblox.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 1 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
                 return { ok: true, status: 403, headers: makeMockHeaders({ csrf: 'FAKE-CSRF-NO-PROXY' }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roproxy.com')) {
+            if (u.includes('/v1/join-game-instance')) {
                 calls.push(options || {});
                 return {
                     ok: true, status: 200, statusMessage: 'OK',
@@ -905,10 +937,6 @@ test('fetchRobloxGameInstance: no CLOUDFLARE_WORKER_URL falls back to direct wit
         // No `dispatcher` key at all => direct egress.
         assert.equal('dispatcher' in calls[0], false, 'dispatcher must be omitted entirely when no worker is configured');
 
-        // The warning must be emitted exactly once, not per request/resolution.
-        const warns = logs.filter(l => /CLOUDFLARE_WORKER_URL is not set/.test(l.args.join(' ')));
-        assert.equal(warns.length, 1, 'missing-worker warning must be logged exactly once');
-
         const rec = realRobloxAuth.getLastGameJoinAttempt();
         assert.ok(rec);
         assert.equal(rec.proxyEnabled, false, 'diagnostics must record direct egress');
@@ -922,13 +950,12 @@ test('fetchRobloxGameInstance: no CLOUDFLARE_WORKER_URL falls back to direct wit
     }
 });
 
-test('fetchRobloxGameInstance: an unparseable worker URL degrades to direct and never logs the value', async () => {
-    const COOKIE_SECRET = 'TEST_COOKIE_SECRET_badproxy';
-    const BAD_WORKER = 'definitely-not-a-valid-worker-url';
+test('fetchRobloxGameInstance: exact 4-field body, identical on initial + CSRF retry', async () => {
+    const COOKIE_SECRET = 'TEST_COOKIE_SECRET_body';
+    const PRE_TOKEN = 'FAKE-CSRF-PRE-body';
+    const HANDSHAKE_TOKEN = 'FAKE-CSRF-403-body';
     const prevCookie = process.env.BOT_ROBLOSECURITY;
-    const prevWorker = process.env.CLOUDFLARE_WORKER_URL;
     process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
-    process.env.CLOUDFLARE_WORKER_URL = BAD_WORKER;
     realRobloxAuth._resetGameJoinTargetForTests();
 
     const calls = [];
@@ -936,39 +963,144 @@ test('fetchRobloxGameInstance: an unparseable worker URL degrades to direct and 
     try {
         global.fetch = async (url, options) => {
             const u = String(url);
-            if (u.includes('users.roproxy.com')) {
+            if (u.includes('users.roblox.com')) {
                 return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 1 }) };
             }
             if (u.includes('auth.roblox.com/v2/logout')) {
-                return { ok: true, status: 403, headers: makeMockHeaders({ csrf: 'FAKE-CSRF-BAD-PROXY' }), json: async () => ({}) };
+                return { ok: true, status: 403, headers: makeMockHeaders({ csrf: PRE_TOKEN }), json: async () => ({}) };
             }
-            if (u.includes('gamejoin.roproxy.com')) {
-                calls.push(options || {});
+            if (u.includes('/v1/join-game-instance')) {
+                calls.push({ url: String(url), options: options || {} });
+                if (calls.length === 1) {
+                    return {
+                        ok: false, status: 403, statusMessage: 'Forbidden',
+                        headers: makeMockHeaders({ csrf: HANDSHAKE_TOKEN, contentType: 'application/json' }),
+                        json: async () => ({ errorMessage: 'Token Validation Failed' })
+                    };
+                }
                 return {
                     ok: true, status: 200, statusMessage: 'OK',
                     headers: makeMockHeaders({ contentType: 'application/json' }),
-                    json: async () => ({ joinScript: { MachineAddress: '10.0.0.7', DataCenterId: 'dc-11', UdmuxEndpoints: [{ Address: '203.0.113.11' }] } })
+                    json: async () => ({ joinScript: { MachineAddress: '10.0.0.5', DataCenterId: 'dc-9' } })
                 };
             }
             throw new Error(`unexpected fetch in test: ${u}`);
         };
 
-        const result = await realRobloxAuth.getServerIp('10449761463', 'JOB-BAD-PROXY', { guildId: GUILD_ID, raidId: 42 });
+        await realRobloxAuth.fetchRobloxGameInstance('10449761463', 'JOB-BODY-TEST');
 
-        assert.ok(result, 'an invalid worker config must not break the join');
-        assert.equal('dispatcher' in calls[0], false, 'invalid worker must degrade to direct egress');
-        assert.ok(findLog(/CLOUDFLARE_WORKER_URL failed to parse/), 'the parse failure must be surfaced');
-        assert.ok(!JSON.stringify(logs).includes(BAD_WORKER), 'the invalid value must never be logged');
+        assert.equal(calls.length, 2, 'expected initial POST + one CSRF retry');
+        const body1 = JSON.parse(calls[0].options.body);
+        const body2 = JSON.parse(calls[1].options.body);
 
-        const rec = realRobloxAuth.getLastGameJoinAttempt();
-        assert.ok(rec);
-        assert.equal(rec.proxyEnabled, false);
+        const expectedKeys = ['placeId', 'isTeleport', 'gameId', 'gameJoinAttemptId'];
+        assert.deepEqual(Object.keys(body1), expectedKeys, 'initial body must have exactly 4 fields');
+        assert.deepEqual(Object.keys(body2), expectedKeys, 'retry body must have exactly 4 fields');
+
+        assert.equal(body1.placeId, 10449761463, 'placeId must be a Number');
+        assert.equal(body1.isTeleport, false, 'isTeleport must be false');
+        assert.equal(body1.gameId, 'JOB-BODY-TEST', 'gameId must be the trimmed serverId string');
+        assert.equal(body1.gameJoinAttemptId, 'JOB-BODY-TEST', 'gameJoinAttemptId must equal serverId string');
+
+        assert.deepEqual(body1, body2, 'CSRF retry body must be byte-identical to initial');
     } finally {
         if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
         else process.env.BOT_ROBLOSECURITY = prevCookie;
-        if (prevWorker === undefined) delete process.env.CLOUDFLARE_WORKER_URL;
-        else process.env.CLOUDFLARE_WORKER_URL = prevWorker;
         realRobloxAuth._resetGameJoinTargetForTests();
         restoreFetch();
     }
 });
+
+test('fetchRobloxGameInstance: new headers (Roblox/WinInet UA, place-specific Referer, Origin roblox.com)', async () => {
+    const COOKIE_SECRET = 'TEST_COOKIE_SECRET_headers';
+    const prevCookie = process.env.BOT_ROBLOSECURITY;
+    process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
+    realRobloxAuth._resetGameJoinTargetForTests();
+
+    const calls = [];
+    logs = [];
+    try {
+        global.fetch = async (url, options) => {
+            const u = String(url);
+            calls.push({ url: u, options: options || {} });
+            if (u.includes('users.roblox.com')) {
+                return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 1 }) };
+            }
+            if (u.includes('auth.roblox.com/v2/logout')) {
+                return { ok: true, status: 200, headers: makeMockHeaders({ csrf: 'CSRF-HDR-TOKEN' }), json: async () => ({}) };
+            }
+            if (u.includes('/v1/join-game-instance')) {
+                return {
+                    ok: true, status: 200, statusMessage: 'OK',
+                    headers: makeMockHeaders({ contentType: 'application/json' }),
+                    json: async () => ({ joinScript: { MachineAddress: '10.0.0.5', DataCenterId: 'dc-9' } })
+                };
+            }
+            throw new Error(`unexpected fetch in test: ${u}`);
+        };
+
+        // getServerIp calls getCsrfToken() first, then fetchRobloxGameInstance,
+        // so both the CSRF probe and the gamejoin POST exercise the new headers.
+        await realRobloxAuth.getServerIp('10449761463', 'JOB-HDR-TEST', { guildId: GUILD_ID, raidId: 42 });
+
+        const csrfCalls = calls.filter(c => c.url.includes('auth.roblox.com/v2/logout'));
+        const joinCalls = calls.filter(c => c.url.includes('/v1/join-game-instance'));
+
+        assert.equal(csrfCalls.length, 1, 'getCsrfToken POST must happen');
+        assert.equal(joinCalls.length, 1, 'gamejoin POST must happen');
+
+        const csrfHdr = csrfCalls[0].options.headers;
+        assert.equal(csrfHdr['User-Agent'], 'Roblox/WinInet', 'CSRF probe: User-Agent must be Roblox/WinInet');
+        assert.equal(csrfHdr['Referer'], 'https://www.roblox.com/', 'CSRF probe: Referer must be https://www.roblox.com/');
+        assert.equal(csrfHdr['Origin'], 'https://roblox.com', 'CSRF probe: Origin must be https://roblox.com');
+
+        const joinHdr = joinCalls[0].options.headers;
+        assert.equal(joinHdr['User-Agent'], 'Roblox/WinInet', 'gamejoin: User-Agent must be Roblox/WinInet');
+        assert.equal(joinHdr['Referer'], 'https://www.roblox.com/games/10449761463/', 'gamejoin: Referer must be place-specific');
+        assert.equal(joinHdr['Origin'], 'https://roblox.com', 'gamejoin: Origin must be https://roblox.com');
+    } finally {
+        if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
+        else process.env.BOT_ROBLOSECURITY = prevCookie;
+        realRobloxAuth._resetGameJoinTargetForTests();
+        restoreFetch();
+    }
+});
+
+test('fetchRobloxGameInstance: null/non-JSON response body does not crash (readGameJoinResponse crash fix)', async () => {
+    const COOKIE_SECRET = 'TEST_COOKIE_SECRET_nullbody';
+    const prevCookie = process.env.BOT_ROBLOSECURITY;
+    process.env.BOT_ROBLOSECURITY = COOKIE_SECRET;
+    realRobloxAuth._resetGameJoinTargetForTests();
+
+    logs = [];
+    try {
+        global.fetch = async (url, options) => {
+            const u = String(url);
+            if (u.includes('users.roblox.com')) {
+                return { ok: true, status: 200, headers: makeMockHeaders({}), json: async () => ({ id: 1 }) };
+            }
+            if (u.includes('auth.roblox.com/v2/logout')) {
+                return { ok: true, status: 200, headers: makeMockHeaders({ csrf: 'CSRF-NULL-BODY' }), json: async () => ({}) };
+            }
+            if (u.includes('/v1/join-game-instance')) {
+                return {
+                    ok: true, status: 200, statusMessage: 'OK',
+                    headers: makeMockHeaders({ contentType: 'application/json' }),
+                    json: async () => null
+                };
+            }
+            throw new Error(`unexpected fetch in test: ${u}`);
+        };
+
+        const result = await realRobloxAuth.fetchRobloxGameInstance('10449761463', 'JOB-NULL-BODY');
+
+        assert.ok(result && typeof result === 'object', 'must return an object, not crash');
+        assert.equal(result.joinScript, undefined, 'no joinScript from null body');
+    } finally {
+        if (prevCookie === undefined) delete process.env.BOT_ROBLOSECURITY;
+        else process.env.BOT_ROBLOSECURITY = prevCookie;
+        realRobloxAuth._resetGameJoinTargetForTests();
+        restoreFetch();
+    }
+});
+

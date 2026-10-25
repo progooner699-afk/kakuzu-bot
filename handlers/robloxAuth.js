@@ -12,6 +12,7 @@
 //     AUTHENTICATES successfully and Roblox returns a replacement
 //     .ROBLOSECURITY, we adopt it IN MEMORY ONLY for all later requests in
 //     this process. It is never persisted and never logged.
+const crypto = require('crypto');
 // ---------------------------------------------------------------------------
 
 const { fetchWithTimeout } = require('./fetchTimeout');
@@ -22,6 +23,7 @@ const GAMEJOIN_FETCH_TIMEOUT_MS = 10000;
 const GAMEJOIN_URL = 'https://gamejoin.roblox.com/v1/join-game-instance';
 
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const GAMEJOIN_USER_AGENT = process.env.GAMEJOIN_USER_AGENT || 'Roblox/WinInet';
 const BROWSER_REFERER = 'https://www.roblox.com/';
 const BROWSER_ORIGIN = 'https://www.roblox.com';
 
@@ -33,6 +35,17 @@ function readRobloxCookieFromEnv() {
     || process.env.ROBLOESECUIRTY
     || process.env.BOT_ROBLOSECURITY
     || "";
+  const setNames = [];
+  if (process.env.ROBLOSECURITY != null && process.env.ROBLOSECURITY !== '') setNames.push('ROBLOSECURITY');
+  if (process.env.ROBLOESECUIRTY != null && process.env.ROBLOESECUIRTY !== '') setNames.push('ROBLOESECUIRTY');
+  if (process.env.BOT_ROBLOSECURITY != null && process.env.BOT_ROBLOSECURITY !== '') setNames.push('BOT_ROBLOSECURITY');
+  if (setNames.length > 1) {
+    const trimmedValues = [process.env.ROBLOSECURITY, process.env.ROBLOESECUIRTY, process.env.BOT_ROBLOSECURITY].map((v) => (v == null ? '' : v.trim()));
+    if (new Set(trimmedValues).size > 1) {
+      console.warn(`[robloxAuth] multiple cookie env vars set with different values; using ${setNames[0]}`);
+    }
+  }
+
   return rawCookie
     .trim()
     .replace(/^[\"']|[\"']$/g, "")
@@ -122,12 +135,12 @@ async function checkRobloxCookieAuth(context, force) {
     let replacementCookieReceived = false;
     let success = false;
     try {
-        const res = await fetchWithTimeout('https://users.roproxy.com/v1/users/authenticated', {
-            headers: {
-                'Cookie': `.ROBLOSECURITY=${botCookie}`,
-                'User-Agent': 'Roblox/WinInet'
-            }
-        }, GAMEJOIN_FETCH_TIMEOUT_MS);
+        const res = await fetchWithTimeout('https://users.roblox.com/v1/users/authenticated', {
+      headers: {
+        'Cookie': `.ROBLOSECURITY=${botCookie}`,
+        'User-Agent': GAMEJOIN_USER_AGENT
+      },
+    }, GAMEJOIN_FETCH_TIMEOUT_MS);
         httpStatus = res.status;
         const replacement = extractReplacementSecurityCookie(res);
         replacementCookieReceived = replacement.received;
@@ -182,6 +195,8 @@ function classifyGameJoinBlocker(httpStatus, response) {
     || (response.error && response.error.message)
     || (Array.isArray(response.errors) && response.errors[0] && response.errors[0].message))) || '');
   const hasChallengeHeader = Boolean(response && response.challengeType);
+  const robloxStatus = (response && response.status != null && response.status !== '')
+    ? Number(response.status) : null;
   // Challenge is identified by EITHER the body message OR the presence of an
   // rblx-challenge-type header (which names the specific challenge method).
   if (/challenge is required/i.test(msg) || (hasChallengeHeader && httpStatus === 403)) return 'roblox_challenge_required';
@@ -191,6 +206,26 @@ function classifyGameJoinBlocker(httpStatus, response) {
   if (httpStatus != null && httpStatus >= 500) return 'roblox_server_error';
   if (/unparseable/i.test(msg)) return 'unparseable_response';
   if (httpStatus === 400) return 'bad_request_ids';
+  // HTTP 200 but Roblox reported a non-success join status. The most common
+  // possibility is:
+  //   12 = "Not authorized to join this game". This is NOT a code defect — it
+  //   means the bot account cannot enter the target server. The causes below
+  //   are UNCONFIRMED possibilities, not confirmed causes. Causes (in order of
+  //   likelihood when the requester's privacy is already "Everyone"):
+  //   1. The bot account is under 13 / age-restricted (Roblox blocks joining
+  //   1. The bot account is under 13 / age-restricted (Roblox blocks joining
+  //      some experiences for under-13 accounts).
+  //   2. The experience itself is set to Private / Friends by its creator
+  //      (separate from the requester's "Who can join me" privacy).
+  //   3. The server is a reserved/private server (paid), not a public instance.
+  //   4. The bot account is banned from the experience.
+  //   5. Roblox soft-blocked the request as automation (rare with a valid UA).
+  // Without a successful joinScript there is no MachineAddress/DataCenterId,
+  // so region detection cannot run.
+  if (robloxStatus != null && !Number.isNaN(robloxStatus) && robloxStatus !== 0 && robloxStatus !== 22) {
+    if (robloxStatus === 12) return 'roblox_unauthorized_to_join';
+    return `roblox_status_${robloxStatus}`;
+  }
   return 'no_join_script';
 }
 
@@ -218,7 +253,12 @@ async function getCsrfToken() {
   if (!botCookie) return null;
   const res = await fetchWithTimeout('https://auth.roblox.com/v2/logout', {
     method: 'POST',
-    headers: { Cookie: `.ROBLOSECURITY=${botCookie}` }
+    headers: {
+      Cookie: `.ROBLOSECURITY=${botCookie}`,
+      'User-Agent': GAMEJOIN_USER_AGENT,
+      'Referer': 'https://www.roblox.com/',
+      'Origin': 'https://roblox.com'
+    }
   }, GAMEJOIN_FETCH_TIMEOUT_MS);
   return res.headers.get('x-csrf-token');
 }
@@ -264,6 +304,7 @@ async function readGameJoinResponse(res) {
   let body;
   let bodyJsonValid = false;
   try { body = await res.json(); bodyJsonValid = true; } catch (_) { body = {}; }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) body = {};
   if (body && typeof body === 'object') {
     body.httpStatus = res.status;
     body.challengeType = challengeType;
@@ -324,23 +365,24 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}, robloxUs
   };
 
   // The EXACT same body is used for the initial request and any CSRF retry.
-  // placeId and targetUserId are coerced to Number so Roblox always receives
-  // numeric IDs. gameJoinAttemptId is trimmed.
+  // gameJoinAttemptId is generated once per call and reused, so the retry body
+  // is identical. placeId/serverId are coerced to primitives Roblox expects.
   const bodyJson = JSON.stringify({
     placeId: Number(placeId),
+    isTeleport: false,
     gameId: String(serverId).trim(),
-    gameJoinAttemptId: String(serverId).trim(),
-    gameJoinContext: "GameFinder",
-    isTeleport: false
+    gameJoinAttemptId: String(serverId).trim()
   });
+
+  const joinReferer = `https://www.roblox.com/games/${Number(placeId)}/`;
 
   const buildHeaders = (csrfToken) => {
     const headers = {
       'Content-Type': 'application/json',
       'Cookie': `.ROBLOSECURITY=${botCookie}`,
-      'User-Agent': BROWSER_USER_AGENT,
-      'Referer': BROWSER_REFERER,
-      'Origin': BROWSER_ORIGIN
+      'User-Agent': GAMEJOIN_USER_AGENT,
+      'Referer': joinReferer,
+      'Origin': 'https://roblox.com'
     };
     if (csrfToken) headers['X-CSRF-TOKEN'] = csrfToken; // token value is NEVER logged
     return headers;
@@ -408,7 +450,8 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}, robloxUs
     challengeIdPresent: parsed.challengeIdPresent,
     challengeMetaPresent: parsed.challengeMetaPresent,
     responseContentType: parsed.responseContentType,
-    bodyJsonValid: parsed.bodyJsonValid
+    bodyJsonValid: parsed.bodyJsonValid,
+    dataCenterIdPresent: Boolean(parsed.body && parsed.body.joinScript && parsed.body.joinScript.DataCenterId)
   });
 
   // Persist the SAME whitelisted fields for getLastGameJoinAttempt() so
@@ -416,6 +459,18 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}, robloxUs
   // Never the cookie, CSRF token, raw body, IPs or headers.
   {
     const joinScriptFound = authenticated;
+    const _sanitizeStatusDataValue = (raw) => {
+      if (raw === undefined || raw === null) return null;
+      if (typeof raw === 'object' && !Array.isArray(raw)) {
+        const keys = Object.keys(raw);
+        if (keys.some((k) => /address|ip|machine/i.test(k))) {
+          return `object(${keys.map((k) => `${k}=<redacted>`).join(' ')})`;
+        }
+        return JSON.stringify(raw).slice(0, 200);
+      }
+      return JSON.stringify(raw).slice(0, 200);
+    };
+
     noteAttempt({
       attempt,
       placeId: String(placeId),
@@ -436,6 +491,8 @@ async function fetchRobloxGameInstance(placeId, serverId, options = {}, robloxUs
       queuePosition: parsed.body && parsed.body.queuePosition !== undefined ? parsed.body.queuePosition : null,
       errorCode: parsed.body && parsed.body.errorCode !== undefined ? parsed.body.errorCode : null,
       errorMessage: parsed.body && typeof parsed.body.errorMessage === 'string' ? parsed.body.errorMessage : null,
+      message: parsed.body && typeof parsed.body.message === 'string' ? parsed.body.message.slice(0, 200) : null,
+      statusData: _sanitizeStatusDataValue(parsed.body && parsed.body.statusData),
       blocker: joinScriptFound ? null : classifyGameJoinBlocker(res.status, parsed.body)
     });
   }
@@ -529,8 +586,9 @@ async function getServerIp(placeId, serverId, context = {}, robloxUserIdArg) {
       response = await fetchRobloxGameInstance(placeId, serverId, {
         attempt: retries + 2,
         csrfToken: await getCsrfToken(),
-        diag
-      });
+        diag,
+        robloxUserId: resolvedRobloxUserId
+      }, resolvedRobloxUserId);
     } catch (err) {
       console.warn(`[gamejoin] ${err && err.message ? err.message : 'request failed'} (queue retry guild=${diagGuildId} raidId=${diagRaidId})`);
       return null;
@@ -561,12 +619,13 @@ async function getServerIp(placeId, serverId, context = {}, robloxUserIdArg) {
  *          challengeMetaPresent:boolean, responseContentType:string|null,
  *          bodyJsonValid:boolean}} log
  */
-function logGameJoinAttempt({ attempt, httpStatus, csrfPresent, csrfRetried, replacementReceived, response, challengeType, challengeIdPresent, challengeMetaPresent, responseContentType, bodyJsonValid }) {
+function logGameJoinAttempt({ attempt, httpStatus, csrfPresent, csrfRetried, replacementReceived, response, challengeType, challengeIdPresent, challengeMetaPresent, responseContentType, bodyJsonValid, dataCenterIdPresent }) {
   const joinScript = !!(response && response.joinScript);
   const fields = [
     `attempt=${attempt}`,
     `httpStatus=${httpStatus}`,
     `joinScript=${joinScript ? 'true' : 'false'}`,
+    `dataCenterId=${dataCenterIdPresent ? 'true' : 'false'}`,
     `csrfPresent=${csrfPresent ? 'true' : 'false'}`,
     `csrfRetried=${csrfRetried ? 'true' : 'false'}`,
     `replacementCookieReceived=${replacementReceived ? 'true' : 'false'}`,
@@ -587,6 +646,25 @@ function logGameJoinAttempt({ attempt, httpStatus, csrfPresent, csrfRetried, rep
     }
     if (response.queuePosition !== undefined && response.queuePosition !== null) {
       fields.push(`queuePosition=${response.queuePosition}`);
+    }
+
+    if (typeof response.message === 'string' && response.message) {
+      fields.push(`message=${JSON.stringify(response.message.slice(0, 200))}`);
+    }
+    const rawStatusData = response.statusData;
+    if (rawStatusData !== undefined && rawStatusData !== null) {
+      let statusDataText = '';
+      if (typeof rawStatusData === 'object' && !Array.isArray(rawStatusData)) {
+        const keys = Object.keys(rawStatusData);
+        if (keys.some((k) => /address|ip|machine/i.test(k))) {
+          statusDataText = `object(${keys.map((k) => `${k}=<redacted>`).join(' ')})`;
+        } else {
+          statusDataText = JSON.stringify(rawStatusData).slice(0, 200);
+        }
+      } else {
+        statusDataText = JSON.stringify(rawStatusData).slice(0, 200);
+      }
+      fields.push(`statusData=${statusDataText}`);
     }
 
     // Roblox error surfaces vary by shape:
