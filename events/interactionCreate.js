@@ -29,6 +29,7 @@ const helperVerification = require("../handlers/helperVerification");
 // Per-guild RAID ADMIN roles (/adminsetup) — strict guild-isolated staff
 // authorization for the edit / close / end raid actions.
 const raidAdminRoles = require("../handlers/raidAdminRoles");
+const { REGIONS: REGION_CATALOG } = require("../handlers/countryCatalog");
 // Commands that bypass the normal per-guild premium-access guard so support
 // moderators can manage access from the support server. They still enforce
 // their own support-server + role + password checks.
@@ -45,6 +46,7 @@ const pendingPlaceIds = new Map();
 const pendingServerIds = new Map();
 const pendingGameThumbnails = new Map();
 const pendingCountryCodes = new Map();
+const pendingDetections = new Map();
 
 // Temporary monitoring records for users who pressed Help. Key =
 // `${guildId}:${raidId}:${discordUserId}` — keying by user alone meant a
@@ -1423,6 +1425,35 @@ module.exports = {
             pendingGameThumbnails.set(interaction.user.id, detection.gameIconUrl || '');
             pendingCountryCodes.set(interaction.user.id, detection.countryCode || '');
 
+            // When auto-detection could not resolve a region / data-center id, do
+            // NOT block the user — instead surface a manual region dropdown so
+            // they can pick the region (and the matching Supabase ping config is
+            // still resolved automatically from the chosen region/country).
+            const regionUnknown = !detection.region || detection.region === 'Unknown';
+            const noDataCenter = !detection.serverId && !detection.placeId;
+            if (regionUnknown || noDataCenter) {
+                pendingDetections.set(interaction.user.id, {
+                    game: detection.game,
+                    serverLink: detection.serverLink || '',
+                    placeId: detection.placeId || '',
+                    serverId: detection.serverId || '',
+                    gameIconUrl: detection.gameIconUrl || '',
+                    countryCode: detection.countryCode || ''
+                });
+                const select = new StringSelectMenuBuilder()
+                    .setCustomId('raid_region_select')
+                    .setPlaceholder('Choose a region (auto-detection failed)…')
+                    .addOptions(REGION_CATALOG.map((r) => new StringSelectMenuOptionBuilder()
+                        .setLabel(`${r.emoji} ${r.label}`)
+                        .setValue(r.key)));
+                const row = new ActionRowBuilder().addComponents(select);
+                return interaction.editReply({
+                    content: '⚠️ Auto-detection could not resolve a region / data-center id. Pick the region manually below — Supabase ping settings will still be applied automatically.',
+                    components: [row],
+                    flags: 64
+                }).catch(() => null);
+            }
+
             const openFormButton = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId("open_raid_application")
@@ -2193,6 +2224,36 @@ module.exports = {
             }
             await interaction.reply({ content: `✅ Combat operation logs compiled as **${outcome.toUpperCase()}**!`, flags: 64 }).catch(() => null);
             await finalizeRaidOutcome(interaction, finalRaid, outcome);
+            return;
+        }
+
+        if (interaction.isStringSelectMenu() && typeof interaction.customId === 'string' && interaction.customId === 'raid_region_select') {
+            const chosenRegion = interaction.values && interaction.values[0];
+            const pending = pendingDetections.get(interaction.user.id);
+            pendingDetections.delete(interaction.user.id);
+            if (!pending || !chosenRegion) {
+                await interaction.update({ content: '❌ Region selection expired. Please try again.', components: [], flags: 64 }).catch(() => null);
+                return;
+            }
+            pendingGameSelections.set(interaction.user.id, pending.game);
+            pendingRegionSelections.set(interaction.user.id, chosenRegion);
+            pendingServerLinks.set(interaction.user.id, pending.serverLink || '');
+            pendingPlaceIds.set(interaction.user.id, pending.placeId || '');
+            pendingServerIds.set(interaction.user.id, pending.serverId || '');
+            pendingGameThumbnails.set(interaction.user.id, pending.gameIconUrl || '');
+            pendingCountryCodes.set(interaction.user.id, pending.countryCode || '');
+
+            const openFormButton = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId("open_raid_application")
+                    .setLabel("⚔️ Open Raid Application Form")
+                    .setStyle(ButtonStyle.Primary)
+            );
+            await interaction.update({
+                content: `✅ Region set to ${chosenRegion}. Click the button below to open the raid application form.`,
+                components: [openFormButton],
+                flags: 64
+            }).catch(() => null);
             return;
         }
 
