@@ -33,15 +33,38 @@ client.raidStateManager = raidStateManager;
 // is destroyed, which is exactly what the removed 0b626e9 version got wrong.
 attachGatewayGuard(client);
 
-// Process-level safety nets: a single unhandled promise rejection would by
-// default CRASH the whole process (making EVERY command stop working). Log it
-// and keep the bot alive so a stray error in a collector/poller can't take the
-// bot offline.
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('⚠️ Unhandled promise rejection (keeping bot alive):', reason instanceof Error ? reason.stack || reason.message : reason);
+// Safe Discord connection-lifecycle logging (never tokens/cookies/env values).
+client.on('clientReady', (c) => {
+    console.log(`[discord] ready as ${c?.user?.tag || 'unknown'} guilds=${c?.guilds?.cache?.size ?? 0}`);
+});
+client.on('shardReady', (shardId) => {
+    console.log(`[discord] shard ${shardId} ready`);
+});
+client.on('shardDisconnect', (event, shardId) => {
+    console.log(`[discord] shard ${shardId} disconnected (code=${event?.code ?? 'unknown'})`);
+});
+client.on('shardReconnecting', (shardId) => {
+    console.log(`[discord] shard ${shardId} reconnecting`);
+});
+client.on('shardResume', (shardId, replayed) => {
+    console.log(`[discord] shard ${shardId} resumed (replayed=${replayed})`);
+});
+client.on('shardError', (error, shardId) => {
+    console.error(`[discord] shard ${shardId} error:`, error && error.message ? error.message : error);
+});
+client.on('error', (error) => {
+    console.error('[discord] client error:', error && error.stack ? error.stack : (error && error.message ? error.message : error));
+});
+client.on('warn', (info) => {
+    console.warn('[discord] warn:', info);
+});
+
+// Process-level safety nets: log message + stack, never tokens/cookies/env values.
+process.on('unhandledRejection', (reason) => {
+    console.error('⚠️ Unhandled promise rejection:', reason instanceof Error ? (reason.stack || reason.message) : reason);
 });
 process.on('uncaughtException', (error) => {
-    console.error('⚠️ Uncaught exception (keeping bot alive):', error && error.stack ? error.stack : error);
+    console.error('⚠️ Uncaught exception:', error && error.stack ? error.stack : error);
 });
 
 commandHandler.loadCommands(client);
@@ -118,13 +141,20 @@ checkRobloxCookieAuth('startup', true).catch(err => {
 console.log('[discordAuth] Discord token configured:', !!process.env.DISCORD_TOKEN && process.env.DISCORD_TOKEN.length > 10);
 console.log('[discordAuth] Starting Discord login...');
 const loginPromise = client.login(process.env.DISCORD_TOKEN);
+const loginPendingTimer = setTimeout(() => {
+    if (!client.isReady()) {
+        console.warn('[discord] login still pending after 30s');
+    }
+}, 30000);
 loginPromise.then(() => {
+    clearTimeout(loginPendingTimer);
     console.log('[discordAuth] Discord login OK.');
     // Arm the self-heal watchdog ONLY after a successful login: before READY the
     // "not ready" state is expected, and reconnecting during startup would just
     // burn Discord's identify budget.
     try { startGatewayWatchdog(client); } catch (err) { console.error('[gateway] could not arm self-heal watchdog:', (err && err.message) || err); }
 }).catch(async (error) => {
+    clearTimeout(loginPendingTimer);
     console.error('[discordAuth] Discord login FAILED - exiting so Render restarts with a fresh session:', error && error.stack ? error.stack : error);
     try { await client.destroy(); } catch (err) { /* ignore */ }
     process.exit(1);
