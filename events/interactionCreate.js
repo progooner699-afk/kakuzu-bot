@@ -1270,6 +1270,11 @@ module.exports = {
                 console.log('[access-guard] guild=%s kind=granted action=allowed', interaction.guildId);
             }
         }
+        if (interaction.isChatInputCommand() && interaction.commandName === 'raidtest') {
+            const raidTest = require('../handlers/raidTest');
+            return raidTest.execute(interaction);
+        }
+
         if (interaction.isChatInputCommand()) {
             const command = interaction.client.commands.get(interaction.commandName);
             // Never silently swallow a command: a bare `return` here makes Discord
