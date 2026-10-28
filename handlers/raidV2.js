@@ -108,8 +108,10 @@ function resolveGameThumbnailUrl(raid) {
     return GAME_THUMBNAILS[raid.targetGame] || GAME_THUMBNAIL_FALLBACK;
 }
 
-async function buildRaidAlertPayload(raid, buttons) {
+async function buildRaidAlertPayload(raid, buttons, options) {
     if (buttons === undefined) buttons = null;
+    if (!options) options = {};
+    const omitHelperSections = Boolean(options.omitHelperSections);
     const helperCount = (raid.helpers && raid.helpers.length) || 0;
     const statusText = rsm.resolveRaidStatus(raid, helperCount);
     const gameLabel = (rsm.GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown');
@@ -200,9 +202,11 @@ async function buildRaidAlertPayload(raid, buttons) {
 
     // --- Section 3: in-game helpers (manual pre-raid names from the request
     // collector). The live Help-button joins stay in the LIVE HELPERS section.
-    sections.push(text('### 🎮 IN-GAME HELPERS' + NL10 + NL10 +
-        '> **In-Game Helpers:** `' + inGameHelpersText + '`' + NL10 +
-        '> **Total Helpers Joined:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`'));
+    if (!omitHelperSections) {
+        sections.push(text('### 🎮 IN-GAME HELPERS' + NL10 + NL10 +
+            '> **In-Game Helpers:** `' + inGameHelpersText + '`' + NL10 +
+            '> **Total Helpers Joined:** `' + helperCount + ' / ' + (raid.helperLimit || 0) + '`'));
+    }
 
     // --- Section 4: description (plain text, no quote bar) ---
     sections.push(text('### 📝 DESCRIPTION' + NL10 + NL10 + '```' + NL10 + reasonText + NL10 + NL10 + '```'));
@@ -210,10 +214,13 @@ async function buildRaidAlertPayload(raid, buttons) {
     // --- Section 5: live helpers (quote-bar'd @user — ⏱ time rows) ---
     // ALWAYS emitted, even at 0 helpers, so the section never vanishes from the
     // alert — the empty state shows an explicit placeholder row instead.
-    const liveHelpersList = helperCount > 0
-        ? raid.helpers.map(formatLiveHelperRow).join(NL10)
-        : '> • None yet — be the first to join!';
-    sections.push(text('### 👥 LIVE HELPERS (' + helperCount + ' / ' + (raid.helperLimit || 0) + ')' + NL10 + NL10 + liveHelpersList));
+    if (!omitHelperSections) {
+        const liveHelpersList = helperCount > 0
+            ? raid.helpers.map(formatLiveHelperRow).join(NL10)
+            : '> • None yet — be the first to join!';
+        sections.push(text('### 👥 LIVE HELPERS (' + helperCount + ' / ' + (raid.helperLimit || 0) + ')' + NL10 + NL10 + liveHelpersList));
+    }
+
 
     // Every section/title block is followed by a native V2 Separator (type 14).
     // Because the buttons row is appended after this loop, it too is always

@@ -117,7 +117,7 @@ async function execute(interaction) {
 
   const scenario = interaction.options.getString('scenario') || 'normal';
   const { raid } = fakeScenario(scenario);
-  const payload = await raidV2.buildRaidAlertPayload(raid, disabledButtonRow());
+  const payload = await raidV2.buildRaidAlertPayload(raid, disabledButtonRow(), { omitHelperSections: true });
 
   await interaction.reply(Object.assign({}, payload, {
     allowedMentions: { parse: [] },
