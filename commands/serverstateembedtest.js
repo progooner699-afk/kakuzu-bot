@@ -35,10 +35,23 @@ function buildPayload(description, closed) {
     );
 
     container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(
-            '> 👥 TOTAL HELPERS      > 🖥️ SERVER STATUS      > 🕒 POS\n' +
-            '> 4 / 10                > 🟢 FULL                > 2'
-        )
+        new TextDisplayBuilder().setContent('> 👥 TOTAL HELPERS\n> 4 / 10')
+    );
+
+    container.addSeparatorComponents(
+        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    );
+
+    container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent('> 🖥️ SERVER STATUS\n> 🟢 FULL')
+    );
+
+    container.addSeparatorComponents(
+        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    );
+
+    container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent('> 🕒 POS\n> 2')
     );
 
     container.addSeparatorComponents(
