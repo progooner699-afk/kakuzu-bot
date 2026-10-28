@@ -103,6 +103,11 @@ function disabledButtonRow() {
   );
 }
 
+async function buildRaidTestPayload(scenario) {
+  const name = scenario || 'normal';
+  const { raid } = fakeScenario(name);
+  return raidV2.buildRaidAlertPayload(raid, disabledButtonRow(), { omitHelperSections: true });
+}
 async function execute(interaction) {
   if (!isAllowedHere(interaction)) {
     return interaction.reply({
@@ -140,6 +145,7 @@ async function registerRaidTest(client) {
 module.exports = {
   data,
   execute,
+  buildRaidTestPayload,
   registerRaidTest,
   fakeScenario,
   isAllowedHere,

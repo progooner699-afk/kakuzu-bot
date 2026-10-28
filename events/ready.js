@@ -87,13 +87,9 @@ module.exports = {
             console.warn('⚠️ Could not clear global command duplicates:', (err && err.message) || err);
         }
 
-        // Register the TEST-ONLY /raidtest command in the support guild only.
-        try {
-            const raidTest = require('../handlers/raidTest');
-            raidTest.registerRaidTest(client);
-        } catch (err) {
-            console.warn('[raidtest] registration failed:', (err && err.message) || err);
-        }
+        // /raidtest standalone registration removed; /serverstateembedtest is
+        // registered through the normal command handler.
+
 
         // Self-heal: re-register commands in any guild that failed above after a
         // short delay, so transient failures don't leave the bot command-less.
