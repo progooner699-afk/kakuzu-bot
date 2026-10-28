@@ -115,54 +115,16 @@ async function execute(interaction) {
     return interaction.reply({ content: 'You need Manage Server to use this.', flags: MessageFlags.Ephemeral });
   }
 
-  const sepField = { name: '\u200B', value: '<:v2_separator:1234567890>', inline: false };
+  const scenario = interaction.options.getString('scenario') || 'normal';
+  const { raid } = fakeScenario(scenario);
+  const payload = await raidV2.buildRaidAlertPayload(raid, disabledButtonRow());
 
-  // Embed 1: Main Details (Dark Gray Border)
-  const embed1 = new EmbedBuilder()
-    .setColor('#2F3136')
-    .setAuthor({ name: 'Kakuzu', iconURL: process.env.RAIDTEST_ROBOT_ICON_URL || 'https://example.com/robot-helmet.png' })
-    .setThumbnail(process.env.RAIDTEST_AVATAR_URL || 'https://example.com/requester-pfp.png')
-    .addFields(
-      { name: '🚨 RAID ALERT #1', value: 'Please remain patient while our helpers make their way to assist you. Someone will be with you shortly!\n\nWednesday, 28 October, 2026 11:34', inline: false },
-      sepField,
-      { name: '🎯 ENEMY NAMES', value: '```\nEnemy Clan: 5\nEnemies: 5\n```', inline: false },
-      sepField,
-      { name: '📋 DETAILS', value: '**Game:** The Strongest Battlegrounds\n**Raid ID:** `1`\n**Region:** `ASIA`\n**Country:** India\n**Status:** 🟢 `OPEN`\n**Time Requested:** 28 October 2026 11:34', inline: false }
-    );
+  await interaction.reply(Object.assign({}, payload, {
+    allowedMentions: { parse: [] },
+  }));
 
-  // Embed 2: Raider Status (Bright Green Border)
-  const embed2 = new EmbedBuilder()
-    .setColor('#2ECC71')
-    .addFields(
-      { name: '👥 SERVER & HELPER STATS', value: 'Server 40/40 FULL | Helpers 2/5 | Waiting 2', inline: false },
-      sepField,
-      { name: '📝 HELPER LIST', value: '*(waiting order is approximate)*\n1. PlayerOne [ IN SERVER ] 2m\n2. PlayerTwo [ IN SERVER ] 40s\n3. PlayerThree [ WAITING #1 ] 1m 20s\n4. PlayerFour [ WAITING #2 ] 45s', inline: false },
-      sepField,
-      { name: '📝 ALREADY IN GAME', value: 'PlayerFive, PlayerSix, PlayerSeven, PlayerEight, PlayerNine', inline: false },
-      sepField,
-      { name: '📝 DESCRIPTION', value: '```\nEnemy clan at spawn, need 5 helpers.\n```', inline: false }
-    );
-
-  // Buttons Row
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId('test_help')
-      .setLabel('Help')
-      .setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId('test_edit')
-      .setLabel('Edit')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId('test_close')
-      .setLabel('CLOSE RAID')
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  await interaction.reply({
-    embeds: [embed1, embed2],
-    components: [row],
-  });
+  const timer = setTimeout(() => { interaction.deleteReply().catch(() => {}); }, 10 * 60 * 1000);
+  if (timer.unref) timer.unref();
 }
 
 async function registerRaidTest(client) {

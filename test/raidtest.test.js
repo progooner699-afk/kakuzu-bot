@@ -63,16 +63,15 @@ test('execute refuses non-admin', async () => {
   assert.ok(interaction._reply.content.includes('Manage Server'));
 });
 
-test('execute sends dual-embed mock layout on success', async () => {
+test('execute sends V2 raid alert on success', async () => {
   const interaction = {
     guildId: raidTest.TEST_GUILD_ID,
     memberPermissions: { has: () => true },
     options: { getString: () => 'normal' },
     reply: async (p) => { interaction._reply = p; },
+    deleteReply: async () => {},
   };
   await raidTest.execute(interaction);
-  assert.strictEqual(interaction._reply.embeds.length, 2);
+  assert.strictEqual(interaction._reply.flags, 1 << 15);
   assert.strictEqual(interaction._reply.components.length, 1);
-  assert.strictEqual(interaction._reply.embeds[0].data.color, 0x2f3136);
-  assert.strictEqual(interaction._reply.embeds[1].data.color, 0x2ecc71);
 });
