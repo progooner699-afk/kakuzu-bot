@@ -37,7 +37,8 @@ function buildPayload(description, closed) {
     container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent(
             '```\n' +
-            '👥 TOTAL HELPERS 4 / 10 -|- 🖥️ SERVER STATUS 🟢 FULL -|- ⏱️ WAITING 2\n' +
+            '👥 TOTAL HELPERS     -|-    🖥️ SERVER STATUS      -|-    ⏱️ WAITING\n' +
+            '4 / 10              -|-    🟢 FULL              -|-        2\n' +
             '```'
         )
     );
@@ -75,7 +76,7 @@ function buildPayload(description, closed) {
     container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent(
             HELPERS.map((h) =>
-                '> `' + h.name + '` `' + h.emoji + ' ' + h.status + '` ⏱️ ' + h.time
+                '> • ' + h.name + ' `' + h.emoji + ' ' + h.status + '` ⏱️ ' + h.time
             ).join('\n')
         )
     );
