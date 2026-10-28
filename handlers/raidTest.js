@@ -1,6 +1,6 @@
 'use strict';
 
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const raidV2 = require('./raidV2');
 
 const DEFAULT_TEST_GUILD_ID = '1536031049774010408';
@@ -105,23 +105,74 @@ function disabledButtonRow() {
 
 async function execute(interaction) {
   if (!isAllowedHere(interaction)) {
-    return interaction.reply({ content: 'This command is not available here.', flags: MessageFlags.Ephemeral });
+    return interaction.reply({
+      content: 'This test command is restricted to the Kakuzu Support server.',
+      ephemeral: true,
+    });
   }
   const perms = interaction.memberPermissions;
   if (!perms || !(perms.has(PermissionFlagsBits.Administrator) || perms.has(PermissionFlagsBits.ManageGuild))) {
     return interaction.reply({ content: 'You need Manage Server to use this.', flags: MessageFlags.Ephemeral });
   }
 
-  const scenario = interaction.options.getString('scenario') || 'normal';
-  const { raid } = fakeScenario(scenario);
-  const payload = await raidV2.buildRaidAlertPayload(raid, disabledButtonRow());
+  // Embed 1: Main Alert & Details
+  const embed1 = new EmbedBuilder()
+    .setColor('#2F3136')
+    .setDescription(
+      '**RAID ALERT #1**\n' +
+      'Please remain patient while our helpers make their way to assist you. Someone will be with you shortly!\n\n' +
+      'Wednesday, 28 October, 2026 11:34\n\n' +
+      '**ENEMY NAMES**\n' +
+      '```\n' +
+      'Enemy Clan: 5\n' +
+      'Enemies: 5\n' +
+      '```\n' +
+      '**DETAILS**\n' +
+      '**Game:** The Strongest Battlegrounds\n' +
+      '**Raid ID:** `1`\n' +
+      '**Region:** `ASIA`\n' +
+      '**Country:** India\n' +
+      '**Status:** `OPEN`\n' +
+      '**Time Requested:** 28 October 2026 11:34'
+    );
 
-  await interaction.reply(Object.assign({}, payload, {
-    allowedMentions: { parse: [] },
-  }));
+  // Embed 2: Helpers & Server Info (Green Accent)
+  const embed2 = new EmbedBuilder()
+    .setColor('#2ECC71')
+    .setDescription(
+      '**Server 40/40 FULL** | **Helpers 2/5** | **Waiting 2**\n' +
+      '───────────────────────────────────────\n' +
+      '**HELPER STATS** *(waiting order is approximate)*\n' +
+      '1. PlayerOne `IN SERVER` 2m\n' +
+      '2. PlayerTwo `IN SERVER` 40s\n' +
+      '3. PlayerThree `WAITING #1` 1m 20s\n' +
+      '4. PlayerFour `WAITING #2` 45s\n\n' +
+      '**ALREADY IN GAME** *(other servers)*\n' +
+      'PlayerFive, PlayerSix, PlayerSeven, PlayerEight, PlayerNine\n\n' +
+      '**DESCRIPTION**\n' +
+      'Enemy clan at spawn, need 5 helpers.'
+    );
 
-  const timer = setTimeout(() => { interaction.deleteReply().catch(() => {}); }, 10 * 60 * 1000);
-  if (timer.unref) timer.unref();
+  // Buttons Row
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('test_help')
+      .setLabel('Help')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId('test_edit')
+      .setLabel('Edit')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('test_close')
+      .setLabel('CLOSE RAID')
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  await interaction.reply({
+    embeds: [embed1, embed2],
+    components: [row],
+  });
 }
 
 async function registerRaidTest(client) {

@@ -49,7 +49,7 @@ test('execute refuses non-test guild', async () => {
     reply: async (p) => { interaction._reply = p; },
   };
   await raidTest.execute(interaction);
-  assert.ok(interaction._reply.content.includes('not available'));
+  assert.ok(interaction._reply.content.includes('restricted to the Kakuzu Support server'));
 });
 
 test('execute refuses non-admin', async () => {
@@ -61,4 +61,18 @@ test('execute refuses non-admin', async () => {
   };
   await raidTest.execute(interaction);
   assert.ok(interaction._reply.content.includes('Manage Server'));
+});
+
+test('execute sends dual-embed mock layout on success', async () => {
+  const interaction = {
+    guildId: raidTest.TEST_GUILD_ID,
+    memberPermissions: { has: () => true },
+    options: { getString: () => 'normal' },
+    reply: async (p) => { interaction._reply = p; },
+  };
+  await raidTest.execute(interaction);
+  assert.strictEqual(interaction._reply.embeds.length, 2);
+  assert.strictEqual(interaction._reply.components.length, 1);
+  assert.strictEqual(interaction._reply.embeds[0].data.color, 0x2f3136);
+  assert.strictEqual(interaction._reply.embeds[1].data.color, 0x2ecc71);
 });
