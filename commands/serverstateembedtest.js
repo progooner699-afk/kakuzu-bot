@@ -103,4 +103,5 @@ module.exports = {
     data,
     execute,
     buildPayload,
+    deferFirst: false,
 };
