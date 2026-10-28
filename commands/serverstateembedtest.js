@@ -48,22 +48,6 @@ function buildPayload(description, closed) {
     );
 
     container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('👥 **HELPER LIST**')
-    );
-
-    container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(
-            HELPERS.map((h) =>
-                '> `' + h.name + '` `' + h.emoji + ' ' + h.status + '` ⏱️ ' + h.time
-            ).join('\n')
-        )
-    );
-
-    container.addSeparatorComponents(
-        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent('🎮 **ALREADY IN GAME**')
     );
     container.addTextDisplayComponents(
@@ -79,6 +63,22 @@ function buildPayload(description, closed) {
     );
     container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent('> ' + String(description || SAMPLE_DESCRIPTION).replace(/\n/g, '\n> '))
+    );
+
+    container.addSeparatorComponents(
+        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    );
+
+    container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent('👥 **HELPER LIST**')
+    );
+
+    container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(
+            HELPERS.map((h) =>
+                '> `' + h.name + '` `' + h.emoji + ' ' + h.status + '` ⏱️ ' + h.time
+            ).join('\n')
+        )
     );
 
     return { flags: V2_FLAGS, components: [container] };
