@@ -1380,26 +1380,6 @@ module.exports = {
             });
             if (handled) return;
         }
-
-        // ===== SERVER STATE EMBED TEST (/serverstateembedtest) =====
-        if (interaction.customId && typeof interaction.customId === 'string' && interaction.customId.startsWith('serverstateembedtest_')) {
-            const ssetCmd = require('../commands/serverstateembedtest');
-            const handled = await ssetCmd.handleComponent(interaction).catch((err) => {
-                console.error('[serverstateembedtest] dispatch error:', err);
-                const errText = '❌ Server state test error: `' + String((err && err.message) || err).slice(0, 300) + '`';
-                try {
-                    if (interaction.deferred || interaction.replied) {
-                        interaction.followUp({ content: errText, flags: 64 }).catch(() => null);
-                    } else {
-                        interaction.reply({ content: errText, flags: 64 }).catch(() => null);
-                    }
-                } catch (e) { /* swallow */ }
-                return true;
-            });
-            if (handled) return;
-        }
-
-
         // Handle raid request buttons — the backuppanel "Request backup" button
         // (request_backup), plus the legacy request_raid id so panels posted by
         // the old /requestraid command keep working. Auto-detect game/region/server.

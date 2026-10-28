@@ -82,29 +82,8 @@ function buildPayload(description, closed) {
         new TextDisplayBuilder().setContent('> ' + String(description || SAMPLE_DESCRIPTION).replace(/\n/g, '\n> '))
     );
 
-    const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId('serverstateembedtest_help')
-            .setLabel('🛟 Help')
-            .setStyle(ButtonStyle.Success)
-            .setDisabled(!!closed),
-        new ButtonBuilder()
-            .setCustomId('serverstateembedtest_edit')
-            .setLabel('✏️ Edit')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(!!closed),
-        new ButtonBuilder()
-            .setCustomId('serverstateembedtest_close')
-            .setLabel('✖️ Close Raid')
-            .setStyle(ButtonStyle.Danger)
-            .setDisabled(!!closed)
-    );
-
-    container.addSeparatorComponents(
-        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    return { flags: V2_FLAGS, components: [container, row] };
+    const row = null;
+    return { flags: V2_FLAGS, components: [container] };
 }
 
 const data = new SlashCommandBuilder()
@@ -113,59 +92,15 @@ const data = new SlashCommandBuilder()
 
 async function execute(interaction) {
     const payload = buildPayload(SAMPLE_DESCRIPTION, false);
-    await interaction.reply(Object.assign({}, payload, { allowedMentions: { parse: [] } }));
-}
-
-async function handleComponent(interaction) {
-    const customId = String(interaction.customId || '');
-    if (!customId.startsWith('serverstateembedtest_')) return false;
-
-    if (customId === 'serverstateembedtest_help') {
-        await interaction.reply({ content: '🛟 Test help clicked.', flags: MessageFlags.Ephemeral });
-        return true;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    if (interaction.channel) {
+        await interaction.channel.send(Object.assign({}, payload, { allowedMentions: { parse: [] } }));
     }
-
-    if (customId === 'serverstateembedtest_edit') {
-        const modal = new ModalBuilder()
-            .setCustomId('serverstateembedtest_editmodal_' + interaction.message.id)
-            .setTitle('Edit Test Description');
-        const input = new TextInputBuilder()
-            .setCustomId('description')
-            .setLabel('Description')
-            .setStyle(TextInputStyle.Paragraph)
-            .setRequired(false)
-            .setValue(SAMPLE_DESCRIPTION);
-        modal.addComponents(new ActionRowBuilder().addComponents(input));
-        await interaction.showModal(modal);
-        return true;
-    }
-
-    if (customId === 'serverstateembedtest_close') {
-        try {
-            const closedPayload = buildPayload(SAMPLE_DESCRIPTION, true);
-            await interaction.update(Object.assign({}, closedPayload, { allowedMentions: { parse: [] } }));
-        } catch (e) {
-            await interaction.reply({ content: 'Test closed.', flags: MessageFlags.Ephemeral }).catch(() => null);
-        }
-        return true;
-    }
-
-    if (customId.startsWith('serverstateembedtest_editmodal_')) {
-        const newDesc = interaction.fields.getTextInputValue('description');
-        const payload = buildPayload(newDesc || SAMPLE_DESCRIPTION, false);
-        if (interaction.message) {
-            await interaction.message.edit(Object.assign({}, payload, { allowedMentions: { parse: [] } })).catch(() => null);
-        }
-        await interaction.reply({ content: '✅ Description updated.', flags: MessageFlags.Ephemeral });
-        return true;
-    }
-
-    return false;
+    await interaction.deleteReply().catch(() => null);
 }
 
 module.exports = {
     data,
     execute,
-    handleComponent,
     buildPayload,
 };
