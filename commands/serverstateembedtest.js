@@ -36,13 +36,9 @@ function buildPayload(description, closed) {
 
     container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent(
-            '> 📊 **Statistics Labels**\n' +
             '```\n' +
-            '👥 TOTAL HELPERS       -|-       🖥️ SERVER STATUS       -|-       🕒 POS\n' +
-            '```\n' +
-            '> 📈 **Statistics Values**\n' +
-            '```\n' +
-            '4 / 10                -|-       🟢 FULL                -|-       2\n' +
+            '👥 TOTAL HELPERS  -|-  🖥️ SERVER STATUS  -|-  🕒 POS\n' +
+            '4 / 10           -|-  🟢 FULL           -|-  2\n' +
             '```'
         )
     );
