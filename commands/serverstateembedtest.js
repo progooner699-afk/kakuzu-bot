@@ -64,17 +64,6 @@ function buildPayload(description, closed) {
     );
 
     container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('### 📄 DESCRIPTION')
-    );
-    container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('> ' + String(description || SAMPLE_DESCRIPTION).replace(/\n/g, '\n> '))
-    );
-
-    container.addSeparatorComponents(
-        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent('### 👥 HELPER LIST')
     );
 
