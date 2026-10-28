@@ -115,42 +115,59 @@ async function execute(interaction) {
     return interaction.reply({ content: 'You need Manage Server to use this.', flags: MessageFlags.Ephemeral });
   }
 
-  // Embed 1: Main Alert & Details
+  const sep = '───────────────────────────────';
+
+  // Embed 1: Main Details (Dark Gray Border)
   const embed1 = new EmbedBuilder()
     .setColor('#2F3136')
+    .setAuthor({ name: 'Kakuzu', iconURL: process.env.RAIDTEST_ROBOT_ICON_URL || 'https://example.com/robot-helmet.png' })
+    .setThumbnail(process.env.RAIDTEST_AVATAR_URL || 'https://example.com/requester-pfp.png')
     .setDescription(
-      '**RAID ALERT #1**\n' +
-      'Please remain patient while our helpers make their way to assist you. Someone will be with you shortly!\n\n' +
-      'Wednesday, 28 October, 2026 11:34\n\n' +
-      '**ENEMY NAMES**\n' +
+      '> 🚨 **RAID ALERT #1**\n' +
+      '> Please remain patient while our helpers make their way to assist you. Someone will be with you shortly!\n' +
+      '>\n' +
+      '> Wednesday, 28 October, 2026 11:34\n' +
+      '>\n' +
+      '> ' + sep + '\n' +
+      '> 🎯 **ENEMY NAMES**\n' +
       '```\n' +
       'Enemy Clan: 5\n' +
       'Enemies: 5\n' +
       '```\n' +
-      '**DETAILS**\n' +
-      '**Game:** The Strongest Battlegrounds\n' +
-      '**Raid ID:** `1`\n' +
-      '**Region:** `ASIA`\n' +
-      '**Country:** India\n' +
-      '**Status:** `OPEN`\n' +
-      '**Time Requested:** 28 October 2026 11:34'
+      '> ' + sep + '\n' +
+      '> 📋 **DETAILS**\n' +
+      '> **Game:** The Strongest Battlegrounds\n' +
+      '> **Raid ID:** `1`\n' +
+      '> **Region:** `ASIA`\n' +
+      '> **Country:** India\n' +
+      '> **Status:** 🟢 `OPEN`\n' +
+      '> **Time Requested:** 28 October 2026 11:34'
     );
 
-  // Embed 2: Helpers & Server Info (Green Accent)
+  // Embed 2: Raider Status (Bright Green Border)
   const embed2 = new EmbedBuilder()
     .setColor('#2ECC71')
     .setDescription(
-      '**Server 40/40 FULL** | **Helpers 2/5** | **Waiting 2**\n' +
-      '───────────────────────────────────────\n' +
-      '**HELPER STATS** *(waiting order is approximate)*\n' +
-      '1. PlayerOne `IN SERVER` 2m\n' +
-      '2. PlayerTwo `IN SERVER` 40s\n' +
-      '3. PlayerThree `WAITING #1` 1m 20s\n' +
-      '4. PlayerFour `WAITING #2` 45s\n\n' +
-      '**ALREADY IN GAME** *(other servers)*\n' +
-      'PlayerFive, PlayerSix, PlayerSeven, PlayerEight, PlayerNine\n\n' +
-      '**DESCRIPTION**\n' +
-      'Enemy clan at spawn, need 5 helpers.'
+      '> 👥 **SERVER & HELPER STATS**\n' +
+      '> ' + sep + '\n' +
+      '> Server 40/40 FULL | Helpers 2/5 | Waiting 2\n' +
+      '> ' + sep + '\n' +
+      '> 📝 **HELPER LIST** *(waiting order is approximate)*\n' +
+      '> ' + sep + '\n' +
+      '> 1. PlayerOne [ IN SERVER ] 2m\n' +
+      '> 2. PlayerTwo [ IN SERVER ] 40s\n' +
+      '> 3. PlayerThree [ WAITING #1 ] 1m 20s\n' +
+      '> 4. PlayerFour [ WAITING #2 ] 45s\n' +
+      '> ' + sep + '\n' +
+      '> 📝 **ALREADY IN GAME**\n' +
+      '> ' + sep + '\n' +
+      '> PlayerFive, PlayerSix, PlayerSeven, PlayerEight, PlayerNine\n' +
+      '> ' + sep + '\n' +
+      '> 📝 **DESCRIPTION**\n' +
+      '> ' + sep + '\n' +
+      '```\n' +
+      'Enemy clan at spawn, need 5 helpers.\n' +
+      '```'
     );
 
   // Buttons Row
