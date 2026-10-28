@@ -48,7 +48,7 @@ function buildPayload(description, closed) {
     );
 
     container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('🎮 **ALREADY IN GAME**')
+        new TextDisplayBuilder().setContent('### 🎮 ALREADY IN GAME')
     );
     container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent('> PlayerFive, PlayerSix, PlayerSeven, PlayerEight, PlayerNine')
@@ -59,7 +59,7 @@ function buildPayload(description, closed) {
     );
 
     container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('📄 **DESCRIPTION**')
+        new TextDisplayBuilder().setContent('### 📄 DESCRIPTION')
     );
     container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent('> ' + String(description || SAMPLE_DESCRIPTION).replace(/\n/g, '\n> '))
@@ -70,7 +70,7 @@ function buildPayload(description, closed) {
     );
 
     container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('👥 **HELPER LIST**')
+        new TextDisplayBuilder().setContent('### 👥 HELPER LIST')
     );
 
     container.addTextDisplayComponents(
