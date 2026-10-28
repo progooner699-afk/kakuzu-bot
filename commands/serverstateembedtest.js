@@ -54,8 +54,8 @@ function buildPayload(description, closed) {
     container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent(
             HELPERS.map((h) =>
-                '> `' + h.name + '`\u3000' + h.emoji + ' `' + h.status + '`\u3000⏱️ `' + h.time + '`'
-            ).join('\n\n')
+                '> `' + h.name + '` `' + h.emoji + ' ' + h.status + '` ⏱️ ' + h.time
+            ).join('\n')
         )
     );
 
