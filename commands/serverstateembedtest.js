@@ -81,7 +81,9 @@ function buildPayload(description, closed) {
         )
     );
 
-    return { flags: V2_FLAGS, components: [container] };
+    const containerJson = container.toJSON();
+    containerJson.size = 'large';
+    return { flags: V2_FLAGS, components: [containerJson] };
 }
 
 const data = new SlashCommandBuilder()
