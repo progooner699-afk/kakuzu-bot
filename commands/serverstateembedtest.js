@@ -38,7 +38,7 @@ function buildPayload(description, closed) {
         new TextDisplayBuilder().setContent(
             '```\n' +
             '👥 TOTAL HELPERS         🖥️ SERVER STATUS        🕒 POS\n' +
-            '   4 / 10                🟢 FULL                       2\n' +
+            '    4 / 10                 🟢 FULL                    2\n' +
             '```'
         )
     );
