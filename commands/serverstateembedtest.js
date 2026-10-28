@@ -16,8 +16,8 @@ const SAMPLE_DESCRIPTION = 'Enemy clan at spawn, need 5 helpers.';
 const HELPERS = [
     { name: 'PlayerOne', emoji: '🟢', status: 'IN GAME', time: '2m' },
     { name: 'PlayerTwo', emoji: '🟢', status: 'IN GAME', time: '40s' },
-    { name: 'PlayerThree', emoji: '🟡', status: 'WAITING #1', time: '1m 20s' },
-    { name: 'PlayerFour', emoji: '🟡', status: 'WAITING #2', time: '45s' },
+    { name: 'PlayerThree', emoji: '🟡', status: 'POS #1', time: '1m 20s' },
+    { name: 'PlayerFour', emoji: '🟡', status: 'POS #2', time: '45s' },
 ];
 
 function buildPayload(description, closed) {
@@ -37,8 +37,10 @@ function buildPayload(description, closed) {
     container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent(
             '```\n' +
-            '👥 TOTAL HELPERS     -|-    🖥️ SERVER STATUS      -|-    ⏱️ WAITING\n' +
-            '4 / 10              -|-    🟢 FULL              -|-        2\n' +
+            '👥 TOTAL HELPERS    -|-    🖥️ SERVER STATUS    -|-    🕒 POS\n' +
+            '```\n' +
+            '```\n' +
+            '4 / 10              -|-    🟢 FULL              -|-    2\n' +
             '```'
         )
     );
@@ -76,7 +78,7 @@ function buildPayload(description, closed) {
     container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent(
             HELPERS.map((h) =>
-                '> • ' + h.name + ' `' + h.emoji + ' ' + h.status + '` ⏱️ ' + h.time
+                '> • `' + h.name + '` `' + h.emoji + ' ' + h.status + '` ⏱️ ' + h.time
             ).join('\n')
         )
     );
