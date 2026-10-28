@@ -2,22 +2,23 @@
 
 const {
     SlashCommandBuilder,
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle,
     ContainerBuilder,
     TextDisplayBuilder,
     SeparatorBuilder,
     SeparatorSpacingSize,
-    ModalBuilder,
-    TextInputBuilder,
-    TextInputStyle,
     MessageFlags,
 } = require('discord.js');
 
 const V2_FLAGS = 1 << 15;
 
 const SAMPLE_DESCRIPTION = 'Enemy clan at spawn, need 5 helpers.';
+
+const HELPERS = [
+    { name: 'PlayerOne', emoji: '🟢', status: 'IN GAME', time: '2m' },
+    { name: 'PlayerTwo', emoji: '🟢', status: 'IN GAME', time: '40s' },
+    { name: 'PlayerThree', emoji: '🟡', status: 'WAITING #1', time: '1m 20s' },
+    { name: 'PlayerFour', emoji: '🟡', status: 'WAITING #2', time: '45s' },
+];
 
 function buildPayload(description, closed) {
     const container = new ContainerBuilder().setAccentColor(0x2F3136);
@@ -49,14 +50,12 @@ function buildPayload(description, closed) {
     container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent('👥 **HELPER LIST**')
     );
+
     container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent(
-            '```\n' +
-            '1. PlayerOne  [ IN SERVER ]   2m\n' +
-            '2. PlayerTwo  [ IN SERVER ]   40s\n' +
-            '3. PlayerThree [ WAITING #1 ] 1m 20s\n' +
-            '4. PlayerFour [ WAITING #2 ] 45s\n' +
-            '```'
+            HELPERS.map((h) =>
+                '> `' + h.name + '`\u3000' + h.emoji + ' `' + h.status + '`\u3000⏱️ `' + h.time + '`'
+            ).join('\n\n')
         )
     );
 
@@ -82,7 +81,6 @@ function buildPayload(description, closed) {
         new TextDisplayBuilder().setContent('> ' + String(description || SAMPLE_DESCRIPTION).replace(/\n/g, '\n> '))
     );
 
-    const row = null;
     return { flags: V2_FLAGS, components: [container] };
 }
 
