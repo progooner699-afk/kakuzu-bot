@@ -27,7 +27,7 @@ function buildPayload(description, closed) {
         new TextDisplayBuilder().setContent('# 📊 SERVER & HELPER STATS')
     );
     container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('┃ Live raid participation and server information.')
+        new TextDisplayBuilder().setContent('┃ Track helper capacity, server status, and player positions to help raid members coordinate assistance and understand live server activity at a glance.')
     );
 
     container.addSeparatorComponents(
@@ -35,23 +35,10 @@ function buildPayload(description, closed) {
     );
 
     container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('> 👥 TOTAL HELPERS\n> 4 / 10')
-    );
-
-    container.addSeparatorComponents(
-        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('> 🖥️ SERVER STATUS\n> 🟢 FULL')
-    );
-
-    container.addSeparatorComponents(
-        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('> 🕒 POS\n> 2')
+        new TextDisplayBuilder().setContent(
+            '👥 TOTAL HELPERS   -|-   🖥️ SERVER STATUS   -|-   🕒 POS\n' +
+            '4 / 10             -|-   🟢 FULL                   -|-   2'
+        )
     );
 
     container.addSeparatorComponents(
