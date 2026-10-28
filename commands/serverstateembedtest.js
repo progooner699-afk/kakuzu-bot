@@ -29,7 +29,7 @@ function buildPayload(description, closed) {
     const container = new ContainerBuilder().setAccentColor(0x2F3136);
 
     container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('# 📊 SERVER & HELPER STATS')
+        new TextDisplayBuilder().setContent('### 📊 SERVER & HELPER STATS')
     );
     container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent('┃ Track helper capacity, server status, and player positions to help raid members coordinate assistance and understand live server activity at a glance.')
@@ -42,8 +42,8 @@ function buildPayload(description, closed) {
     container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent(
             '```\\n' +
-            '👥 TOTAL HELPERS         🖥️ SERVER STATUS        🕒 POS\\n' +
-            '    4 / 10                 🟢 FULL                    2\\n' +
+            '👥 TOTAL HELPERS         🖥️ SERVER STATUS        🕒 POS\n' +
+            '    4 / 10                 🟢 FULL                    2\n' +
             '```'
         )
     );
