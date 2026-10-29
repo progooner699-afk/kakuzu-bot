@@ -1877,7 +1877,7 @@ module.exports = {
             const robloxUserId = verificationData?.roblox_user_id || "1";
             const robloxAvatarUrl = verificationData?.roblox_avatar_url || null;
 
-            const raid = raidStateManager.createRaid({
+            const raid = await raidStateManager.createRaid({
                 requesterId: userId,
                 requesterTag: interaction.user.tag,
                 targetGame: game,

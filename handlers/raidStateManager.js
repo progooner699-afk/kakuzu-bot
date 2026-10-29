@@ -7,11 +7,8 @@ const PRESENCE_FETCH_TIMEOUT_MS = 8000;
 const { EmbedBuilder, ChannelType } = require('discord.js');
 const leaderboardDb = require('./leaderboardDb');
 const robloxApi = require('./robloxApi');
-// Permanent Supabase raid storage (kakuzu_raids) and raid-channel config
-// (kakuzu_raid_channels). Supabase is the source of truth; local JSON is the
-// live-session cache. Every guild keeps its own rows keyed by guild_id.
-const raidSupabase = require('./raidSupabase');
 const raidChannelSupabase = require('./raidChannelSupabase');
+const raidCounterSupabase = require('./raidCounterSupabase');
 // Pure verification core: tiered server matching + helper active/idle transitions.
 const { evaluateHelperMatch, noteHelperActiveState, normalizeId } = require('./helperVerification');
 
@@ -153,11 +150,6 @@ function saveSettings(guildId, settings) {
     fs.writeFileSync(getSettingsPath(guildId), JSON.stringify(settings, null, 4));
 }
 
-/**
- * Load raid settings for a guild, resolving the result channel from Supabase
- * when the local settings.json is missing it. Supabase is the durable source
- * of truth so settings survive restarts and redeployments.
- */
 async function loadRaidSettings(guildId) {
     const local = loadSettings(guildId) || {};
     if (!local.resultChannel) {
@@ -333,6 +325,13 @@ async function createRaid(options) {
         throw new Error('User already has an active raid or is blocked from creating new raids.');
     }
     const raids = loadRaids(options.guildId);
+    // Restore counter from Supabase if local has 0.
+    if (!raids.lastRaidId) {
+        try {
+            const counter = await raidCounterSupabase.getRaidCounter(options.guildId);
+            if (counter && counter > 0) raids.lastRaidId = counter;
+        } catch (_) { /* Supabase unavailable */ }
+    }
     if (!isDraft) resetLeaderboardsIfNeeded(raids);
     const nextId = raids.lastRaidId + 1;
 // Per-server raid index: the DISPLAYED raid number (alert title / Raid ID / count.
@@ -376,31 +375,16 @@ async function createRaid(options) {
     };
     raids.lastRaidId = nextId;
     raids.serverRaidCount[serverKey]= serverIndex;
+    // Persist the numeric raid counter to Supabase so it survives restarts.
+    try { raidCounterSupabase.setRaidCounter(options.guildId, nextId).catch(() => {}); } catch (_) { /* ignore */ }
+
+    // Persist the numeric raid counter to Supabase so it survives restarts.
+    try { raidCounterSupabase.setRaidCounter(options.guildId, nextId).catch(() => {}); } catch (_) { /* ignore */ }
     raids.raids.push(raid);
     if (!isDraft && raid.requesterId) {
         raids.activeRaidByOwner[raid.requesterId] = raid.raidId;
     }
     saveRaids(options.guildId, raids);
-
-    // Persist to Supabase so raid survives restarts/redeploys.
-    if (!isDraft) {
-        try {
-            await raidSupabase.createRaid(options.guildId, options.requesterId, {
-                targetGame: options.targetGame,
-                placeId: options.placeId,
-                serverId: options.serverId,
-                enemyClanNames: options.enemyClanNames,
-                enemyNames: options.enemyNames,
-                region: options.region,
-                countryCode: options.countryCode,
-                reason: options.reason,
-                helperLimit: options.helperLimit,
-            });
-        } catch (err) {
-            console.error('[raid state] Supabase createRaid failed guildId=' + options.guildId + ' raidId=' + raid.raidId + ':', (err && err.message) || err);
-        }
-    }
-
     return raid;
 }
 
@@ -488,7 +472,7 @@ function removeHelper(raidId, userId, guildId) {
     return { success: true, raid };
 }
 
-async function closeRaid(raidId, options = {}, guildId) {
+function closeRaid(raidId, options = {}, guildId) {
     const raids = loadRaids(guildId);
     const raid = raids.raids.find(item => item.raidId === raidId);
     if (!raid) return null;
@@ -521,21 +505,6 @@ async function closeRaid(raidId, options = {}, guildId) {
         delete raids.activeRaidByOwner[raid.requesterId];
     }
     saveRaids(guildId, raids);
-
-    // Persist closure to Supabase so it survives restarts.
-    try {
-        await raidSupabase.closeRaid(
-            raidId,
-            raid.outcome || null,
-            raid.mvpUserId || null,
-            raid.resultChannelId || null,
-            raid.messageId || null,
-            raid.channelId || null
-        );
-    } catch (err) {
-        console.error('[raid state] Supabase closeRaid failed guildId=' + guildId + ' raidId=' + raidId + ':', (err && err.message) || err);
-    }
-
     return raid;
 }
 
@@ -555,19 +524,13 @@ function closeAllRaids(guildId) {
     return closedCount;
 }
 
-async function updateRaidMessageReference(raidId, channelId, messageId, guildId) {
+function updateRaidMessageReference(raidId, channelId, messageId, guildId) {
     const raids = loadRaids(guildId);
     const raid = raids.raids.find(item => item.raidId === raidId);
     if (!raid) return;
     raid.channelId = channelId;
     raid.messageId = messageId;
     saveRaids(guildId, raids);
-
-    try {
-        await raidSupabase.updateRaidMessageReference(raidId, messageId);
-    } catch (err) {
-        console.error('[raid state] Supabase updateRaidMessageReference failed guildId=' + guildId + ' raidId=' + raidId + ':', (err && err.message) || err);
-    }
 }
 
 /**
@@ -675,19 +638,12 @@ function formatRaidMessage(raid, guildId = null) {
     return embeds;
 }
 
-async function setRaidMvp(raidId, mvpUserId, guildId) {
+function setRaidMvp(raidId, mvpUserId, guildId) {
     const raids = loadRaids(guildId);
     const raid = raids.raids.find(item => item.raidId === raidId);
     if (!raid) return null;
     raid.mvpUserId = mvpUserId;
     saveRaids(guildId, raids);
-
-    try {
-        await raidSupabase.updateRaidMvp(raidId, mvpUserId);
-    } catch (err) {
-        console.error('[raid state] Supabase setRaidMvp failed guildId=' + guildId + ' raidId=' + raidId + ':', (err && err.message) || err);
-    }
-
     return raid;
 }
 
@@ -701,7 +657,7 @@ async function setRaidMvp(raidId, mvpUserId, guildId) {
  * disk and would otherwise discard an in-memory mutation.
  * @returns {object|null} the updated raid, or null when not found.
  */
-async function setRaidServerId(raidId, serverId, guildId) {
+function setRaidServerId(raidId, serverId, guildId) {
     const raids = loadRaids(guildId);
     const raid = raids.raids.find(item => item.raidId === raidId);
     if (!raid) return null;
@@ -709,13 +665,6 @@ async function setRaidServerId(raidId, serverId, guildId) {
     if (raid.serverId === next) return raid;
     raid.serverId = next;
     saveRaids(guildId, raids);
-
-    try {
-        await raidSupabase.updateRaidServerId(raidId, serverId);
-    } catch (err) {
-        console.error('[raid state] Supabase setRaidServerId failed guildId=' + guildId + ' raidId=' + raidId + ':', (err && err.message) || err);
-    }
-
     return raid;
 }
 
@@ -1000,20 +949,13 @@ async function syncLeaderboardMessage(client, guildId) {
 // Mark a previously-drafted (PENDING) raid as genuinely open. This is only
 // invoked AFTER the raid alert embed has actually been posted to the channel,
 // so a raid is never considered open until real helpers can see it.
-async function setRaidOpen(raidId, guildId) {
+function setRaidOpen(raidId, guildId) {
     const raids = loadRaids(guildId);
     const raid = raids.raids.find(item => item.raidId === raidId);
     if (!raid) return null;
     raid.status = 'OPEN';
     if (raid.requesterId) raids.activeRaidByOwner[raid.requesterId] = raidId;
     saveRaids(guildId, raids);
-
-    try {
-        await raidSupabase.updateRaidStatus(raidId, 'OPEN');
-    } catch (err) {
-        console.error('[raid state] Supabase setRaidOpen failed guildId=' + guildId + ' raidId=' + raidId + ':', (err && err.message) || err);
-    }
-
     return raid;
 }
 
