@@ -852,7 +852,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
         streakMessage = `**Current Streak:** 💀 ${raidsData.streakCount} Matches consecutive!`;
     }
 
-    const sendResultEmbed = async (attachments = [], rallyPicUrl = null) => {
+    const sendResultEmbed = async (attachments = [], rallyPicUrl = null, endersNote = null) => {
         if (!settings.resultChannel) return;
         const targetResultChannel = await interaction.client.channels.fetch(settings.resultChannel).catch(() => null);
         if (!targetResultChannel || !targetResultChannel.isTextBased()) return;
@@ -882,7 +882,8 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             rallyPicUrl: permanentRallyUrl,
             proofUrls: permanentProofUrls,
             streakMessage,
-            endedAtMs: raid.closedAt || Date.now()
+            endedAtMs: raid.closedAt || Date.now(),
+            endersNote: endersNote || null
         };
         try {
             // Native Components V2 result card — the same layout as the
@@ -921,6 +922,8 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
 
     let uploadedUrls = [];   // raid proof pictures (everything not marked as rally)
     let rallyPicUrl = null;  // rally picture -> TOP banner of the result card
+    let endersNote = null;   // ender's note typed in the upload channel (NOT the raid description)
+    let lastTextMessage = null; // last free-text message by the closer, used by `enders note`
     const closerId = interaction.user.id;
     const guild = interaction.guild;
     let tempChannel = null;
@@ -941,7 +944,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
         const collector = tempChannel.createMessageCollector({
             filter: (msg) => {
                 const content = msg.content?.toLowerCase().trim();
-                if ((content === 'done' || content === 'rally' || content === 'ingame') && msg.author.id === closerId) return true;
+                if (msg.author.id === closerId) return true;
                 return msg.attachments && msg.attachments.size > 0;
             },
             time: 120000,
@@ -967,7 +970,30 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
                     tempChannel.send({ content: '✅ Rally picture set — it will be the banner at the top of the result card. Send the remaining raid pictures and type `done` to post the result.' }).catch(() => null);
                 }
             }
-            // `ingame` — show the closer the CURRENT in-game helpers and their
+            // `enders note <text>` (or `ender note`, `endersnote`, `endnote`) —
+            // sets the Ender's Note on the result card. Also supports the
+            // two-step form: send any free-text message, then type `enders note`
+            // to use that text as the note (mirrors the `rally` flow).
+            const endersMatch = content.match(/^(?:enders?\s*note|endersnote|endnote|end note)\s*(.*)$/i);
+            if (endersMatch && msg.author.id === closerId) {
+                const note = (endersMatch[1] || '').trim();
+                if (note) {
+                    endersNote = note;
+                    tempChannel.send({ content: '✅ Ender’s Note set — it will appear on the result card. Type `done` to post the result.' }).catch(() => null);
+                } else if (lastTextMessage) {
+                    endersNote = lastTextMessage;
+                    tempChannel.send({ content: '✅ Ender’s Note set from your last message — it will appear on the result card. Type `done` to post the result.' }).catch(() => null);
+                } else {
+                    tempChannel.send({ content: '⚠️ Usage: type `enders note <your note>` (or send a message first, then type `enders note`).' }).catch(() => null);
+                }
+            }
+            // Track the closer's last free-text message so `enders note` (no
+            // argument) can adopt it.
+            if (msg.author.id === closerId && msg.content && !msg.content.startsWith('/') &&
+                !/^(done|rally|ingame|enders?\s*note|endersnote|endnote|end note)\b/i.test(content)) {
+                lastTextMessage = msg.content.trim();
+            }
+            // `ingame` — show the closer the CURRENT in-game helpers...
             // participation time so far (snapshot; final times are computed on
             // close). Helpers already removed are not listed.
             if (content === 'ingame' && msg.author.id === closerId) {
@@ -996,7 +1022,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
 
         collector.on('end', async () => {
             try {
-                await sendResultEmbed(uploadedUrls, rallyPicUrl);
+                await sendResultEmbed(uploadedUrls, rallyPicUrl, endersNote);
             } catch (err) {
                 console.warn('Failed to send result embed after collection:', err?.message || err);
             }
@@ -1017,7 +1043,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
 
     const collectorChannel = interaction.channel || await interaction.client.channels.fetch(interaction.channelId).catch(() => null);
     if (!collectorChannel || !collectorChannel.isTextBased()) {
-        await sendResultEmbed(uploadedUrls, rallyPicUrl);
+        await sendResultEmbed(uploadedUrls, rallyPicUrl, endersNote);
         return;
     }
 
@@ -1062,7 +1088,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
     });
 
     legacyCollector.on('end', async () => {
-        await sendResultEmbed(uploadedUrls, rallyPicUrl);
+        await sendResultEmbed(uploadedUrls, rallyPicUrl, endersNote);
     });
 }
 

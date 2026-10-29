@@ -14,7 +14,7 @@ function fakeRaid(overrides = {}) {
         enemyNames: 'enemy_one, enemy_two',
         enemyCount: 2,
         enemyClanNames: 'Lucent',
-        reason: 'They called more people',
+        closeReason: 'They called more people',
         helpers: [
             { userId: '222333444', robloxUsername: 'MvpGuy', robloxDisplayName: 'MVP Guy', timeSpentSeconds: 300, avatarUrl: 'https://example.com/mvp.png' },
             { userId: '333444555', robloxUsername: 'OtherGuy', robloxDisplayName: 'Other', timeSpentSeconds: 100 }

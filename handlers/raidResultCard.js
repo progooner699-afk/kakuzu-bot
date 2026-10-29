@@ -166,7 +166,7 @@ function buildResultCardPayload(opts) {
 
     // --- ONE consolidated Info block ---
     const durationSeconds = Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
-    const noteText = raid.closeReason || raid.reason || null;
+    const noteText = opts.endersNote || raid.endersNote || raid.closeReason || null;
 
     contents.push(text(
         '## \uD83C\uDFC6 ' + style.title + ' — #' + raid.raidId + NL +
