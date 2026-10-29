@@ -1902,7 +1902,7 @@ module.exports = {
                 draft: true
             });
 
-            const settings = raidStateManager.loadSettings(guildId);
+            const settings = await raidStateManager.loadRaidSettings(guildId);
             const embeds = raidStateManager.formatRaidMessage(raid, guildId);
             const raidButtonRow = createRaidButtons(raid, interaction.member);
             const regionRoleInfo = await getRaidPingInfo(interaction.client, guildId, { countryCode, region });

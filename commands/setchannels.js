@@ -23,6 +23,7 @@ module.exports = {
         raidStateManager.saveSettings(guildId, settings);
         try {
             await raidChannelSupabase.setRaidResultChannel(guildId, resultChannel);
+            console.log('[setchannels] persisted result channel to Supabase for guild=' + guildId + ': ' + resultChannel);
         } catch (err) {
             console.warn('[setchannels] failed to persist result channel to Supabase:', err?.message || err);
         }

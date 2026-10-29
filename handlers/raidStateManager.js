@@ -152,11 +152,22 @@ function saveSettings(guildId, settings) {
 
 async function loadRaidSettings(guildId) {
     const local = loadSettings(guildId) || {};
+    console.log('[raidSettings] loadRaidSettings guild=' + guildId + ' local.resultChannel=' + (local.resultChannel || 'null'));
     if (!local.resultChannel) {
         try {
             const rc = await raidChannelSupabase.getRaidResultChannel(guildId);
-            if (rc) local.resultChannel = rc;
-        } catch (_) { /* Supabase unavailable */ }
+            console.log('[raidSettings] Supabase result channel for guild=' + guildId + ': ' + (rc || 'null'));
+            if (rc) {
+                local.resultChannel = rc;
+                // Persist back to local JSON so sync loadSettings() sees it too.
+                try { saveSettings(guildId, local); } catch (e) { console.warn('[raidSettings] failed to persist loaded channel to local settings:', (e && e.message) || e); }
+            }
+        } catch (err) {
+            console.warn('[raidSettings] failed to load result channel from Supabase for guild=' + guildId + ':', (err && err.message) || err);
+        }
+    }
+    if (!local.resultChannel) {
+        console.warn('[raidSettings] no result channel configured for guild=' + guildId);
     }
     return local;
 }
