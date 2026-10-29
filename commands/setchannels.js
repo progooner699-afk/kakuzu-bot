@@ -1,5 +1,6 @@
 ﻿const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const raidStateManager = require('../handlers/raidStateManager');
+const raidChannelSupabase = require('../handlers/raidChannelSupabase');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -20,6 +21,11 @@ module.exports = {
         settings.resultChannel = resultChannel;
 
         raidStateManager.saveSettings(guildId, settings);
+        try {
+            await raidChannelSupabase.setRaidResultChannel(guildId, resultChannel);
+        } catch (err) {
+            console.warn('[setchannels] failed to persist result channel to Supabase:', err?.message || err);
+        }
         await interaction.editReply({
             content: '✅ Result channel set to <#' + resultChannel + '>. Raid result embeds will be posted there, and each raid alert gets its own temporary `raid-alert-<id>` channel created in the same category — it is deleted automatically 1 minute after the raid closes. Alerts are posted via the `backupalerts` webhook.',
             flags: 64

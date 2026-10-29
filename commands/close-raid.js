@@ -50,6 +50,13 @@ module.exports = {
         }
 
         const settings = raidStateManager.loadSettings(interaction.guild.id);
+        if (!settings.resultChannel) {
+            try {
+                const rcs = require('../handlers/raidChannelSupabase');
+                const rc = await rcs.getRaidResultChannel(interaction.guild.id);
+                if (rc) settings.resultChannel = rc;
+            } catch (_) { /* ignore */ }
+        }
         // Alerts are authored by the 'backupalerts' webhook -> edit via webhook.
         if (updatedRaid.alertFormat === 'v2') {
             const closedPayload = await raidV2.buildRaidAlertPayload(updatedRaid);

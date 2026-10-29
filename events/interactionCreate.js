@@ -828,6 +828,17 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
     const settings = raidStateManager.loadSettings(interaction.guild.id);
     const raidsData = raidStateManager.loadRaids(interaction.guild.id);
 
+    // Resolve the raid-result channel from Supabase (persistent across deploys)
+    // first, falling back to the legacy local settings.json value.
+    let resultChannelId = settings.resultChannel || null;
+    if (!resultChannelId) {
+        try {
+            const rcs = require('../handlers/raidChannelSupabase');
+            resultChannelId = await rcs.getRaidResultChannel(interaction.guild.id);
+        } catch (_) { /* ignore */ }
+    }
+    if (resultChannelId) settings.resultChannel = resultChannelId;
+
     // Streak tracking — only counted outcomes (win / whooped / loss). The
     // "No Result" outcome never touches streaks or metrics. (The old
     // "Can't Say" option was removed.)
@@ -2217,6 +2228,13 @@ module.exports = {
                 await interaction.reply({ content: '✅ Raid closed — no result card will be posted.', flags: 64 }).catch(() => null);
                 await markRaidAlertClosed(interaction, closedRaid);
                 const nologSettings = raidStateManager.loadSettings(interaction.guild.id);
+                if (!nologSettings.resultChannel) {
+                    try {
+                        const rcs = require('../handlers/raidChannelSupabase');
+                        const rc = await rcs.getRaidResultChannel(interaction.guild.id);
+                        if (rc) nologSettings.resultChannel = rc;
+                    } catch (_) { /* ignore */ }
+                }
                 if (nologSettings.resultChannel) {
                     const noteChannel = await interaction.client.channels.fetch(nologSettings.resultChannel).catch(() => null);
                     if (noteChannel && noteChannel.isTextBased()) {

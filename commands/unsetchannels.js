@@ -1,5 +1,6 @@
 ﻿const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const raidStateManager = require('../handlers/raidStateManager');
+const raidChannelSupabase = require('../handlers/raidChannelSupabase');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -60,6 +61,9 @@ module.exports = {
         }
 
         raidStateManager.saveSettings(guildId, settings);
+        if (target === 'result' || target === 'all') {
+            try { await raidChannelSupabase.clearRaidResultChannel(guildId); } catch (err) { console.warn('[unsetchannels] failed to clear result channel in Supabase:', err?.message || err); }
+        }
 
         await interaction.editReply({
             content: '✅ **Channel configuration cleared.**\n\n' +

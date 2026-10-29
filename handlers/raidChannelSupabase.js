@@ -67,8 +67,19 @@ async function getRaidResultChannelRow(guildId) {
     );
 }
 
+async function clearRaidResultChannel(guildId) {
+    if (!supabaseDb.isConfigured()) return;
+    if (!guildId) return;
+    await supabaseDb.runQuery(
+        `DELETE FROM kakuzu_raid_channels WHERE guild_id = $1`,
+        [guildId]
+    );
+}
+
+
 module.exports = {
     setRaidResultChannel,
     getRaidResultChannel,
     getRaidResultChannelRow,
+    clearRaidResultChannel,
 };
