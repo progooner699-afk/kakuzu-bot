@@ -169,10 +169,54 @@ async function updateRaidAlertChannel(raidId, alertChannelId) {
     );
 }
 
+
+/** Updates the MVP user on a raid row. */
+async function updateRaidMvp(raidId, mvpUserId) {
+    requireDb();
+    if (!raidId) return;
+    await supabaseDb.runQuery(
+        'UPDATE kakuzu_raids SET mvp_user_id =  WHERE raid_id = ',
+        [raidId, mvpUserId != null ? String(mvpUserId) : null]
+    );
+}
+
+/** Updates the server_id on a raid row. */
+async function updateRaidServerId(raidId, serverId) {
+    requireDb();
+    if (!raidId) return;
+    await supabaseDb.runQuery(
+        'UPDATE kakuzu_raids SET server_id =  WHERE raid_id = ',
+        [raidId, serverId != null ? String(serverId) : null]
+    );
+}
+
+
+/** Updates the MVP user on a raid row. */
+async function updateRaidMvp(raidId, mvpUserId) {
+    requireDb();
+    if (!raidId) return;
+    await supabaseDb.runQuery(
+        'UPDATE kakuzu_raids SET mvp_user_id = \ WHERE raid_id = ',
+        [raidId, mvpUserId != null ? String(mvpUserId) : null]
+    );
+}
+
+/** Updates the server_id on a raid row. */
+async function updateRaidServerId(raidId, serverId) {
+    requireDb();
+    if (!raidId) return;
+    await supabaseDb.runQuery(
+        'UPDATE kakuzu_raids SET server_id = \ WHERE raid_id = ',
+        [raidId, serverId != null ? String(serverId) : null]
+    );
+}
+
 module.exports = Object.assign(module.exports, {
     getNextDisplayNumber,
     updateRaidStatus,
     closeRaid,
     updateRaidMessageReference,
     updateRaidAlertChannel,
+    updateRaidMvp,
+    updateRaidServerId,
 });

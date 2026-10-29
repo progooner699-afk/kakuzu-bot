@@ -37,6 +37,16 @@ module.exports = {
     async execute(client) {
         console.log(`${client.user.tag} is online!`);
 
+    // Run pending Supabase migrations (additive only, never DROP/TRUNCATE).
+    try {
+        const supabaseDb = require('../handlers/supabaseDb');
+        supabaseDb.runPendingMigrations().then(() => {
+            console.log('[supabaseDb] pending migrations applied.');
+        }).catch((err) => console.warn('[supabaseDb] migration run failed:', (err && err.message) || err));
+    } catch (err) {
+        console.warn('[supabaseDb] migration runner unavailable:', (err && err.message) || err);
+    }
+
         // Permanent premium-access tables (idempotent; never DROP/reset).
         // Fire-and-forget so a slow DB never delays command registration.
         try {
