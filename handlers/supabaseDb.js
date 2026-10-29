@@ -22,7 +22,7 @@ function buildPool() {
     }
     const ssl = buildSslConfig(url);
     try {
-        return new Pool({ connectionString: url, ssl });
+        return new Pool({ connectionString: url, ssl, prepare: false });
     } catch (err) {
         console.error('[supabaseDb] Failed to create pg Pool:', (err && err.message) || err);
         return null;
@@ -56,16 +56,11 @@ async function runQuery(sql, params, timeoutMs) {
         throw new Error(msg);
     }
     const deadline = (timeoutMs && timeoutMs > 0) ? timeoutMs : 8000;
-    const client = await pool.connect();
-    try {
-        const result = await Promise.race([
-            client.query(sql, params || []),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Query timed out after ' + deadline + 'ms')), deadline))
-        ]);
-        return result;
-    } finally {
-        client.release();
-    }
+    const result = await Promise.race([
+        pool.query(sql, params || []),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Query timed out after ' + deadline + 'ms')), deadline))
+    ]);
+    return result;
 }
 
 async function queryOne(sql, params, timeoutMs) {
