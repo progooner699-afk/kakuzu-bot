@@ -10,9 +10,14 @@ const {
     ChannelType,
     AttachmentBuilder,
     StringSelectMenuBuilder,
-    StringSelectMenuOptionBuilder
+    StringSelectMenuOptionBuilder,
+    ContainerBuilder,
+    TextDisplayBuilder,
+    SeparatorBuilder,
+    SeparatorSpacingSize
 } = require("discord.js");
 const raidStateManager = require("../handlers/raidStateManager");
+const endersNoteByRaid = new Map();
 const raidV2 = require("../handlers/raidV2");
 const raidResultCard = require("../handlers/raidResultCard");
 const robloxApi = require("../handlers/robloxApi");
@@ -883,7 +888,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             proofUrls: permanentProofUrls,
             streakMessage,
             endedAtMs: raid.closedAt || Date.now(),
-            endersNote: endersNote || null
+            endersNote: (endersNote || endersNoteByRaid.get(raid.raidId)) || null
         };
         try {
             // Native Components V2 result card — the same layout as the
@@ -939,7 +944,17 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
 
         await interaction.followUp({ content: `📸 Upload your **rally picture** for this raid result in ${tempChannel} now — after sending it, type \`rally\` to set it as the result card banner. Then upload the remaining raid pictures and reply with \`done\` in that channel to post the result (or wait 2 minutes).`, ephemeral: true }).catch(() => null);
 
-        await tempChannel.send({ content: `📸 **Upload pictures for Raid #${raidStateManager.getRaidDisplayId(raid)} here.**\n1️⃣ Send your **rally picture**, then type \`rally\` — it becomes the banner at the top of the result card.\n2️⃣ Send the remaining raid result pictures (raid proof).\n3️⃣ Type \`ingame\` to see the current in-game helpers and how long they've been participating.\n4️⃣ Type \`done\` (by <@${closerId}>) to post the result card — or wait 2 minutes and the bot posts whatever was uploaded.` }).catch(() => null);
+        const uploadInfoContainer = new ContainerBuilder().toJSON();
+        uploadInfoContainer.size = 'large';
+        const uploadContents = [];
+        uploadContents.push(new TextDisplayBuilder().setContent('> 📸 **Upload pictures for Raid #' + raidStateManager.getRaidDisplayId(raid) + ' here.**').toJSON());
+        uploadContents.push(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small).toJSON());
+        uploadContents.push(new TextDisplayBuilder().setContent('• Send your **rally picture**, then type `rally` — it becomes the banner at the top of the result card.\n• Send the remaining raid result pictures (raid proof).\n• Type `ingame` to see the current in-game helpers and how long they’ve been participating.\n• Type `done` (by <@' + closerId + '>) to post the result card — or wait 2 minutes and the bot posts whatever was uploaded.\n• Click the button below to add an **Ender’s Note**.').toJSON());
+        uploadContents.push(new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('raid_endersnote_' + raid.raidId).setLabel('📝 Add Ender’s Note').setStyle(ButtonStyle.Secondary)
+        ).toJSON());
+        uploadInfoContainer.components = uploadContents;
+        await tempChannel.send({ flags: 1 << 15, components: [uploadInfoContainer] }).catch(() => null);
 
         const collector = tempChannel.createMessageCollector({
             filter: (msg) => {
@@ -1984,6 +1999,34 @@ module.exports = {
                 }
             }
         }
+        // Enders Note button in the temp upload channel: opens a modal.
+        if (interaction.isButton() && typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_endersnote_')) {
+            const raidId = Number(interaction.customId.split('_')[2]);
+            if (Number.isNaN(raidId)) return;
+            const modal = new ModalBuilder()
+                .setCustomId('raid_endersnote_modal_' + raidId)
+                .setTitle("Ender's Note");
+            const input = new TextInputBuilder()
+                .setCustomId('endersnote_input')
+                .setLabel("Ender's Note")
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(false)
+                .setMaxLength(500);
+            modal.addComponents(new ActionRowBuilder().addComponents(input));
+            await interaction.showModal(modal).catch(() => null);
+            return;
+        }
+
+        // Enders Note modal submit: store the note for this raid.
+        if (interaction.isModalSubmit() && typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_endersnote_modal_')) {
+            const raidId = Number(interaction.customId.split('_')[3]);
+            const note = (interaction.fields.getTextInputValue('endersnote_input') || '').trim();
+            if (note) endersNoteByRaid.set(raidId, note);
+            await interaction.reply({ content: note ? "Ender's Note saved - it will appear on the result card." : 'Empty note - nothing saved.', flags: 64 }).catch(() => null);
+            return;
+        }
+
+
         // ===== RAID OPERATIONS: help / edit / accept / leave / close / outcome / mvp =====
         
         // [ Help ] — green PUBLIC button: the user asks to join a raid.

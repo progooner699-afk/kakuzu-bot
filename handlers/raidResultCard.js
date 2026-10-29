@@ -317,6 +317,11 @@ function buildResultFallbackEmbed(opts) {
         { name: 'Deployment Squad Roster', value: rosterValue, inline: false }
     ]);
 
+const noteText = opts.endersNote || raid.endersNote || raid.closeReason || null;
+    if (noteText) {
+        embed.addFields({ name: "📝 Ender's Note", value: '> ' + String(noteText).replace(/\n/g, ' '), inline: false });
+    }
+
     if (proofUrls.length > 0) {
         // Clickable markdown links, NOT bare URLs. The URLs handed in here are
         // already PERMANENT (see handlers/imageHost.js) so clicking "Image 1"
