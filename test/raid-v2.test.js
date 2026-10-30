@@ -168,6 +168,6 @@ test('alert shows the per-server raid index (serverIndex) when present', async (
       return [];
     })
     .join(String.fromCharCode(10));
-  assert.ok(contents.includes('RAID ALERT #3'));
-  assert.ok(contents.includes('> **Raid ID:** `3`'));
+  assert.ok(contents.includes('RAID ALERT #7'));
+  assert.ok(contents.includes('> **Raid ID:** `7`'));
 });

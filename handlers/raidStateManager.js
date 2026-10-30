@@ -412,7 +412,7 @@ async function createRaid(options) {
  */
 function getRaidDisplayId(raid) {
     if (!raid) return 0;
-    return raid.serverIndex ? raid.serverIndex : raid.raidId;
+    return raid.raidId ? raid.raidId : 0;
 
 }
 
