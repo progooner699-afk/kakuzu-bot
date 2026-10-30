@@ -1521,7 +1521,7 @@ module.exports = {
         // Handle open_raid_application button - shows the modal (fast, no async work)
         if (interaction.customId === "open_raid_application") {
             const modal = new ModalBuilder()
-                .setCustomId("raid_application_step1")
+                .setCustomId(`raid_application_step1_${interaction.user.id}_${Date.now()}`)
                 .setTitle("Raid Request Application");
 
             modal.addComponents(
@@ -1841,7 +1841,7 @@ module.exports = {
             , flags: 64 }).catch(() => null);
         }
 
-        if (interaction.customId === "raid_application_step1") {
+        if (interaction.customId.startsWith("raid_application_step1")) {
             const userId = interaction.user.id;
             const guildId = interaction.guild.id;
             raidStateManager.cleanupPendingRaids(userId, guildId);
@@ -1975,9 +1975,9 @@ module.exports = {
                 const v2SendOptions = Object.assign({ username: raidStateManager.RAID_ALERT_WEBHOOK_NAME }, v2Payload);
                 if (regionRoleInfo.allowedMentions) v2SendOptions.allowedMentions = regionRoleInfo.allowedMentions;
                 const v2Message = await alertWebhook.send(v2SendOptions);
-                raidV2.markAlertV2(raid.raidId, guildId);
-                raidStateManager.setRaidOpen(raid.raidId, guildId);
-                raidStateManager.updateRaidMessageReference(raid.raidId, alertChannel.id, v2Message.id, guildId);
+                try { raidV2.markAlertV2(raid.raidId, guildId); } catch (e) { console.warn('[raid alert] markAlertV2 failed:', e?.message || e); }
+                try { raidStateManager.setRaidOpen(raid.raidId, guildId); } catch (e) { console.warn('[raid alert] setRaidOpen failed:', e?.message || e); }
+                try { raidStateManager.updateRaidMessageReference(raid.raidId, alertChannel.id, v2Message.id, guildId); } catch (e) { console.warn('[raid alert] updateRaidMessageReference failed:', e?.message || e); }
             } catch (err) {
                 console.warn('Components V2 alert failed, falling back to embed:', (err && err.message) || err);
                 try {
@@ -1995,7 +1995,7 @@ module.exports = {
                         allowedMentions: regionRoleInfo.allowedMentions
                     });
                     raidStateManager.setRaidOpen(raid.raidId, guildId);
-                    raidStateManager.updateRaidMessageReference(raid.raidId, alertChannel.id, message.id, guildId);
+                    try { raidStateManager.updateRaidMessageReference(raid.raidId, alertChannel.id, message.id, guildId); } catch (e) { console.warn('[raid alert] updateRaidMessageReference failed:', e?.message || e); }
                 } catch (err2) {
                     console.warn('Failed to post raid alert embed:', (err2 && err2.message) || err2);
                     raidStateManager.cleanupPendingRaids(userId, guildId);
