@@ -1930,7 +1930,7 @@ module.exports = {
             const regionRoleInfo = await getRaidPingInfo(interaction.client, guildId, { countryCode, region });
 
             if (!settings.resultChannel) {
-                return interaction.reply({ content: 'Result channel is not configured. Please run `/setchannels` and set the `result_channel` first — raid alerts are posted in a temporary channel created in the same category.', flags: 64 }).catch(() => null);
+                return interaction.editReply({ content: 'Result channel is not configured. Please run `/setchannels` and set the `result_channel` first — raid alerts are posted in a temporary channel created in the same category.', flags: 64 }).catch(() => null);
             }
 
             const completionEmbed = new EmbedBuilder()
@@ -1945,7 +1945,7 @@ module.exports = {
                 .setColor(0x00ff66)
                 .setTimestamp();
 
-            await interaction.reply({ embeds: [completionEmbed], flags: 64 }).catch(() => null);
+            await interaction.editReply({ embeds: [completionEmbed], flags: 64 }).catch(() => null);
 
             // Temporary raid alert channel: created in the SAME CATEGORY as the
             // configured raid result channel, named raid-alert-<raidId>. It
