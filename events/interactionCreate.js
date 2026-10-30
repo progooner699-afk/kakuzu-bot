@@ -18,6 +18,8 @@ const {
 } = require("discord.js");
 const raidStateManager = require("../handlers/raidStateManager");
 const endersNoteByRaid = new Map();
+const allyNamesByRaid = new Map();
+const allyClanByRaid = new Map();
 const raidV2 = require("../handlers/raidV2");
 const raidResultCard = require("../handlers/raidResultCard");
 const robloxApi = require("../handlers/robloxApi");
@@ -880,7 +882,9 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             ? permanentUrls[(attachments || []).length] || null
             : null;
 
-        const cardOpts = {
+        if (allyNamesByRaid.has(raid.raidId)) raid.allyNames = allyNamesByRaid.get(raid.raidId);
+    if (allyClanByRaid.has(raid.raidId)) raid.allyClanNames = allyClanByRaid.get(raid.raidId);
+    const cardOpts = {
             raid,
             outcome,
             submitterId: interaction.user.id,
@@ -951,7 +955,9 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
         uploadContents.push(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small).toJSON());
         uploadContents.push(new TextDisplayBuilder().setContent('• Send your **rally picture**, then type `rally` — it becomes the banner at the top of the result card.\n• Send the remaining raid result pictures (raid proof).\n• Type `ingame` to see the current in-game helpers and how long they’ve been participating.\n• Type `done` (by <@' + closerId + '>) to post the result card — or wait 2 minutes and the bot posts whatever was uploaded.\n• Click the button below to add an **Ender’s Note**.').toJSON());
         uploadContents.push(new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('raid_endersnote_' + raid.raidId).setLabel('📝 Add Ender’s Note').setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder().setCustomId('raid_endersnote_' + raid.raidId).setLabel('📝 Add Ender’s Note').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('raid_addallies_' + raid.raidId).setLabel('➕ Add Allies Name').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('raid_addallyclan_' + raid.raidId).setLabel('➕ Add Ally Clan Names').setStyle(ButtonStyle.Secondary)
         ).toJSON());
         uploadInfoContainer.components = uploadContents;
         await tempChannel.send({ flags: 1 << 15, components: [uploadInfoContainer] }).catch(() => null);
@@ -2023,6 +2029,56 @@ module.exports = {
             const note = (interaction.fields.getTextInputValue('endersnote_input') || '').trim();
             if (note) endersNoteByRaid.set(raidId, note);
             await interaction.reply({ content: note ? "Ender's Note saved - it will appear on the result card." : 'Empty note - nothing saved.', flags: 64 }).catch(() => null);
+            return;
+        }
+
+        // Add allies name button -> modal
+        if (interaction.isButton() && typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_addallies_')) {
+            const raidId = Number(interaction.customId.split('_')[2]);
+            if (Number.isNaN(raidId)) return;
+            const modal = new ModalBuilder()
+                .setCustomId('raid_addallies_modal_' + raidId)
+                .setTitle('Add Allies Name');
+            const input = new TextInputBuilder()
+                .setCustomId('allies_input')
+                .setLabel('Allies Names')
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(false);
+            modal.addComponents(new ActionRowBuilder().addComponents(input));
+            await interaction.showModal(modal).catch(() => null);
+            return;
+        }
+        if (interaction.isModalSubmit() && typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_addallies_modal_')) {
+            const raidId = Number(interaction.customId.split('_')[3]);
+            const val = (interaction.fields.getTextInputValue('allies_input') || '').trim();
+            allyNamesByRaid.set(raidId, val);
+            try { raidStateManager.updateRaidAllies(raidId, interaction.guild.id, undefined, val); } catch (e) {}
+            await interaction.reply({ content: val ? 'Allies saved - will appear on the result card.' : 'Empty - nothing saved.', flags: 64 }).catch(() => null);
+            return;
+        }
+
+        // Add ally clan names button -> modal
+        if (interaction.isButton() && typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_addallyclan_')) {
+            const raidId = Number(interaction.customId.split('_')[2]);
+            if (Number.isNaN(raidId)) return;
+            const modal = new ModalBuilder()
+                .setCustomId('raid_addallyclan_modal_' + raidId)
+                .setTitle('Add Ally Clan Names');
+            const input = new TextInputBuilder()
+                .setCustomId('allyclan_input')
+                .setLabel('Ally Clan Names')
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(false);
+            modal.addComponents(new ActionRowBuilder().addComponents(input));
+            await interaction.showModal(modal).catch(() => null);
+            return;
+        }
+        if (interaction.isModalSubmit() && typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_addallyclan_modal_')) {
+            const raidId = Number(interaction.customId.split('_')[3]);
+            const val = (interaction.fields.getTextInputValue('allyclan_input') || '').trim();
+            allyClanByRaid.set(raidId, val);
+            try { raidStateManager.updateRaidAllies(raidId, interaction.guild.id, val, undefined); } catch (e) {}
+            await interaction.reply({ content: val ? 'Ally clan saved - will appear on the result card.' : 'Empty - nothing saved.', flags: 64 }).catch(() => null);
             return;
         }
 

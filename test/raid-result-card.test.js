@@ -57,8 +57,8 @@ test('rally picture becomes the TOP banner image; default banner used otherwise'
     const withoutRally = raidResultCard.buildResultCardPayload({
         raid: fakeRaid(), outcome: 'win', submitterId: '9'
     });
-    assert.strictEqual(withoutRally.components[0].components[0].items[0].media.url,
-        raidResultCard.DEFAULT_BANNER_IMAGE);
+    // No default gif banner is sent when there is no rally picture.
+    assert.notStrictEqual(withoutRally.components[0].components[0].type, 12);
 });
 
 test('the 3 outcome types render 3 different titles', () => {
@@ -114,7 +114,7 @@ test('raid proof images are text links, never gallery items', () => {
     assert.ok(text.includes('[Image 2](https://example.com/proof2.png)'));
     // Only ONE MediaGallery in the whole card (the top banner).
     const galleries = payload.components[0].components.filter((c) => c.type === 12);
-    assert.strictEqual(galleries.length, 1);
+    assert.strictEqual(galleries.length, 0);
 });
 
 test('fallback embed works without a V2 payload', () => {

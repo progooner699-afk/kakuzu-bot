@@ -375,6 +375,8 @@ async function createRaid(options) {
         teamersCount,
         enemyClanNames: normalizeText(options.enemyClanNames),
         enemyNames: normalizeText(options.enemyNames),
+        allyClanNames: normalizeText(options.allyClanNames),
+        allyNames: normalizeText(options.allyNames),
         enemyClanPresent: parseBooleanYesNo(options.enemyClanPresent),
         reason: normalizeText(options.reason),
         helperLimit: Number(options.helperLimit) || 1,
@@ -1122,6 +1124,16 @@ function scheduleRaidAlertChannelDeletion(client, raidId, guildId, delayMs) {
     }
 }
 
+function updateRaidAllies(raidId, guildId, allyClanNames, allyNames) {
+    const raids = loadRaids(guildId);
+    const raid = raids.raids.find(item => item.raidId === raidId);
+    if (!raid) return null;
+    if (allyClanNames !== undefined) raid.allyClanNames = normalizeText(allyClanNames);
+    if (allyNames !== undefined) raid.allyNames = normalizeText(allyNames);
+    saveRaids(guildId, raids);
+    return raid;
+}
+
 module.exports = {
     ensureDataFiles,
     loadSettings,
@@ -1149,6 +1161,7 @@ module.exports = {
     removeHelper,
     closeRaid,
     updateRaidMessageReference,
+    updateRaidAllies,
     formatRaidMessage,
     publishLeaderboard,
     syncLeaderboardMessage,

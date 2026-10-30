@@ -154,15 +154,17 @@ function buildResultCardPayload(opts) {
     container.size = 'large';
     const contents = [];
 
-    // --- TOP banner: the rally picture (or the default banner) rendered
-    // edge-to-edge across the full card width, ABOVE everything else ---
-    contents.push(new MediaGalleryBuilder().addItems([
-        new MediaGalleryItemBuilder()
-            .setURL(rallyPicUrl || DEFAULT_BANNER_IMAGE)
-            .setDescription(style.title)
-            .toJSON()
-    ]).toJSON());
-    contents.push(separator());
+    // --- TOP banner: the rally picture (if uploaded) rendered edge-to-edge
+    // across the full card width, ABOVE everything else. No default gif. ---
+    if (rallyPicUrl) {
+        contents.push(new MediaGalleryBuilder().addItems([
+            new MediaGalleryItemBuilder()
+                .setURL(rallyPicUrl)
+                .setDescription(style.title)
+                .toJSON()
+        ]).toJSON());
+        contents.push(separator());
+    }
 
     // --- ONE consolidated Info block ---
     const durationSeconds = Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
@@ -171,12 +173,12 @@ function buildResultCardPayload(opts) {
     contents.push(text(
         '## \uD83C\uDFC6 ' + style.title + ' — #' + raid.raidId + NL +
         NL +
-        '### ' + INFO_EMOJI + ' INFO' + NL +
+        '### ' + INFO_EMOJI + ' INFO`' + NL +
         DOT + ' **Requested By:** ' + (raid.requesterId ? '<@' + raid.requesterId + '>' : '**Unknown**') + NL +
         DOT + ' **Ended By:** ' + (submitterId ? '<@' + submitterId + '>' : '**Unknown**') + NL +
         DOT + ' **Raid Duration:** `' + rsm.formatTimeSpent(durationSeconds) + '`' + NL +
         (noteText
-            ? NL + '> \uD83D\uDCDD **Ender\u2019s Note**' + NL + '> ' + String(noteText).replace(/\n/g, ' ')
+            ? NL + '> \uD83D\uDCDD **Ender\u2019s Note**`' + NL + '> ' + String(noteText).replace(/\n/g, ' ')
             : '')
     ));
 
@@ -199,7 +201,7 @@ function buildResultCardPayload(opts) {
                         .setDescription('MVP profile picture')
                 )
                 .addTextDisplayComponents(new TextDisplayBuilder().setContent(
-                    DOT + ' ' + MVP_EMOJI + ' **Raid MVP:** **' + mvpName + '**' + NL +
+                    DOT + ' ' + MVP_EMOJI + ' **Raid MVP:** **' + mvpName + '**`' + NL +
                     DOT + ' **Roblox:** ' + (mvpProfileUrl
                         ? '[' + mvpName + ' (' + (mvpHelper.robloxUsername || mvpName) + ')](' + mvpProfileUrl + ')'
                         : (mvpHelper.robloxUsername || mvpName)) + NL +
@@ -218,8 +220,10 @@ function buildResultCardPayload(opts) {
     const proofLinks = buildProofLinks(proofUrls);
 
     contents.push(text(
-        DOT + ' **Enemy Clan:** `' + (raid.enemyClanNames || 'None') + '`' + NL +
-        DOT + ' **Enemies — ' + (raid.enemyCount || 0) + ':** `' + enemiesText + '`' + NL +
+        DOT + ' **Enemy Clan:** ' + (raid.enemyClanNames || 'None') + ' ' + NL +
+        DOT + ' **Enemies — ' + (raid.enemyCount || 0) + ':** ' + enemiesText + ' ' + NL +
+        DOT + ' **Ally Clan:** ' + (raid.allyClanNames || 'None') + ' ' + NL +
+        DOT + ' **Allies:** ' + (raid.allyNames || 'None') + ' ' + NL +
         NL +
         DOT + ' **Game:** ' + gameLabel + NL +
         DOT + ' **Location:** `' + (raid.region || 'Unknown') + '`' + NL +
@@ -314,6 +318,8 @@ function buildResultFallbackEmbed(opts) {
         { name: 'Hostile Count', value: '`' + (raid.enemyCount || 0) + '`', inline: true },
         { name: 'Hostile Names', value: raid.enemyNames ? '`' + raid.enemyNames + '`' : '`None`', inline: true },
         { name: 'Hostile Grouping', value: raid.enemyClanNames ? '`' + raid.enemyClanNames + '`' : '`None`', inline: true },
+        { name: 'Ally Grouping', value: raid.allyClanNames ? '`' + raid.allyClanNames + '`' : '`None`', inline: true },
+        { name: 'Allies', value: raid.allyNames ? '`' + raid.allyNames + '`' : '`None`', inline: true },
         { name: 'Deployment Squad Roster', value: rosterValue, inline: false }
     ]);
 
@@ -350,7 +356,7 @@ function buildNoResultEmbed(opts) {
         .setTitle('\uD83D\uDED1 NO RAID RESULTS RECORDED')
         .setColor(0x888888)
         .setDescription(
-            '> \uD83D\uDCDD **Note:** Raid `#' + raid.raidId + '` was closed without a result card.' + NL +
+            '> \uD83D\uDCDD **Note:** Raid `#' + raid.raidId + '` was closed without a result card.`' + NL +
             '> No outcome, streaks or raid metrics were recorded for this deployment.'
         )
         .addFields(
