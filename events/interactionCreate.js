@@ -953,7 +953,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
         const uploadContents = [];
         uploadContents.push(new TextDisplayBuilder().setContent('> 📸 **Upload pictures for Raid #' + raidStateManager.getRaidDisplayId(raid) + ' here.**').toJSON());
         uploadContents.push(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small).toJSON());
-        uploadContents.push(new TextDisplayBuilder().setContent('• Send your **rally picture**, then type `rally` — it becomes the banner at the top of the result card.\n• Send the remaining raid result pictures (raid proof).\n• Type `ingame` to see the current in-game helpers and how long they’ve been participating.\n• Type `done` (by <@' + closerId + '>) to post the result card — or wait 2 minutes and the bot posts whatever was uploaded.\n• Click the button below to add an **Ender’s Note**.').toJSON());
+        uploadContents.push(new TextDisplayBuilder().setContent('• Send your **rally picture**, then type `rally` — it becomes the banner at the top of the result card.\n• Send the remaining raid result pictures (raid proof).\n• Type `ingame` to see the current in-game helpers and how long they’ve been participating.\n• Type `done` (by <@' + closerId + '>) to post the result card — or wait 10 minutes and the bot posts whatever was uploaded.\n• Click the button below to add an **Ender’s Note**.').toJSON());
         uploadContents.push(new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('raid_endersnote_' + raid.raidId).setLabel('📝 Add Ender’s Note').setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId('raid_addallies_' + raid.raidId).setLabel('➕ Add Allies Name').setStyle(ButtonStyle.Secondary),
@@ -968,7 +968,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
                 if (msg.author.id === closerId) return true;
                 return msg.attachments && msg.attachments.size > 0;
             },
-            time: 120000,
+            time: 600000,
             max: 100
         });
 
