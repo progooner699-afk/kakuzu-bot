@@ -1,4 +1,4 @@
-const {
+﻿const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
@@ -33,7 +33,7 @@ const guildAccess = require("../handlers/guildAccess");
 const gatewayGuard = require("../handlers/gatewayGuard");
 // Pure tiered server matcher (shared with auto-join + helper time tracking).
 const helperVerification = require("../handlers/helperVerification");
-// Per-guild RAID ADMIN roles (/adminsetup) — strict guild-isolated staff
+// Per-guild RAID ADMIN roles (/adminsetup) â€” strict guild-isolated staff
 // authorization for the edit / close / end raid actions.
 const raidAdminRoles = require("../handlers/raidAdminRoles");
 const { REGIONS: REGION_CATALOG } = require("../handlers/countryCatalog");
@@ -56,10 +56,10 @@ const pendingCountryCodes = new Map();
 const pendingDetections = new Map();
 
 // Temporary monitoring records for users who pressed Help. Key =
-// `${guildId}:${raidId}:${discordUserId}` — keying by user alone meant a
+// `${guildId}:${raidId}:${discordUserId}` â€” keying by user alone meant a
 // helper pressing Help on raid B while still monitored on raid A got the
 // "already checking" reply and could never switch raids.
-// These are NOT helpers — they are users the bot is watching to see if they
+// These are NOT helpers â€” they are users the bot is watching to see if they
 // join the raid server. Auto-expires after 10 minutes.
 // Value: { guildId, raidId, discordUserId, robloxUserId, robloxUsername, displayName, avatarUrl, expiresAt }
 const pendingHelpMonitors = new Map();
@@ -100,7 +100,7 @@ function cleanupExpiredMonitors() {
 
 // Region/country ping roles are configured per-guild in the shared Postgres
 // database (dashboard-owned). The legacy /setregionping settings.json command
-// was REMOVED — the bot no longer reads settings.regionPings.
+// was REMOVED â€” the bot no longer reads settings.regionPings.
 
 function safeGetTextInputValue(fields, customId, fallback) {
   try {
@@ -157,7 +157,7 @@ function getVerificationStaffPing(guildId) {
 // Administrator | this guild's raid-admin roles from /adminsetup) using only
 // the in-memory cache, because button RENDERING cannot await a database read.
 // The authoritative async check runs again at click time (guardRaidAction).
-// STRICT PER-GUILD ISOLATION: roles are read for member.guild.id ONLY — a
+// STRICT PER-GUILD ISOLATION: roles are read for member.guild.id ONLY â€” a
 // staff role configured in another server never shows or grants anything here.
 // (The old RAID_CLOSE_ROLES name-based fallback and the legacy
 // verificationAdminRoles setting were retired for raid actions; staff must now
@@ -173,12 +173,12 @@ function canCloseRaid(member, raid) {
 }
 
 /**
- * STRICT PER-GUILD RAID ACTION GUARD — used by every raid action entry point
+ * STRICT PER-GUILD RAID ACTION GUARD â€” used by every raid action entry point
  * (raid_edit_ / raid_editmodal_ / close_raid_ / raid_close_ / raid_outcome_ /
  * raid_mvp_select_). A raid action is allowed only when the clicker is the
  * ORIGINAL requester of that raid, OR holds raid-admin rights in THIS guild
  * (Discord Administrator or a /adminsetup-assigned role of interaction.guildId).
- * Every check reads interaction.guildId / interaction.member ONLY — staff
+ * Every check reads interaction.guildId / interaction.member ONLY â€” staff
  * status in another server never grants anything here.
  * @returns {Promise<boolean>} true = proceed; false = denial already replied.
  */
@@ -205,7 +205,7 @@ function canModerateVerification(member) {
 
 /**
  * Returns a mention for the guild's configured verification channel (the
- * channel where the backuppanel — with its "Link Roblox account" button — was
+ * channel where the backuppanel â€” with its "Link Roblox account" button â€” was
  * posted), or null if none has been set up yet. It is persisted when an admin
  * posts the backup panel, so guard messages can point users to the exact spot.
  */
@@ -220,20 +220,20 @@ function getVerificationChannelMention(guildId) {
 function buildUnverifiedMessage(guildId) {
     const mention = getVerificationChannelMention(guildId);
     return mention
-        ? `🔒 You are not verified! Please link your Roblox account in ${mention} first.`
-        : '🔒 You are not verified! Please link your Roblox account using the Link Roblox embed first.';
+        ? `ðŸ”’ You are not verified! Please link your Roblox account in ${mention} first.`
+        : 'ðŸ”’ You are not verified! Please link your Roblox account using the Link Roblox embed first.';
 }
 
 /**
  * Builds the Roblox join URL for a raid (used by the public JOIN SERVER button
  * and the helper's ephemeral link button).
- * Discord Link-style buttons only accept http(s) URLs — a `roblox://` scheme is
+ * Discord Link-style buttons only accept http(s) URLs â€” a `roblox://` scheme is
  * rejected by the API and would make the whole alert message fail to post. So we
  * expose an https Roblox "start" link (the client redirects to the launcher) and
  * fall back to the stored HTTPS server link when no place id is available.
  * When the raid carries a live serverId (Job ID), it is appended as
  * `gameInstanceId` so the launcher targets the requester's EXACT server
- * instance instead of matchmaking the helper into a random public server —
+ * instance instead of matchmaking the helper into a random public server â€”
  * the old placeId-only link is why helpers "joined" but never landed in the
  * raid server and were never detected.
  */
@@ -354,7 +354,7 @@ function pickRoleId(configValue) {
  *
  * Config source: dashboard-owned shared PostgreSQL only
  *   (`getGuildPingSettings(guildId)` -> `countryPings` / `regionPings`). When it
- *   is empty/down there is simply NO location ping — the legacy settings.json
+ *   is empty/down there is simply NO location ping â€” the legacy settings.json
  *   `regionPings` (from the removed `/setregionping` command) is no longer read.
  *
  * Lookups are case-insensitive so a casing mismatch between the dashboard's
@@ -398,7 +398,7 @@ async function getRaidPingInfo(client, guildId, { countryCode, region }) {
             }
         }
 
-        // Step 2: Region fallback — tried when:
+        // Step 2: Region fallback â€” tried when:
         //   (a) no country code was detected, or
         //   (b) a country code was detected but the country role is not
         //       configured or doesn't exist in the guild (deleted/renamed).
@@ -419,7 +419,7 @@ async function getRaidPingInfo(client, guildId, { countryCode, region }) {
 
     if (resolvedPing) return resolvedPing;
 
-    // No usable role found — log diagnostics so the failure is debuggable
+    // No usable role found â€” log diagnostics so the failure is debuggable
     // instead of silently posting with no ping.
     console.warn(
         '[raid ping] No usable ping role for guild', guildId,
@@ -437,7 +437,7 @@ async function getRaidPingInfo(client, guildId, { countryCode, region }) {
 function createRaidButtons(raid, member = null) {
     const components = [];
 
-    // [ Help ] — green PUBLIC button. Opens the join modal so the user is added
+    // [ Help ] â€” green PUBLIC button. Opens the join modal so the user is added
     // to the LIVE HELPERS list (no Roblox link required). They get full
     // join/leave time tracking and receive an ephemeral Link button to the
     // Roblox join URL after submitting.
@@ -449,7 +449,7 @@ function createRaidButtons(raid, member = null) {
             .setDisabled(raid.status === "CLOSED")
     );
 
-    // [ Edit ] — grey, restricted to requester/staff (same gate as Close). Opens a
+    // [ Edit ] â€” grey, restricted to requester/staff (same gate as Close). Opens a
     // modal to edit raid fields (Target, Enemy Clan, Description), then edits the
     // existing alert IN PLACE (no new embed/message is sent).
     if (canCloseRaid(member, raid)) {
@@ -462,7 +462,7 @@ function createRaidButtons(raid, member = null) {
         );
     }
 
-    // Close — restricted to the requester / staff via canCloseRaid.
+    // Close â€” restricted to the requester / staff via canCloseRaid.
     if (canCloseRaid(member, raid)) {
         components.push(
             new ButtonBuilder()
@@ -513,9 +513,9 @@ function buildVerificationEmbed({ title, description, color, footerText, thumbna
 }
 
 function getVerificationFieldValue(value) {
-    if (value === null || value === undefined) return '�';
+    if (value === null || value === undefined) return 'ï¿½';
     const stringValue = String(value).trim();
-    return stringValue || '�';
+    return stringValue || 'ï¿½';
 }
 
 async function getVerificationTargetChannel(client, configuredChannelId, fallbackChannel) {
@@ -615,9 +615,9 @@ function getVerificationValues(verificationData, targetUserTag) {
 function buildAcceptedEmbed({ values, reviewerTag, reviewedAt, guild }) {
     return buildVerificationEmbed({
         title: '??? PLAYER VERIFIED ???',
-        description: '> ?? **CONGRATULATIONS!** ??\nYour verification request has been **approved**.\nWelcome to the clan � we\'re thrilled to have you aboard! ??',
+        description: '> ?? **CONGRATULATIONS!** ??\nYour verification request has been **approved**.\nWelcome to the clan ï¿½ we\'re thrilled to have you aboard! ??',
         color: 0x2ECC71,
-        footerText: `?? Kakuzu Verification System � ? Approved at ${reviewedAt}`,
+        footerText: `?? Kakuzu Verification System ï¿½ ? Approved at ${reviewedAt}`,
         thumbnailUrl: values.robloxAvatarUrl || guild.iconURL({ size: 256 }),
         imageUrl: null,
         fields: [
@@ -637,9 +637,9 @@ function buildAcceptedEmbed({ values, reviewerTag, reviewedAt, guild }) {
 function buildRejectedEmbed({ values, reviewerTag, reviewedAt, guild, reason }) {
     return buildVerificationEmbed({
         title: '? PLAYER VERIFICATION REJECTED',
-        description: '> ?? Unfortunately, your verification request was **rejected** by the verification staff.\nPlease review the reason below � you are welcome to try again later. ??',
+        description: '> ?? Unfortunately, your verification request was **rejected** by the verification staff.\nPlease review the reason below ï¿½ you are welcome to try again later. ??',
         color: 0xE74C3C,
-        footerText: `?? Kakuzu Verification System � ? Rejected at ${reviewedAt}`,
+        footerText: `?? Kakuzu Verification System ï¿½ ? Rejected at ${reviewedAt}`,
         thumbnailUrl: values.robloxAvatarUrl || guild.iconURL({ size: 256 }),
         imageUrl: null,
         fields: [
@@ -714,19 +714,19 @@ async function markRaidAlertClosed(interaction, raid) {
 // the SAME single message payload as the result embed ({ embeds, files }), so
 // image + embed collapse under ONE "Kakuzu [BOT]" header instead of being a
 // hotlinked URL or a second message. Nothing else about the embed (fields,
-// text, color, timestamp) is touched — only its image reference.
+// text, color, timestamp) is touched â€” only its image reference.
 const PROOF_FETCH_TIMEOUT_MS = 10000;
-// 8MB — safe under every Discord guild upload tier; oversized screenshots
+// 8MB â€” safe under every Discord guild upload tier; oversized screenshots
 // degrade to the previous hotlinked image instead of failing the whole send.
 const MAX_PROOF_BYTES = 8 * 1024 * 1024;
 const PROOF_ATTACHMENT_NAME = 'raid-proof.png';
 
 /**
  * Downloads a raid proof/screenshot into an in-memory buffer for direct
- * attachment (`files: [attachment]` — a STANDALONE image next to the embed,
+ * attachment (`files: [attachment]` â€” a STANDALONE image next to the embed,
  * never `.setImage()`, which would collapse the embed to the image width).
  * Returns null on ANY failure (non-OK response, non-image content, oversized,
- * timeout) so the caller simply keeps the current hotlinked behaviour — a
+ * timeout) so the caller simply keeps the current hotlinked behaviour â€” a
  * failed download can never drop the result post or trigger a second message.
  * @param {string} url
  * @param {Function} [fetchImpl] test seam; defaults to the repo's bounded fetch
@@ -753,9 +753,9 @@ async function buildRaidProofAttachment(url, fetchImpl = fetchWithTimeout) {
 
 /**
  * Posts the classic fallback result embed with the raid proof attached as a
- * SINGLE message payload (embeds + files together — never two sends). The
+ * SINGLE message payload (embeds + files together â€” never two sends). The
  * embed object comes from raidResultCard.buildResultFallbackEmbed completely
- * untouched — in particular it carries NO .setImage(), so the embed container
+ * untouched â€” in particular it carries NO .setImage(), so the embed container
  * expands to its FULL WIDTH. The screenshot travels as a standalone file
  * attachment in the very same payload.
  * @param {object} opts
@@ -835,7 +835,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
     const settings = await raidStateManager.loadRaidSettings(interaction.guild.id);
     const raidsData = raidStateManager.loadRaids(interaction.guild.id);
 
-    // Streak tracking — only counted outcomes (win / whooped / loss). The
+    // Streak tracking â€” only counted outcomes (win / whooped / loss). The
     // "No Result" outcome never touches streaks or metrics. (The old
     // "Can't Say" option was removed.)
     let streakMessage = '**Current Streak:** None tracking';
@@ -847,7 +847,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             raidsData.streakCount = 1;
         }
         raidStateManager.saveRaids(interaction.guild.id, raidsData);
-        streakMessage = `**Current Streak:** 🏆 ${raidsData.streakCount} Matches consecutive!`;
+        streakMessage = `**Current Streak:** ðŸ† ${raidsData.streakCount} Matches consecutive!`;
     } else if (outcome === 'loss') {
         if (raidsData.streakType === 'LOSS') {
             raidsData.streakCount += 1;
@@ -856,7 +856,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             raidsData.streakCount = 1;
         }
         raidStateManager.saveRaids(interaction.guild.id, raidsData);
-        streakMessage = `**Current Streak:** 💀 ${raidsData.streakCount} Matches consecutive!`;
+        streakMessage = `**Current Streak:** ðŸ’€ ${raidsData.streakCount} Matches consecutive!`;
     }
 
     const sendResultEmbed = async (attachments = [], rallyPicUrl = null, endersNote = null) => {
@@ -872,7 +872,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
         // mobile app once the signature dies. Re-host every picture on a
         // permanent public host (Supabase Storage when configured, otherwise
         // catbox.moe) so "Image 1" always opens the full-resolution picture.
-        // Failures degrade gracefully — the original (normalised) URL is kept.
+        // Failures degrade gracefully â€” the original (normalised) URL is kept.
         const permanentUrls = await makePermanentUrls([
             ...(attachments || []),
             ...(rallyPicUrl ? [rallyPicUrl] : [])
@@ -895,7 +895,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             endersNote: (endersNote || endersNoteByRaid.get(raid.raidId)) || null
         };
         try {
-            // Native Components V2 result card — the same layout as the
+            // Native Components V2 result card â€” the same layout as the
             // removed /rwinner test card (now built by handlers/raidResultCard.js).
             // V2 messages disable `content`, so the region-role ping goes out
             // as a separate message first (same pattern as the raid alert).
@@ -912,7 +912,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
         } catch (err) {
             console.warn('[raid result] V2 card failed, falling back to embed:', err?.message || err);
             // Image delivery ONLY: the rally/proof screenshot rides in the
-            // SAME single payload as the embed ({ embeds, files } — one
+            // SAME single payload as the embed ({ embeds, files } â€” one
             // message, one bot header). win / whooped / loss all share this
             // one send path; nothing else about the embed changes.
             await sendFallbackResultEmbed({
@@ -946,18 +946,18 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
             topic: `Temporary upload channel for raid #${raidStateManager.getRaidDisplayId(raid)}. Will be removed after collection.`
         });
 
-        await interaction.followUp({ content: `📸 Upload your **rally picture** for this raid result in ${tempChannel} now — after sending it, type \`rally\` to set it as the result card banner. Then upload the remaining raid pictures and reply with \`done\` in that channel to post the result (or wait 2 minutes).`, ephemeral: true }).catch(() => null);
+        await interaction.followUp({ content: `ðŸ“¸ Upload your **rally picture** for this raid result in ${tempChannel} now â€” after sending it, type \`rally\` to set it as the result card banner. Then upload the remaining raid pictures and reply with \`done\` in that channel to post the result (or wait 2 minutes).`, ephemeral: true }).catch(() => null);
 
         const uploadInfoContainer = new ContainerBuilder().toJSON();
         uploadInfoContainer.size = 'large';
         const uploadContents = [];
-        uploadContents.push(new TextDisplayBuilder().setContent('> 📸 **Upload pictures for Raid #' + raidStateManager.getRaidDisplayId(raid) + ' here.**').toJSON());
+        uploadContents.push(new TextDisplayBuilder().setContent('> ðŸ“¸ **Upload pictures for Raid #' + raidStateManager.getRaidDisplayId(raid) + ' here.**').toJSON());
         uploadContents.push(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small).toJSON());
-        uploadContents.push(new TextDisplayBuilder().setContent('• Send your **rally picture**, then type `rally` — it becomes the banner at the top of the result card.\n• Send the remaining raid result pictures (raid proof).\n• Type `ingame` to see the current in-game helpers and how long they’ve been participating.\n• Type `done` (by <@' + closerId + '>) to post the result card — or wait 10 minutes and the bot posts whatever was uploaded.\n• Click the button below to add an **Ender’s Note**.').toJSON());
+        uploadContents.push(new TextDisplayBuilder().setContent('â€¢ Send your **rally picture**, then type `rally` â€” it becomes the banner at the top of the result card.\nâ€¢ Send the remaining raid result pictures (raid proof).\nâ€¢ Type `ingame` to see the current in-game helpers and how long theyâ€™ve been participating.\nâ€¢ Type `done` (by <@' + closerId + '>) to post the result card â€” or wait 10 minutes and the bot posts whatever was uploaded.\nâ€¢ Click the button below to add an **Enderâ€™s Note**.').toJSON());
         uploadContents.push(new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('raid_endersnote_' + raid.raidId).setLabel('📝 Add Ender’s Note').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('raid_addallies_' + raid.raidId).setLabel('➕ Add Allies Name').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('raid_addallyclan_' + raid.raidId).setLabel('➕ Add Ally Clan Names').setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder().setCustomId('raid_endersnote_' + raid.raidId).setLabel('ðŸ“ Add Enderâ€™s Note').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('raid_addallies_' + raid.raidId).setLabel('âž• Add Allies Name').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('raid_addallyclan_' + raid.raidId).setLabel('âž• Add Ally Clan Names').setStyle(ButtonStyle.Secondary)
         ).toJSON());
         uploadInfoContainer.components = uploadContents;
         await tempChannel.send({ flags: 1 << 15, components: [uploadInfoContainer] }).catch(() => null);
@@ -979,7 +979,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
                     uploadedUrls.push(attachment.url);
                 }
             }
-            // `rally` — mark the rally picture: prefer the picture(s) sent in
+            // `rally` â€” mark the rally picture: prefer the picture(s) sent in
             // the SAME message, otherwise the most recently uploaded one.
             if (content === 'rally' && msg.author.id === closerId) {
                 if (msg.attachments && msg.attachments.size > 0) {
@@ -988,10 +988,10 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
                     rallyPicUrl = uploadedUrls.pop();
                 }
                 if (rallyPicUrl) {
-                    tempChannel.send({ content: '✅ Rally picture set — it will be the banner at the top of the result card. Send the remaining raid pictures and type `done` to post the result.' }).catch(() => null);
+                    tempChannel.send({ content: 'âœ… Rally picture set â€” it will be the banner at the top of the result card. Send the remaining raid pictures and type `done` to post the result.' }).catch(() => null);
                 }
             }
-            // `enders note <text>` (or `ender note`, `endersnote`, `endnote`) —
+            // `enders note <text>` (or `ender note`, `endersnote`, `endnote`) â€”
             // sets the Ender's Note on the result card. Also supports the
             // two-step form: send any free-text message, then type `enders note`
             // to use that text as the note (mirrors the `rally` flow).
@@ -1000,12 +1000,12 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
                 const note = (endersMatch[1] || '').trim();
                 if (note) {
                     endersNote = note;
-                    tempChannel.send({ content: '✅ Ender’s Note set — it will appear on the result card. Type `done` to post the result.' }).catch(() => null);
+                    tempChannel.send({ content: 'âœ… Enderâ€™s Note set â€” it will appear on the result card. Type `done` to post the result.' }).catch(() => null);
                 } else if (lastTextMessage) {
                     endersNote = lastTextMessage;
-                    tempChannel.send({ content: '✅ Ender’s Note set from your last message — it will appear on the result card. Type `done` to post the result.' }).catch(() => null);
+                    tempChannel.send({ content: 'âœ… Enderâ€™s Note set from your last message â€” it will appear on the result card. Type `done` to post the result.' }).catch(() => null);
                 } else {
-                    tempChannel.send({ content: '⚠️ Usage: type `enders note <your note>` (or send a message first, then type `enders note`).' }).catch(() => null);
+                    tempChannel.send({ content: 'âš ï¸ Usage: type `enders note <your note>` (or send a message first, then type `enders note`).' }).catch(() => null);
                 }
             }
             // Track the closer's last free-text message so `enders note` (no
@@ -1014,7 +1014,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
                 !/^(done|rally|ingame|enders?\s*note|endersnote|endnote|end note)\b/i.test(content)) {
                 lastTextMessage = msg.content.trim();
             }
-            // `ingame` — show the closer the CURRENT in-game helpers...
+            // `ingame` â€” show the closer the CURRENT in-game helpers...
             // participation time so far (snapshot; final times are computed on
             // close). Helpers already removed are not listed.
             if (content === 'ingame' && msg.author.id === closerId) {
@@ -1027,12 +1027,12 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
                                 (h.lastSeenTime ? Math.floor((Date.now() - h.lastSeenTime) / 1000) : 0);
                             const name = h.robloxDisplayName || h.robloxUsername || h.discordTag || `<@${h.userId}>`;
                             const hasRoblox = h.robloxUserId && h.robloxUserId !== '1';
-                            const timeStr = hasRoblox ? ` — in-game for ${raidStateManager.formatTimeSpent(secs)}` : ' — added as helper';
-                            return `• <@${h.userId}> — **${name}**${timeStr}`;
+                            const timeStr = hasRoblox ? ` â€” in-game for ${raidStateManager.formatTimeSpent(secs)}` : ' â€” added as helper';
+                            return `â€¢ <@${h.userId}> â€” **${name}**${timeStr}`;
                         })
-                    : ['• None yet'];
+                    : ['â€¢ None yet'];
                 tempChannel.send({
-                    content: `🎮 **In-Game Helpers** (live snapshot for raid #${raidStateManager.getRaidDisplayId(raid)}):\n` + liveHelpers.join('\n') +
+                    content: `ðŸŽ® **In-Game Helpers** (live snapshot for raid #${raidStateManager.getRaidDisplayId(raid)}):\n` + liveHelpers.join('\n') +
                         `\n\nType \`done\` to post the result card, \`rally\` to set a rally banner, or \`ingame\` to refresh this list.`
                 }).catch(() => null);
             }
@@ -1060,7 +1060,7 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
     }
 
     // Legacy fallback
-    await interaction.followUp({ content: '📸 Upload any pictures or files for this raid result in this channel. Send your rally picture and type `rally` to set it as the card banner, then reply with `done` when finished, or wait 30 seconds. The result will be sent automatically after.', ephemeral: true }).catch(() => null);
+    await interaction.followUp({ content: 'ðŸ“¸ Upload any pictures or files for this raid result in this channel. Send your rally picture and type `rally` to set it as the card banner, then reply with `done` when finished, or wait 30 seconds. The result will be sent automatically after.', ephemeral: true }).catch(() => null);
 
     const collectorChannel = interaction.channel || await interaction.client.channels.fetch(interaction.channelId).catch(() => null);
     if (!collectorChannel || !collectorChannel.isTextBased()) {
@@ -1099,11 +1099,11 @@ async function finalizeRaidOutcome(interaction, raid, outcome) {
                     .map((h) => {
                         const secs = (h.timeSpentSeconds || 0) +
                             (h.lastSeenTime ? Math.floor((Date.now() - h.lastSeenTime) / 1000) : 0);
-                        return `• <@${h.userId}> — **${h.robloxDisplayName || h.robloxUsername}** — in-game for ${raidStateManager.formatTimeSpent(secs)}`;
+                        return `â€¢ <@${h.userId}> â€” **${h.robloxDisplayName || h.robloxUsername}** â€” in-game for ${raidStateManager.formatTimeSpent(secs)}`;
                     });
-                await collectorChannel.send({ content: `🎮 **In-Game Helpers** (raid #${raidStateManager.getRaidDisplayId(liveRaid)}):\n` + liveHelpers.join('\n') }).catch(() => null);
+                await collectorChannel.send({ content: `ðŸŽ® **In-Game Helpers** (raid #${raidStateManager.getRaidDisplayId(liveRaid)}):\n` + liveHelpers.join('\n') }).catch(() => null);
             } else {
-                await collectorChannel.send({ content: '🎮 **In-Game Helpers**: None yet — keep raiding!' }).catch(() => null);
+                await collectorChannel.send({ content: 'ðŸŽ® **In-Game Helpers**: None yet â€” keep raiding!' }).catch(() => null);
             }
         }
     });
@@ -1136,7 +1136,7 @@ async function processHelpMonitors(client) {
         // Resolve raids UP FRONT so the raid requester's Roblox id joins the same
         // presence batch: the requester's CURRENT jobId is the reference that
         // exact instance matching compares against. Matching against a jobId
-        // captured once at request time is what used to break public servers —
+        // captured once at request time is what used to break public servers â€”
         // instances churn and the recorded id dies.
         const resolved = monitors.map(m => ({
             key: m.key,
@@ -1173,7 +1173,7 @@ async function processHelpMonitors(client) {
         for (const item of resolved) {
             const { key, userId, rec, raid } = item;
             // A raid that filled while this user waited can no longer admit
-            // them — release the monitor now instead of letting it idle to TTL.
+            // them â€” release the monitor now instead of letting it idle to TTL.
             if (!raid || raid.status === 'CLOSED') { pendingHelpMonitors.delete(key); continue; }
             const limit = Number(raid.helperLimit) || 0;
             if (limit > 0 && Array.isArray(raid.helpers) && raid.helpers.length >= limit) { pendingHelpMonitors.delete(key); continue; }
@@ -1216,9 +1216,9 @@ async function processHelpMonitors(client) {
                 await raidStateManager.editRaidAlertMessage(client, updated, { embeds: embeds, components: [row] });
             }
             pendingHelpMonitors.delete(key);
-            console.log('[help-monitor] <@' + userId + '> (' + rec.robloxUsername + ') detected in raid #' + rec.raidId + ' — Live Helpers');
+            console.log('[help-monitor] <@' + userId + '> (' + rec.robloxUsername + ') detected in raid #' + rec.raidId + ' â€” Live Helpers');
             try {
-                const dmEmbed = new EmbedBuilder().setTitle('✅ You Joined Raid #' + raidStateManager.getRaidDisplayId(updated) + '!').setDescription('You were detected inside the raid server and added to Live Helpers. Good luck!').setColor(0x57F287).setTimestamp();
+                const dmEmbed = new EmbedBuilder().setTitle('âœ… You Joined Raid #' + raidStateManager.getRaidDisplayId(updated) + '!').setDescription('You were detected inside the raid server and added to Live Helpers. Good luck!').setColor(0x57F287).setTimestamp();
                 const discordUser = await client.users.fetch(userId).catch(() => null);
                 if (discordUser) await discordUser.send({ embeds: [dmEmbed] }).catch(() => null);
             } catch (e) { /* ignore DM errors */ }
@@ -1228,7 +1228,7 @@ async function processHelpMonitors(client) {
     for (const [key, rec] of pendingHelpMonitors) {
         if (rec.expiresAt <= now) {
             try {
-                const dmEmbed = new EmbedBuilder().setTitle('⏰ Raid Check Expired').setDescription('We could not detect you joining the raid server within 10 minutes. Please ensure your Roblox privacy settings allow joins for **Everyone**, then press Help again.').setColor(0xED4245).setTimestamp();
+                const dmEmbed = new EmbedBuilder().setTitle('â° Raid Check Expired').setDescription('We could not detect you joining the raid server within 10 minutes. Please ensure your Roblox privacy settings allow joins for **Everyone**, then press Help again.').setColor(0xED4245).setTimestamp();
                 const discordUser = await client.users.fetch(rec.discordUserId || key.split(':').pop()).catch(() => null);
                 if (discordUser) await discordUser.send({ embeds: [dmEmbed] }).catch(() => null);
             } catch (e) { /* ignore */ }
@@ -1329,7 +1329,7 @@ module.exports = {
             if (!command) {
                 console.warn(`No local handler for /${interaction.commandName || 'unknown'} - acknowledging instead of timing out.`);
                 return interaction.reply({
-                    content: '⚠️ This command is not loaded on the bot instance. Please try again in a few seconds.',
+                    content: 'âš ï¸ This command is not loaded on the bot instance. Please try again in a few seconds.',
                     flags: 64
                 }).catch(() => null);
             }
@@ -1372,7 +1372,7 @@ module.exports = {
                 console.error('[announcement] dispatch error:', err);
                 if (!interaction.replied && !interaction.deferred) {
                     return interaction.reply({
-                        content: '❌ Announcement builder error: `' + String((err && err.message) || err).slice(0, 300) + '`',
+                        content: 'âŒ Announcement builder error: `' + String((err && err.message) || err).slice(0, 300) + '`',
                         flags: 64
                     }).catch(() => null);
                 }
@@ -1385,13 +1385,13 @@ module.exports = {
         // Any button / select menu / role select with a `pingsetup_` customId
         // belongs to the /pingsetup builder (admin-managed country/region ping
         // roles, stored permanently in the shared Postgres table). Routed
-        // through the SAME interaction system — no second listener. Required
+        // through the SAME interaction system â€” no second listener. Required
         // lazily to keep startup light (mirrors the announcement pattern).
         if (interaction.customId && typeof interaction.customId === 'string' && interaction.customId.startsWith('pingsetup_')) {
             const pingSetupCmd = require('../commands/pingsetup');
             const handled = await pingSetupCmd.handlePingSetupComponent(interaction).catch((err) => {
                 console.error('[pingsetup] dispatch error:', err);
-                const errText = '❌ Ping setup error: `' + String((err && err.message) || err).slice(0, 300) + '`';
+                const errText = 'âŒ Ping setup error: `' + String((err && err.message) || err).slice(0, 300) + '`';
                 try {
                     if (interaction.deferred || interaction.replied) {
                         interaction.followUp({ content: errText, flags: 64 }).catch(() => null);
@@ -1408,13 +1408,13 @@ module.exports = {
         // Any role-select / button with an `adminsetup_` customId belongs to the
         // /adminsetup builder (per-guild raid-admin roles, stored permanently in
         // the Supabase `guild_configs` table). Routed through the SAME
-        // interaction system — no second listener. Required lazily to keep
+        // interaction system â€” no second listener. Required lazily to keep
         // startup light (mirrors the pingsetup / announcement pattern).
         if (interaction.customId && typeof interaction.customId === 'string' && interaction.customId.startsWith('adminsetup_')) {
             const adminSetupCmd = require('../commands/adminsetup');
             const handled = await adminSetupCmd.handleAdminSetupComponent(interaction).catch((err) => {
                 console.error('[adminsetup] dispatch error:', err);
-                const errText = '❌ Admin setup error: `' + String((err && err.message) || err).slice(0, 300) + '`';
+                const errText = 'âŒ Admin setup error: `' + String((err && err.message) || err).slice(0, 300) + '`';
                 try {
                     if (interaction.deferred || interaction.replied) {
                         interaction.followUp({ content: errText, flags: 64 }).catch(() => null);
@@ -1426,7 +1426,7 @@ module.exports = {
             });
             if (handled) return;
         }
-        // Handle raid request buttons — the backuppanel "Request backup" button
+        // Handle raid request buttons â€” the backuppanel "Request backup" button
         // (request_backup), plus the legacy request_raid id so panels posted by
         // the old /requestraid command keep working. Auto-detect game/region/server.
         if (interaction.customId === "request_raid" || interaction.customId === "request_backup") {
@@ -1476,7 +1476,7 @@ module.exports = {
             pendingCountryCodes.set(interaction.user.id, detection.countryCode || '');
 
             // When auto-detection could not resolve a region / data-center id, do
-            // NOT block the user — instead surface a manual region dropdown so
+            // NOT block the user â€” instead surface a manual region dropdown so
             // they can pick the region (and the matching Supabase ping config is
             // still resolved automatically from the chosen region/country).
             const regionUnknown = !detection.region || detection.region === 'Unknown';
@@ -1492,13 +1492,13 @@ module.exports = {
                 });
                 const select = new StringSelectMenuBuilder()
                     .setCustomId('raid_region_select')
-                    .setPlaceholder('Choose a region (auto-detection failed)…')
+                    .setPlaceholder('Choose a region (auto-detection failed)â€¦')
                     .addOptions(REGION_CATALOG.map((r) => new StringSelectMenuOptionBuilder()
                         .setLabel(`${r.emoji} ${r.label}`)
                         .setValue(r.key)));
                 const row = new ActionRowBuilder().addComponents(select);
                 return interaction.editReply({
-                    content: '⚠️ Auto-detection could not resolve a region / data-center id. Pick the region manually below — Supabase ping settings will still be applied automatically.',
+                    content: 'âš ï¸ Auto-detection could not resolve a region / data-center id. Pick the region manually below â€” Supabase ping settings will still be applied automatically.',
                     components: [row],
                     flags: 64
                 }).catch(() => null);
@@ -1507,12 +1507,12 @@ module.exports = {
             const openFormButton = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId("open_raid_application")
-                    .setLabel("⚔️ Open Raid Application Form")
+                    .setLabel("âš”ï¸ Open Raid Application Form")
                     .setStyle(ButtonStyle.Primary)
             );
 
             return interaction.editReply({
-                content: "✅ Game & server detected! Click the button below to open the raid application form.",
+                content: "âœ… Game & server detected! Click the button below to open the raid application form.",
                 components: [openFormButton],
                 flags: 64
             }).catch(() => null);
@@ -1571,7 +1571,7 @@ module.exports = {
             return interaction.showModal(modal).catch(() => null);
         }
 
-        // Handle backup panel channel selection — post the panel through a
+        // Handle backup panel channel selection â€” post the panel through a
         // webhook named "backuppanel" (dummy profile with the branded avatar)
         // instead of the bot account itself.
         if (interaction.customId === "post_backuppanel") {
@@ -1592,7 +1592,7 @@ module.exports = {
             }
 
             await interaction.reply({
-                content: `Posting the backup panel in <#${selectedChannel.id}>…`,
+                content: `Posting the backup panel in <#${selectedChannel.id}>â€¦`,
                 flags: 64
             }).catch(() => null);
 
@@ -1622,7 +1622,7 @@ module.exports = {
                         reason: `Backup panel dummy profile (created by ${interaction.user.tag})`
                     });
                 } else if (!webhook.avatarURL() && avatarBuffer) {
-                    // Existing webhook still has Discord's default avatar —
+                    // Existing webhook still has Discord's default avatar â€”
                     // apply the branded avatar once.
                     await webhook.edit({ avatar: avatarBuffer }).catch(() => null);
                 }
@@ -1634,11 +1634,11 @@ module.exports = {
                 });
 
                 await interaction.editReply({
-                    content: `✅ Backup panel posted in <#${selectedChannel.id}> via the **${backupPanel.BACKUP_PANEL_WEBHOOK_NAME}** profile.`
+                    content: `âœ… Backup panel posted in <#${selectedChannel.id}> via the **${backupPanel.BACKUP_PANEL_WEBHOOK_NAME}** profile.`
                 }).catch(() => null);
             } catch (err) {
                 console.error("Failed to post backup panel:", err);
-                const errText = '❌ Failed to post the backup panel: `' +
+                const errText = 'âŒ Failed to post the backup panel: `' +
                     String((err && err.message) || err).slice(0, 300) + '`';
                 if (interaction.deferred || interaction.replied) {
                     await interaction.editReply({ content: errText }).catch(() => null);
@@ -1681,7 +1681,7 @@ module.exports = {
                 });
             }
 
-            // Check if already verified — GLOBAL link first, per-guild legacy row
+            // Check if already verified â€” GLOBAL link first, per-guild legacy row
             // as a fallback so older links keep working until migrated.
             const globalExisting = await robloxLinks.getGlobalRobloxLink(interaction.user.id).catch(() => null);
             const globalLink = globalExisting && globalExisting.ok ? globalExisting.link : null;
@@ -1733,7 +1733,7 @@ module.exports = {
             const robloxAvatarUrl = validation.avatarUrl;
             const profileLink = `https://www.roblox.com/users/${robloxUserId}/profile`;
 
-            // Save the GLOBAL permanent link (Supabase) first — this is the
+            // Save the GLOBAL permanent link (Supabase) first â€” this is the
             // source of truth every guild reads. Keep the per-guild legacy row
             // as a fallback mirror so old guild-scoped checks keep working.
             try {
@@ -1769,7 +1769,7 @@ module.exports = {
 
             const successEmbed = new EmbedBuilder()
                 .setTitle('Roblox Account Linked')
-                .setDescription(`✅ Successfully linked as ${robloxDisplayName}!`)
+                .setDescription(`âœ… Successfully linked as ${robloxDisplayName}!`)
                 .addFields([
                     { name: 'Roblox Profile', value: `[${robloxDisplayName} (@${robloxUsername})](${profileLink})`, inline: false },
                     { name: 'Roblox User ID', value: `\`${robloxUserId}\``, inline: true },
@@ -1784,7 +1784,7 @@ module.exports = {
             await interaction.reply({ embeds: [successEmbed], flags: 64 });
         }
 
-        // Handle unlink roblox button click — GLOBAL unlink: the link belongs to
+        // Handle unlink roblox button click â€” GLOBAL unlink: the link belongs to
         // the Discord user, not the server, so removing it here removes it
         // everywhere. The per-guild legacy row is cleared too as a mirror.
         if (interaction.customId === "unlink_roblox") {
@@ -1833,7 +1833,7 @@ module.exports = {
             return interaction.reply({
                 embeds: [new EmbedBuilder()
                     .setTitle('Roblox Account Unlinked')
-                    .setDescription(`✅ Successfully unlinked **${unlinkedName}**. You can now link a different Roblox account using the **Link Roblox account** button on the backup panel.`)
+                    .setDescription(`âœ… Successfully unlinked **${unlinkedName}**. You can now link a different Roblox account using the **Link Roblox account** button on the backup panel.`)
                     .setColor(0x9B59B6)
                     .setThumbnail(unlinkedAvatar)
                     .setFooter({ text: 'Kakuzu Verification System', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) })
@@ -1844,9 +1844,10 @@ module.exports = {
         if (interaction.customId.startsWith("raid_application_step1")) {
             const userId = interaction.user.id;
             const guildId = interaction.guild.id;
+            await interaction.deferReply({ flags: 64 }).catch(() => null);
             raidStateManager.cleanupPendingRaids(userId, guildId);
             if (!raidStateManager.canCreateRaid(userId, guildId)) {
-                return interaction.reply({ content: "You already have an open raid. Close the existing raid first.", flags: 64 }).catch(() => null);
+                return interaction.editReply({ content: "You already have an open raid. Close the existing raid first.", flags: 64 }).catch(() => null);
             }
 
             const game = pendingGameSelections.get(userId);
@@ -1860,7 +1861,7 @@ module.exports = {
             if (!game || !region) {
                 pendingGameSelections.delete(userId);
                 pendingRegionSelections.delete(userId);
-                return interaction.reply({ content: "Game detection expired. Please try again.", flags: 64 }).catch(() => null);
+                return interaction.editReply({ content: "Game detection expired. Please try again.", flags: 64 }).catch(() => null);
             }
 
             const enemyNamesInput = interaction.fields.getTextInputValue("enemyNames").trim();
@@ -1870,10 +1871,10 @@ module.exports = {
             const reason = interaction.fields.getTextInputValue("reason");
 
             if (!enemyNamesInput) {
-                return interaction.reply({ content: "Please enter the enemy names.", flags: 64 }).catch(() => null);
+                return interaction.editReply({ content: "Please enter the enemy names.", flags: 64 }).catch(() => null);
             }
             if (Number.isNaN(helperLimit) || helperLimit < 1 || helperLimit > 20) {
-                return interaction.reply({ content: "Helpers needed must be a number between 1 and 20.", flags: 64 }).catch(() => null);
+                return interaction.editReply({ content: "Helpers needed must be a number between 1 and 20.", flags: 64 }).catch(() => null);
             }
 
             const enemyNames = enemyNamesInput.split(',').map(n => n.trim()).filter(Boolean);
@@ -1929,7 +1930,7 @@ module.exports = {
             const regionRoleInfo = await getRaidPingInfo(interaction.client, guildId, { countryCode, region });
 
             if (!settings.resultChannel) {
-                return interaction.reply({ content: 'Result channel is not configured. Please run `/setchannels` and set the `result_channel` first — raid alerts are posted in a temporary channel created in the same category.', flags: 64 }).catch(() => null);
+                return interaction.reply({ content: 'Result channel is not configured. Please run `/setchannels` and set the `result_channel` first â€” raid alerts are posted in a temporary channel created in the same category.', flags: 64 }).catch(() => null);
             }
 
             const completionEmbed = new EmbedBuilder()
@@ -1955,14 +1956,14 @@ module.exports = {
             const alertChannel = await raidStateManager.createRaidAlertChannel(interaction.client, raid, guildId, alertCategoryId);
             if (!alertChannel) {
                 raidStateManager.cleanupPendingRaids(userId, guildId);
-                return interaction.followUp({ content: '⚠️ Could not create the temporary raid alert channel. Please make sure the bot has **Manage Channels** permission in the result channel category.', flags: 64 }).catch(() => null);
+                return interaction.followUp({ content: 'âš ï¸ Could not create the temporary raid alert channel. Please make sure the bot has **Manage Channels** permission in the result channel category.', flags: 64 }).catch(() => null);
             }
 
             const alertWebhook = await raidStateManager.getRaidAlertWebhook(alertChannel);
             if (!alertWebhook) {
                 raidStateManager.cleanupPendingRaids(userId, guildId);
-                await alertChannel.delete('Raid alert setup failed — no webhook permission').catch(() => null);
-                return interaction.followUp({ content: '⚠️ Could not create the `backupalerts` webhook. Please make sure the bot has **Manage Webhooks** permission.', flags: 64 }).catch(() => null);
+                await alertChannel.delete('Raid alert setup failed â€” no webhook permission').catch(() => null);
+                return interaction.followUp({ content: 'âš ï¸ Could not create the `backupalerts` webhook. Please make sure the bot has **Manage Webhooks** permission.', flags: 64 }).catch(() => null);
             }
 
             try {
@@ -2001,7 +2002,7 @@ module.exports = {
                     raidStateManager.cleanupPendingRaids(userId, guildId);
                     // The channel never got a live alert -> remove it shortly.
                     raidStateManager.scheduleRaidAlertChannelDeletion(interaction.client, raid.raidId, guildId, 5000);
-                    await interaction.followUp({ content: '⚠️ The raid alert could not be posted. Please ask an admin to verify the bot permissions and try again.', flags: 64 }).catch(() => null);
+                    await interaction.followUp({ content: 'âš ï¸ The raid alert could not be posted. Please ask an admin to verify the bot permissions and try again.', flags: 64 }).catch(() => null);
                 }
             }
         }
@@ -2085,8 +2086,8 @@ module.exports = {
 
         // ===== RAID OPERATIONS: help / edit / accept / leave / close / outcome / mvp =====
         
-        // [ Help ] — green PUBLIC button: the user asks to join a raid.
-        // Flow: must be linked → given server link + temporary presence monitor.
+        // [ Help ] â€” green PUBLIC button: the user asks to join a raid.
+        // Flow: must be linked â†’ given server link + temporary presence monitor.
         // Only when Roblox presence confirms they are in the exact raid server
         // are they added to Live Helpers (handled in the presence loop).
         // No "pending helper" status is ever shown.
@@ -2105,18 +2106,18 @@ module.exports = {
             }
             const alreadyHelper = Array.isArray(raid.helpers) && raid.helpers.some(h => typeof h === 'object' && h.userId === interaction.user.id);
             if (alreadyHelper) {
-                await interaction.reply({ content: '✅ You are already a helper on this raid!', flags: 64 }).catch(() => null);
+                await interaction.reply({ content: 'âœ… You are already a helper on this raid!', flags: 64 }).catch(() => null);
                 return;
             }
             const limit = Number(raid.helperLimit) || 0;
             if (limit > 0 && Array.isArray(raid.helpers) && raid.helpers.length >= limit) {
-                await interaction.reply({ content: '⚠️ This raid is already full (' + limit + '/' + limit + ' helpers).', flags: 64 }).catch(() => null);
+                await interaction.reply({ content: 'âš ï¸ This raid is already full (' + limit + '/' + limit + ' helpers).', flags: 64 }).catch(() => null);
                 return;
             }
             // GLOBAL link lookup (same shared service as raid requests): a link
             // made in any Kakuzu server works here. Field shapes differ between
             // stores (global: `verified`/`roblox_user_id`, legacy sqlite:
-            // `is_verified`/`roblox_user_id`), so normalize before checking —
+            // `is_verified`/`roblox_user_id`), so normalize before checking â€”
             // the old inline `vdata.is_verified || vdata.verified` check treated
             // valid global rows as unlinked whenever only one flag was set.
             // DB outage with a usable cached/global row still admits the helper;
@@ -2142,7 +2143,7 @@ module.exports = {
                 const channelId = settings && settings.verificationChannel;
                 const linkBtn = new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Link Roblox Account').setURL('https://www.roblox.com');
                 const row = new ActionRowBuilder().addComponents(linkBtn);
-                const embed = new EmbedBuilder().setTitle('🔒 Roblox Account Required').setDescription('You must link your Roblox account before you can join a raid.' + (channelId ? '\n\nPlease link your account in <#' + channelId + '> first, then press Help again.' : '')).setColor(0xED4245);
+                const embed = new EmbedBuilder().setTitle('ðŸ”’ Roblox Account Required').setDescription('You must link your Roblox account before you can join a raid.' + (channelId ? '\n\nPlease link your account in <#' + channelId + '> first, then press Help again.' : '')).setColor(0xED4245);
                 await interaction.reply({ embeds: [embed], components: [row], flags: 64 }).catch(() => null);
                 return;
             }
@@ -2150,20 +2151,20 @@ module.exports = {
             if (pendingHelpMonitors.has(monitorKey)) {
                 const rec = pendingHelpMonitors.get(monitorKey);
                 const remaining = Math.max(0, Math.ceil((rec.expiresAt - Date.now()) / 60000));
-                await interaction.reply({ content: '⏳ We are already checking whether you joined the server. Please enter the raid and wait — the check expires in ' + remaining + ' minute(s).', flags: 64 }).catch(() => null);
+                await interaction.reply({ content: 'â³ We are already checking whether you joined the server. Please enter the raid and wait â€” the check expires in ' + remaining + ' minute(s).', flags: 64 }).catch(() => null);
                 return;
             }
             const serverLink = buildRobloxJoinLink(raid);
             const gameLabel = raidStateManager.GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
             const joinRow = serverLink ? new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Join Raid Server').setURL(serverLink)) : null;
-            const embed = new EmbedBuilder().setTitle('🎮 Raid #' + raidStateManager.getRaidDisplayId(raid) + ' — Join Server').setDescription('Click the button below to join the raid server. Once you are in-game, the bot will automatically detect you and add you to the Live Helpers list.').addFields([{ name: 'Game', value: gameLabel, inline: true }, { name: 'Region', value: raid.region || 'Unknown', inline: true }, { name: 'Raid ID', value: '#' + raidStateManager.getRaidDisplayId(raid), inline: true }]).setColor(0x57F287).setFooter({ text: 'You have 10 minutes to join the server.', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) }).setTimestamp();
+            const embed = new EmbedBuilder().setTitle('ðŸŽ® Raid #' + raidStateManager.getRaidDisplayId(raid) + ' â€” Join Server').setDescription('Click the button below to join the raid server. Once you are in-game, the bot will automatically detect you and add you to the Live Helpers list.').addFields([{ name: 'Game', value: gameLabel, inline: true }, { name: 'Region', value: raid.region || 'Unknown', inline: true }, { name: 'Raid ID', value: '#' + raidStateManager.getRaidDisplayId(raid), inline: true }]).setColor(0x57F287).setFooter({ text: 'You have 10 minutes to join the server.', iconURL: interaction.client.user.displayAvatarURL({ size: 64 }) }).setTimestamp();
             await interaction.reply({ embeds: [embed], components: joinRow ? [joinRow] : [], flags: 64 }).catch(() => null);
             pendingHelpMonitors.set(monitorKey, { guildId, raidId, discordUserId: interaction.user.id, robloxUserId: String(vdata.roblox_user_id), robloxUsername: vdata.roblox_username, displayName: vdata.roblox_display_name || vdata.roblox_username, avatarUrl: vdata.roblox_avatar_url || null, expiresAt: Date.now() + HELP_MONITOR_TTL_MS });
-            console.log('[help-monitor] <@' + interaction.user.id + '> (' + vdata.roblox_username + ') pressing help on raid #' + raidId + ' — monitoring started');
+            console.log('[help-monitor] <@' + interaction.user.id + '> (' + vdata.roblox_username + ') pressing help on raid #' + raidId + ' â€” monitoring started');
             return;
         }
 
-        // [ Edit ] — grey staff/requester button: opens a modal to edit hostile
+        // [ Edit ] â€” grey staff/requester button: opens a modal to edit hostile
         // name / clan / count, then edits the existing alert message in place.
         if (interaction.isButton() && typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_edit_')) {
             const raidId = Number(interaction.customId.split('_')[2]);
@@ -2274,13 +2275,13 @@ module.exports = {
             // STRICT PER-GUILD GATE: requester or a raid admin of THIS guild only.
             if (!(await guardRaidAction(interaction, raid))) return;
             const outcomeRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`raid_outcome_win_${raidId}`).setLabel('🏆 Win').setStyle(ButtonStyle.Success),
-                new ButtonBuilder().setCustomId(`raid_outcome_whooped_${raidId}`).setLabel('🔥 Whooped').setStyle(ButtonStyle.Danger),
-                new ButtonBuilder().setCustomId(`raid_outcome_loss_${raidId}`).setLabel('❌ Loss').setStyle(ButtonStyle.Danger),
-                new ButtonBuilder().setCustomId(`raid_outcome_nolog_${raidId}`).setLabel('🚫 No Result').setStyle(ButtonStyle.Secondary)
+                new ButtonBuilder().setCustomId(`raid_outcome_win_${raidId}`).setLabel('ðŸ† Win').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId(`raid_outcome_whooped_${raidId}`).setLabel('ðŸ”¥ Whooped').setStyle(ButtonStyle.Danger),
+                new ButtonBuilder().setCustomId(`raid_outcome_loss_${raidId}`).setLabel('âŒ Loss').setStyle(ButtonStyle.Danger),
+                new ButtonBuilder().setCustomId(`raid_outcome_nolog_${raidId}`).setLabel('ðŸš« No Result').setStyle(ButtonStyle.Secondary)
             );
             await interaction.reply({
-                content: '📊 **Select the final raid outcome to compile streaks and log metrics:**',
+                content: 'ðŸ“Š **Select the final raid outcome to compile streaks and log metrics:**',
                 components: [outcomeRow],
                 flags: 64
             }).catch(() => null);
@@ -2294,13 +2295,13 @@ module.exports = {
             if (Number.isNaN(raidId)) return;
             const raid = raidStateManager.getRaidById(raidId, interaction.guild?.id);
             if (!raid || raid.status === 'CLOSED') {
-                await interaction.reply({ content: '❌ This raid record has already been locked.', flags: 64 }).catch(() => null);
+                await interaction.reply({ content: 'âŒ This raid record has already been locked.', flags: 64 }).catch(() => null);
                 return;
             }
             // STRICT PER-GUILD GATE: requester or a raid admin of THIS guild only.
             if (!(await guardRaidAction(interaction, raid))) return;
 
-            // 🚫 No Result — close the raid WITHOUT a result card, streaks or
+            // ðŸš« No Result â€” close the raid WITHOUT a result card, streaks or
             // metrics. A simple "no results recorded" note embed is posted to
             // the configured result channel instead, and the upload-collection
             // channel is skipped entirely.
@@ -2313,7 +2314,7 @@ module.exports = {
                 let closedRaid = raidStateManager.getRaidById(raidId, interaction.guild.id) || raid;
                 closedRaid.status = 'CLOSED';
                 closedRaid.outcome = 'nolog';
-                await interaction.reply({ content: '✅ Raid closed — no result card will be posted.', flags: 64 }).catch(() => null);
+                await interaction.reply({ content: 'âœ… Raid closed â€” no result card will be posted.', flags: 64 }).catch(() => null);
                 await markRaidAlertClosed(interaction, closedRaid);
                 const nologSettings = await raidStateManager.loadRaidSettings(interaction.guild.id);
                 if (nologSettings.resultChannel) {
@@ -2350,7 +2351,7 @@ module.exports = {
                 raidStateManager.setRaidMvp(raidId, mvpUserId, interaction.guild.id);
                 finalRaid = raidStateManager.getRaidById(raidId, interaction.guild.id) || finalRaid;
             }
-            await interaction.reply({ content: `✅ Combat operation logs compiled as **${outcome.toUpperCase()}**!`, flags: 64 }).catch(() => null);
+            await interaction.reply({ content: `âœ… Combat operation logs compiled as **${outcome.toUpperCase()}**!`, flags: 64 }).catch(() => null);
             await finalizeRaidOutcome(interaction, finalRaid, outcome);
             return;
         }
@@ -2360,7 +2361,7 @@ module.exports = {
             const pending = pendingDetections.get(interaction.user.id);
             pendingDetections.delete(interaction.user.id);
             if (!pending || !chosenRegion) {
-                await interaction.update({ content: '❌ Region selection expired. Please try again.', components: [], flags: 64 }).catch(() => null);
+                await interaction.update({ content: 'âŒ Region selection expired. Please try again.', components: [], flags: 64 }).catch(() => null);
                 return;
             }
             pendingGameSelections.set(interaction.user.id, pending.game);
@@ -2374,11 +2375,11 @@ module.exports = {
             const openFormButton = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId("open_raid_application")
-                    .setLabel("⚔️ Open Raid Application Form")
+                    .setLabel("âš”ï¸ Open Raid Application Form")
                     .setStyle(ButtonStyle.Primary)
             );
             await interaction.update({
-                content: `✅ Region set to ${chosenRegion}. Click the button below to open the raid application form.`,
+                content: `âœ… Region set to ${chosenRegion}. Click the button below to open the raid application form.`,
                 components: [openFormButton],
                 flags: 64
             }).catch(() => null);
@@ -2393,14 +2394,14 @@ module.exports = {
             pendingRaidOutcomes.delete(raidId);
             let raid = raidStateManager.getRaidById(raidId, interaction.guild.id);
             if (!raid || raid.status !== 'CLOSED') {
-                await interaction.reply({ content: '❌ This raid has already been finalized.', flags: 64 }).catch(() => null);
+                await interaction.reply({ content: 'âŒ This raid has already been finalized.', flags: 64 }).catch(() => null);
                 return;
             }
             // STRICT PER-GUILD GATE: requester or a raid admin of THIS guild only.
             if (!(await guardRaidAction(interaction, raid))) return;
             const actualOutcome = outcome || raid.outcome;
             if (!actualOutcome) {
-                await interaction.reply({ content: '❌ Could not determine the raid outcome.', flags: 64 }).catch(() => null);
+                await interaction.reply({ content: 'âŒ Could not determine the raid outcome.', flags: 64 }).catch(() => null);
                 return;
             }
             if (mvpUserId !== 'skip') {
@@ -2408,7 +2409,7 @@ module.exports = {
                 raid = raidStateManager.getRaidById(raidId, interaction.guild.id);
             }
             await interaction.update({
-                content: `🏆 MVP set to ${mvpUserId !== 'skip' ? '<@' + mvpUserId + '>' : 'none'}. Compiling raid result...`,
+                content: `ðŸ† MVP set to ${mvpUserId !== 'skip' ? '<@' + mvpUserId + '>' : 'none'}. Compiling raid result...`,
                 components: [],
                 flags: 64
             }).catch(() => null);
@@ -2449,7 +2450,7 @@ module.exports = {
                     await raidStateManager.editRaidAlertMessage(interaction.client, raid, { embeds: embeds, components: [row] });
                 }
             }
-            await interaction.reply({ content: '✅ Raid fields updated in the alert.', flags: 64 }).catch(() => null);
+            await interaction.reply({ content: 'âœ… Raid fields updated in the alert.', flags: 64 }).catch(() => null);
             return;
         }
 
@@ -2464,14 +2465,14 @@ module.exports = {
             }
 
             // The Roblox validation + sql.js writes below can exceed Discord's
-            // 3-second interaction window — defer FIRST so nothing silently dies
+            // 3-second interaction window â€” defer FIRST so nothing silently dies
             // with "The application did not respond" and no helper ever recorded.
             await interaction.deferReply({ flags: 64 }).catch(() => null);
 
             try {
             const robloxValidation = await robloxApi.validateAndGetAvatar(helperUsername);
             if (!robloxValidation.success) {
-                await interaction.editReply({ content: `❌ **Roblox Username Validation Failed**\n${robloxValidation.error}`, flags: 64 }).catch(() => null);
+                await interaction.editReply({ content: `âŒ **Roblox Username Validation Failed**\n${robloxValidation.error}`, flags: 64 }).catch(() => null);
                 return;
             }
             // Helpers use the SAME global link service as requesters: joining
@@ -2524,7 +2525,7 @@ module.exports = {
             // Send the helper their deployment info.
             const gameLabel = raidStateManager.GAME_CONFIG[updated.targetGame] || updated.targetGame || 'Unknown';
             const helperEmbed = new EmbedBuilder()
-                .setTitle(`Raid #${raidStateManager.getRaidDisplayId(updated)} — Join Deployment`)
+                .setTitle(`Raid #${raidStateManager.getRaidDisplayId(updated)} â€” Join Deployment`)
                 .setDescription('You have been accepted as a helper for this raid.')
                 .addFields([
                     { name: 'Game', value: gameLabel, inline: true },
@@ -2542,14 +2543,14 @@ module.exports = {
                 )
                 : null;
             await interaction.editReply({
-                content: `✅ Raid Request Accepted!`,
+                content: `âœ… Raid Request Accepted!`,
                 embeds: [helperEmbed],
                 components: joinRow ? [joinRow] : [],
                 flags: 64
             }).catch(() => null);
             } catch (err) {
                 console.error('[raid accept] join flow failed:', err);
-                const msg = '❌ Join failed: `' + ((err && err.message) || String(err)) + '`';
+                const msg = 'âŒ Join failed: `' + ((err && err.message) || String(err)) + '`';
                 if (interaction.deferred || interaction.replied) {
                     await interaction.editReply({ content: msg, flags: 64 }).catch(() => null);
                 } else {
@@ -2564,7 +2565,7 @@ module.exports = {
         // handlers that throw (or hit an unexpected ack state) must still get
         // a visible safe reply, never "The application did not respond".
         console.error(`[interaction] FAILED ${cmdLabel}:`, (topErr && topErr.stack) || topErr);
-        await safeReplyError('❌ Something went wrong handling that interaction. Please try again.');
+        await safeReplyError('âŒ Something went wrong handling that interaction. Please try again.');
     } finally {
         try {
             console.log(`[interaction] done ${cmdLabel} in ${Date.now() - startedAt}ms`);
@@ -2572,4 +2573,6 @@ module.exports = {
     }
     } // end execute
 };
+
+
 
