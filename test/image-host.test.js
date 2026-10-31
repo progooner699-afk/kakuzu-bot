@@ -296,7 +296,7 @@ test('the fallback result embed renders Raid Proof as CLICKABLE markdown links',
         proofUrls: ['https://files.catbox.moe/a.png', 'https://files.catbox.moe/b.png'],
         streakMessage: '**Current Streak:** None tracking'
     });
-    const field = embed.data.fields.find(f => f.name === 'Raid Proof');
+    const field = embed.data.fields.find(f => f.name === '📸 Raid Proof');
     assert.ok(field, 'Raid Proof field exists');
     assert.ok(field.value.includes('[Image 1](https://files.catbox.moe/a.png)'),
         'Image 1 must be a markdown link, got: ' + field.value);

@@ -36,7 +36,7 @@ const RAID_RESULT_V2_FLAGS = 1 << 15;
 
 // Accent color matched to Discord's dark chat background (#2b2d31) so the
 // Container's left accent bar is effectively invisible.
-const RESULT_NEUTRAL_COLOR = 0x2B2D31;
+const RESULT_NEUTRAL_COLOR = 0x111111;
 
 // Default top banner (hosted on catbox.moe — permanent, hotlinkable URL).
 // Replaced by the uploaded RALLY PICTURE whenever the raid closer marks one
@@ -173,10 +173,10 @@ function buildResultCardPayload(opts) {
     contents.push(text(
         '## \uD83C\uDFC6 ' + style.title + ' — #' + raid.raidId + NL +
         NL +
-        '### ' + INFO_EMOJI + ' INFO`' + NL +
-        DOT + ' **Requested By:** ' + (raid.requesterId ? '<@' + raid.requesterId + '>' : '**Unknown**') + NL +
-        DOT + ' **Ended By:** ' + (submitterId ? '<@' + submitterId + '>' : '**Unknown**') + NL +
-        DOT + ' **Raid Duration:** `' + rsm.formatTimeSpent(durationSeconds) + '`' + NL +
+        '### ℹ️ INFO' + NL +
+        DOT + ' 👤 **Requested By:** ' + (raid.requesterId ? '<@' + raid.requesterId + '>' : '**Unknown**') + NL +
+        DOT + ' 👤 **Ended By:** ' + (submitterId ? '<@' + submitterId + '>' : '**Unknown**') + NL +
+        DOT + ' 🕒 **Raid Duration:** `' + rsm.formatTimeSpent(durationSeconds) + '`' + NL +
         (noteText
             ? NL + '> \uD83D\uDCDD **Ender\u2019s Note**`' + NL + '> ' + String(noteText).replace(/\n/g, ' ')
             : '')
@@ -214,29 +214,46 @@ function buildResultCardPayload(opts) {
     }
 
     // --- Enemy / game / location / times / proof block ---
+    // --- Code block: REGION / ENEMY CLAN / ALLY CLAN boxes (horizontal) ---
+    function padBox(s, w) { return String(s || '').slice(0, w).padEnd(w, ' '); }
+    const boxW = 14;
+    const regionVal = padBox(raid.region || 'Unknown', boxW);
+    const enemyClanVal = padBox(raid.enemyClanNames || 'None', boxW);
+    const allyClanVal = padBox(raid.allyClanNames || 'None', boxW);
+    const regionLab = padBox('REGION', boxW);
+    const enemyLab = padBox('ENEMY CLAN', boxW);
+    const allyLab = padBox('ALLY CLAN', boxW);
+    const codeBlock =
+        '┌' + '─'.repeat(boxW + 2) + '┐ ┌' + '─'.repeat(boxW + 2) + '┐ ┌' + '─'.repeat(boxW + 2) + '┐' + NL +
+        '│ ' + regionLab + ' │ │ ' + enemyLab + ' │ │ ' + allyLab + ' │' + NL +
+        '│ ' + regionVal + ' │ │ ' + enemyClanVal + ' │ │ ' + allyClanVal + ' │' + NL +
+        '└' + '─'.repeat(boxW + 2) + '┘ └' + '─'.repeat(boxW + 2) + '┘ └' + '─'.repeat(boxW + 2) + '┘';
+    contents.push(text('```\n' + codeBlock + '\n```'));
+    contents.push(separator());
+
     const gameLabel = rsm.GAME_CONFIG[raid.targetGame] || raid.targetGame || 'Unknown';
     const enemiesText = raid.enemyNames || 'None';
 
     const proofLinks = buildProofLinks(proofUrls);
 
     contents.push(text(
-        DOT + ' **Enemy Clan:** ' + (raid.enemyClanNames || 'None') + ' ' + NL +
-        DOT + ' **Enemies — ' + (raid.enemyCount || 0) + ':** ' + enemiesText + ' ' + NL +
-        DOT + ' **Ally Clan:** ' + (raid.allyClanNames || 'None') + ' ' + NL +
-        DOT + ' **Allies:** ' + (raid.allyNames || 'None') + ' ' + NL +
+        DOT + ' ⚔️ **Enemy Clan:** ' + (raid.enemyClanNames || 'None') + ' ' + NL +
+        DOT + ' ⚔️ **Enemies — ' + (raid.enemyCount || 0) + ':** ' + enemiesText + ' ' + NL +
+        DOT + ' 🛡️ **Ally Clan:** ' + (raid.allyClanNames || 'None') + ' ' + NL +
+        DOT + ' 🛡️ **Allies:** ' + (raid.allyNames || 'None') + ' ' + NL +
         NL +
-        DOT + ' **Game:** ' + gameLabel + NL +
-        DOT + ' **Location:** `' + (raid.region || 'Unknown') + '`' + NL +
-        DOT + ' **Started:** ' + formatDayTime(startedAtMs) + NL +
-        DOT + ' **Ended:** ' + formatDayTime(endedAtMs) + NL +
+        DOT + ' 🎮 **Game:** ' + gameLabel + NL +
+        DOT + ' 🌍 **Location:** `' + (raid.region || 'Unknown') + '`' + NL +
+        DOT + ' 🕒 **Started:** ' + formatDayTime(startedAtMs) + NL +
+        DOT + ' 🕒 **Ended:** ' + formatDayTime(endedAtMs) + NL +
         NL +
-        DOT + ' **Raid Proof:** ' + proofLinks
+        DOT + ' 📸 **Raid Proof:** ' + proofLinks
     ));
     contents.push(separator());
 
     // --- Helpers section: each helper in its own TextDisplay with a native
     // Separator divider between helpers ---
-    contents.push(text('### \uD83D\uDEE1\uFE0F HELPERS'));
+    contents.push(text('### 👥 HELPERS'));
     const helpers = Array.isArray(raid.helpers)
         ? raid.helpers.filter(h => typeof h === 'object' && h && h.userId)
         : [];
@@ -355,9 +372,9 @@ const noteText = opts.endersNote || raid.endersNote || raid.closeReason || null;
         // The field value is capped at 1024 chars by Discord — the cap is
         // applied on WHOLE LINKS (never mid-link) so nothing is ever broken.
         const picsValue = buildProofLinks(proofUrls);
-        embed.addFields({ name: 'Raid Proof', value: picsValue, inline: false });
+        embed.addFields({ name: '📸 Raid Proof', value: picsValue, inline: false });
     } else {
-        embed.addFields({ name: 'Raid Proof', value: 'No raid pictures uploaded.', inline: false });
+        embed.addFields({ name: '📸 Raid Proof', value: 'No raid pictures uploaded.', inline: false });
     }
 
     return embed;
