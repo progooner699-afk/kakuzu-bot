@@ -260,6 +260,16 @@ function buildResultCardPayload(opts) {
     contents.push(text('-# Kakuzu Raid Network \u00B7 Raid #' + raid.raidId +
         (submitterId ? ' \u00B7 Result submitted by <@' + submitterId + '>' : '')));
 
+    // --- Closing message (outcome-based) ---
+    const closingMessages = {
+        win: '**🏆 WON**' + NL + '┃ Congratulations to everyone who participated in this raid! Your teamwork, coordination, and dedication secured a great victory against the enemy clan. Keep up the excellent work and continue making your clan proud!',
+        whooped: '**💥 WHOOPED**' + NL + '┃ Absolutely incredible performance! Your team completely dominated the enemy clan and showed what true coordination looks like. Congratulations on the overwhelming victory!',
+        loss: '**❌ LOSS**' + NL + '┃ The battle didn\'t go our way this time, but every raid is an opportunity to learn and improve. Thank you to everyone who showed up and gave their best. Stay strong, regroup, and come back even stronger!'
+    };
+    const closingText = closingMessages[outcome] || closingMessages.win;
+    contents.push(separator());
+    contents.push(text(closingText));
+
     container.components = contents;
 
     return {
@@ -298,7 +308,16 @@ function buildResultFallbackEmbed(opts) {
     // the embed container to shrink to the image's width. The rally/proof
     // screenshot is delivered by the caller as a STANDALONE file attachment
     // in the same message payload, so this embed stays FULL WIDTH.
-    if (streakMessage) embed.setDescription(streakMessage);
+    const closingMessages = {
+        win: '🏆 WON\n┃ Congratulations to everyone who participated in this raid! Your teamwork, coordination, and dedication secured a great victory against the enemy clan. Keep up the excellent work and continue making your clan proud!',
+        whooped: '💥 WHOOPED\n┃ Absolutely incredible performance! Your team completely dominated the enemy clan and showed what true coordination looks like. Congratulations on the overwhelming victory!',
+        loss: '❌ LOSS\n┃ The battle didn\'t go our way this time, but every raid is an opportunity to learn and improve. Thank you to everyone who showed up and gave their best. Stay strong, regroup, and come back even stronger!'
+    };
+    const closingText = closingMessages[outcome] || closingMessages.win;
+    const descParts = [];
+    if (streakMessage) descParts.push(streakMessage);
+    descParts.push(closingText);
+    embed.setDescription(descParts.join('\n\n'));
 
     const rosterValue = Array.isArray(raid.helpers) && raid.helpers.length > 0
         ? raid.helpers
