@@ -294,8 +294,10 @@ function buildRobloxJoinLink(raid) {
     const placeId = raid && raid.placeId;
     if (placeId) {
         const serverId = raid && raid.serverId ? String(raid.serverId).trim() : '';
-        const base = `https://www.roblox.com/games/start?placeId=${placeId}`;
-        return serverId ? `${base}&gameInstanceId=${encodeURIComponent(serverId)}` : base;
+        const params = new URLSearchParams();
+        params.set('placeId', String(placeId));
+        if (serverId) params.set('gameInstanceId', serverId);
+        return `https://www.roseal.live/join?${params.toString()}`;
     }
     const fallback = (raid && raid.serverLink) ? raid.serverLink : null;
     return fallback && /^https?:\/\//i.test(fallback) ? fallback : null;
