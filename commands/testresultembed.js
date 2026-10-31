@@ -31,7 +31,7 @@ function buildPayload() {
     const container = new ContainerBuilder().setAccentColor(0x2B2D31);
 
     container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('# RAID RESULT = WON')
+        new TextDisplayBuilder().setContent('# 🏆 RAID RESULT = WON')
     );
 
     container.addSeparatorComponents(
@@ -39,24 +39,14 @@ function buildPayload() {
     );
 
     container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('## INFO')
-    );
-
-    container.addSeparatorComponents(
-        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+        new TextDisplayBuilder().setContent('## ℹ️ INFO')
     );
 
     const codeBlock =
-        '┌─────────────────────────────────────┐\n' +
-        '│  REGION                             │\n' +
-        '│  ASIA  INDIA                        │\n' +
-        '├─────────────────────────────────────┤\n' +
-        '│  ENEMY CLAN                         │\n' +
-        '│  Test Clan                          │\n' +
-        '├─────────────────────────────────────┤\n' +
-        '│  ALLIE CLAN                         │\n' +
-        '│  Kakuzu Clan                        │\n' +
-        '└─────────────────────────────────────┘\n' +
+        '┌──────────────┐ ┌──────────────┐ ┌──────────────┐' + '\n' +
+        '│ 🌍 REGION    │ │ ⚔️ ENEMY CLAN│ │ 🤝 ALLY CLAN │' + '\n' +
+        '│ ASIA INDIA   │ │ Test Clan    │ │ Kakuzu Clan  │' + '\n' +
+        '└──────────────┘ └──────────────┘ └──────────────┘' + '\n' +
         'RQ CLAN';
 
     container.addTextDisplayComponents(
@@ -68,14 +58,14 @@ function buildPayload() {
     );
 
     const bulletLines = [
-        '• **ENEMY NAMES:** EnemyOne, EnemyTwo, EnemyThree, EnemyFour, EnemyFive',
-        '• **ALLIE S:** AllyOne, AllyTwo, AllyThree',
-        '• **REQUESTED BY:** TestRequester',
-        '• **ENDED BY:** TestEnder',
-        '• **TIME STARTED:** 10:00 AM',
-        '• **ENDED:** 10:15 AM',
-        '• **DURATION:** 15m',
-        '┃ **ENDER\'S NOTE:** Great raid, everyone performed well.',
+        '• ⚔️ **ENEMY NAMES:** EnemyOne, EnemyTwo, EnemyThree, EnemyFour, EnemyFive',
+        '• 🤝 **ALLIE S:** AllyOne, AllyTwo, AllyThree',
+        '• 👤 **REQUESTED BY:** TestRequester',
+        '• 👤 **ENDED BY:** TestEnder',
+        '• 🕒 **TIME STARTED:** 10:00 AM',
+        '• 🕒 **ENDED:** 10:15 AM',
+        '• 🕒 **DURATION:** 15m',
+        '> 📝 **ENDER\'S NOTE:** Great raid, everyone performed well.',
     ].join('\n');
 
     container.addTextDisplayComponents(
@@ -87,11 +77,7 @@ function buildPayload() {
     );
 
     container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('## RAID PROOF')
-    );
-
-    container.addSeparatorComponents(
-        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+        new TextDisplayBuilder().setContent('## 📸 RAID PROOF')
     );
 
     container.addTextDisplayComponents(
@@ -103,11 +89,7 @@ function buildPayload() {
     );
 
     container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('## HELPERS')
-    );
-
-    container.addSeparatorComponents(
-        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+        new TextDisplayBuilder().setContent('## 👥 HELPERS')
     );
 
     container.addTextDisplayComponents(
