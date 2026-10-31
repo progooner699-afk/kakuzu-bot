@@ -26,7 +26,7 @@ const fs = require('fs');
 const BACKUP_PANEL_V2_FLAGS = 1 << 15;
 
 // Accent color for the Container's left color bar (panel red).
-const PANEL_ACCENT_COLOR = 0x8B0000;
+const PANEL_ACCENT_COLOR = 0x2B2D31;
 
 // Runtime newline used while composing TextDisplay content (avoids escape
 // sequence mangling in the source file itself).

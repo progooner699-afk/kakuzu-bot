@@ -21,7 +21,7 @@ const RAID_ALERT_V2_FLAGS = 1 << 15;
 const NL10 = String.fromCharCode(10);
 
 // Accent color for the container left color bar (Raid Alert red).
-const ALERT_ACCENT_COLOR = 0xED4245;
+const ALERT_ACCENT_COLOR = 0x2B2D31;
 
 // Game-specific thumbnail map — verified real 512x512 game-icon URLs pulled
 // from the Roblox Thumbnails API. The keys are the short game codes stored on
