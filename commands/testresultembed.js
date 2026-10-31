@@ -156,4 +156,5 @@ module.exports = {
     buildPayload,
     isAllowedHere,
     TEST_GUILD_ID,
+    deferFirst: false,
 };
