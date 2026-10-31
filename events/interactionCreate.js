@@ -55,6 +55,59 @@ const pendingGameThumbnails = new Map();
 const pendingCountryCodes = new Map();
 const pendingDetections = new Map();
 
+// Shared builder for the raid application modal (collector). Used by both the
+// request_backup handler and the raid_region_select handler so the existing
+// application fields/validation are reused without duplication.
+function buildRaidApplicationModal(userId) {
+    const modal = new ModalBuilder()
+        .setCustomId(`raid_application_step1_${userId}_${Date.now()}`)
+        .setTitle("Raid Request Application");
+    modal.addComponents(
+        new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+                .setCustomId("enemyNames")
+                .setLabel("Enemy Names")
+                .setPlaceholder("e.g., Player1, Player2, Player3")
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(true)
+        ),
+        new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+                .setCustomId("helperLimit")
+                .setLabel("Helpers Needed (1-20)")
+                .setPlaceholder("e.g., 3")
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+        ),
+        new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+                .setCustomId("enemyClanName")
+                .setLabel("Enemy Clan Name")
+                .setPlaceholder("Enter enemy clan name")
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+        ),
+        new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+                .setCustomId("reason")
+                .setLabel("Reason for Raid")
+                .setPlaceholder("Explain why you need help")
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(true)
+        ),
+        new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+                .setCustomId("inGameHelpers")
+                .setLabel("In-Game Helpers")
+                .setPlaceholder("Enter the names of players already helping you, separated by commas")
+                .setStyle(TextInputStyle.Short)
+                .setRequired(false)
+                .setMaxLength(400)
+        )
+    );
+    return modal;
+}
+
 // Temporary monitoring records for users who pressed Help. Key =
 // `${guildId}:${raidId}:${discordUserId}` — keying by user alone meant a
 // helper pressing Help on raid B while still monitored on raid A got the
@@ -1430,12 +1483,10 @@ module.exports = {
         // (request_backup), plus the legacy request_raid id so panels posted by
         // the old /requestraid command keep working. Auto-detect game/region/server.
         if (interaction.customId === "request_raid" || interaction.customId === "request_backup") {
-            await interaction.deferReply({ flags: 64 }).catch(() => null);
-
             // GLOBAL link lookup: discord_user_id -> Roblox account (no guild_id).
             const globalRes = await robloxLinks.getGlobalRobloxLink(interaction.user.id).catch(() => null);
             if (globalRes && !globalRes.ok) {
-                return interaction.editReply({
+                return interaction.reply({
                     content: 'Kakuzu cannot check your Roblox link right now because the database is temporarily unavailable. Please try again shortly.',
                     flags: 64
                 }).catch(() => null);
@@ -1447,7 +1498,7 @@ module.exports = {
             const verificationData = globalData || legacyData;
             const isVerified = Boolean(verificationData && (verificationData.verified || verificationData.is_verified) && verificationData.roblox_user_id);
             if (!isVerified) {
-                return interaction.editReply({
+                return interaction.reply({
                     content: buildUnverifiedMessage(interaction.guild.id),
                     flags: 64
                 }).catch(() => null);
@@ -1461,7 +1512,7 @@ module.exports = {
             });
 
             if (!detection.success) {
-                return interaction.editReply({
+                return interaction.reply({
                     content: "Auto-Detection Failed: " + detection.error + ". Make sure you are in a Roblox game.",
                     flags: 64
                 }).catch(() => null);
@@ -1497,79 +1548,21 @@ module.exports = {
                         .setLabel(`${r.emoji} ${r.label}`)
                         .setValue(r.key)));
                 const row = new ActionRowBuilder().addComponents(select);
-                return interaction.editReply({
+                return interaction.reply({
                     content: '⚠️ Auto-detection could not resolve a region / data-center id. Pick the region manually below — Supabase ping settings will still be applied automatically.',
                     components: [row],
                     flags: 64
                 }).catch(() => null);
             }
 
-            const openFormButton = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId("open_raid_application")
-                    .setLabel("⚔️ Open Raid Application Form")
-                    .setStyle(ButtonStyle.Primary)
-            );
-
-            return interaction.editReply({
-                content: "✅ Game & server detected! Click the button below to open the raid application form.",
-                components: [openFormButton],
-                flags: 64
-            }).catch(() => null);
+            // Open the raid application form directly — no second button interaction.
+            // discord.js v14 throws InteractionAlreadyReplied if showModal follows a
+            // deferReply, so the modal is opened as the interaction's initial response.
+            return interaction.showModal(buildRaidApplicationModal(interaction.user.id)).catch(() => null);
         }
 
-        // Handle open_raid_application button - shows the modal (fast, no async work)
-        if (interaction.customId === "open_raid_application") {
-            const modal = new ModalBuilder()
-                .setCustomId(`raid_application_step1_${interaction.user.id}_${Date.now()}`)
-                .setTitle("Raid Request Application");
-
-            modal.addComponents(
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId("enemyNames")
-                        .setLabel("Enemy Names")
-                        .setPlaceholder("e.g., Player1, Player2, Player3")
-                        .setStyle(TextInputStyle.Paragraph)
-                        .setRequired(true)
-                ),
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId("helperLimit")
-                        .setLabel("Helpers Needed (1-20)")
-                        .setPlaceholder("e.g., 3")
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(true)
-                ),
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId("enemyClanName")
-                        .setLabel("Enemy Clan Name")
-                        .setPlaceholder("Enter enemy clan name")
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(true)
-                ),
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId("reason")
-                        .setLabel("Reason for Raid")
-                        .setPlaceholder("Explain why you need help")
-                        .setStyle(TextInputStyle.Paragraph)
-                        .setRequired(true)
-                ),
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId("inGameHelpers")
-                        .setLabel("In-Game Helpers")
-                        .setPlaceholder("Enter the names of players already helping you, separated by commas")
-                        .setStyle(TextInputStyle.Short)
-                        .setRequired(false)
-                        .setMaxLength(400)
-                )
-            );
-
-            return interaction.showModal(modal).catch(() => null);
-        }
+        // (raid application modal is now opened directly by the request_backup and
+        //  raid_region_select handlers via buildRaidApplicationModal — no second button.)
 
         // Handle backup panel channel selection — post the panel through a
         // webhook named "backuppanel" (dummy profile with the branded avatar)
@@ -1933,19 +1926,62 @@ module.exports = {
                 return interaction.editReply({ content: 'Result channel is not configured. Please run `/setchannels` and set the `result_channel` first — raid alerts are posted in a temporary channel created in the same category.', flags: 64 }).catch(() => null);
             }
 
-            const completionEmbed = new EmbedBuilder()
-                .setTitle('Raid Request Successfully Launched!')
-                .setDescription(`Operator <@${userId}> has successfully deployed a combat request!`)
-                .addFields([
-                    { name: 'Raid Registry ID', value: `\`#${raid.raidId}\``, inline: true },
-                    { name: 'Roblox Identity', value: `\`${robloxUsername}\``, inline: true },
-                    { name: 'Target Game', value: `\`${raidStateManager.GAME_CONFIG[game] || game}\``, inline: true },
-                    { name: 'Target Region', value: `\`${region}\``, inline: true }
-                ])
-                .setColor(0x00ff66)
-                .setTimestamp();
+            const NL = String.fromCharCode(10);
+            const gameLabel = raidStateManager.GAME_CONFIG[game] || game;
+            const countryName = raidStateManager.countryCodeToName(raid.countryCode);
+            const roIdentity = (robloxDisplayName && robloxDisplayName !== robloxUsername)
+                ? (robloxUsername + ' (' + robloxDisplayName + ')')
+                : robloxUsername;
 
-            await interaction.editReply({ embeds: [completionEmbed], flags: 64 }).catch(() => null);
+            // Redesigned success message using Discord V2 components + separators.
+            const completionContainer = new ContainerBuilder()
+                .setAccentColor(0x00FF66)
+                .addTextDisplayComponents(
+                    new TextDisplayBuilder().setContent(
+                        '# ⚔️ Raid Request Successfully Registered!' + NL + NL +
+                        'Your raid request has been successfully registered and the alert is now live.'
+                    )
+                )
+                .addComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+                .addTextDisplayComponents(
+                    new TextDisplayBuilder().setContent(
+                        '### 📋 Raid Information' + NL + NL +
+                        '🆔 **Raid Registry ID:** `#' + raid.raidId + '`' + NL +
+                        '👤 **Operator:** <@' + userId + '>' + NL +
+                        '🎮 **Target Game:** `' + gameLabel + '`' + NL +
+                        '🌍 **Target Region:** `' + region + '`' + NL +
+                        '🥷 **Roblox Identity:** `' + roIdentity + '`' + NL +
+                        (countryName && countryName !== 'Unknown' ? ('🌐 **Country:** `' + countryName + '`' + NL) : '')
+                    )
+                )
+                .addComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+                .addTextDisplayComponents(
+                    new TextDisplayBuilder().setContent(
+                        '✅ Registered at <t:' + Math.floor(Date.now() / 1000) + ':F>.'
+                    )
+                );
+
+            try {
+                await interaction.editReply({
+                    flags: 64 | raidV2.RAID_ALERT_V2_FLAGS,
+                    components: [completionContainer]
+                });
+            } catch (err) {
+                console.warn('[raid request] V2 success edit failed, falling back to embed:', (err && err.message) || err);
+                const completionEmbed = new EmbedBuilder()
+                    .setTitle('⚔️ Raid Request Successfully Registered!')
+                    .setDescription('Your raid request has been successfully registered and the alert is now live.')
+                    .addFields([
+                        { name: '🆔 Raid Registry ID', value: '`#' + raid.raidId + '`', inline: true },
+                        { name: '👤 Operator', value: '<@' + userId + '>', inline: true },
+                        { name: '🎮 Target Game', value: '`' + gameLabel + '`', inline: true },
+                        { name: '🌍 Target Region', value: '`' + region + '`', inline: true },
+                        { name: '🥷 Roblox Identity', value: '`' + roIdentity + '`', inline: true }
+                    ])
+                    .setColor(0x00FF66)
+                    .setTimestamp();
+                await interaction.editReply({ embeds: [completionEmbed], flags: 64 }).catch(() => null);
+            }
 
             // Temporary raid alert channel: created in the SAME CATEGORY as the
             // configured raid result channel, named raid-alert-<raidId>. It
@@ -2372,18 +2408,8 @@ module.exports = {
             pendingGameThumbnails.set(interaction.user.id, pending.gameIconUrl || '');
             pendingCountryCodes.set(interaction.user.id, pending.countryCode || '');
 
-            const openFormButton = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId("open_raid_application")
-                    .setLabel("⚔️ Open Raid Application Form")
-                    .setStyle(ButtonStyle.Primary)
-            );
-            await interaction.update({
-                content: `✅ Region set to ${chosenRegion}. Click the button below to open the raid application form.`,
-                components: [openFormButton],
-                flags: 64
-            }).catch(() => null);
-            return;
+            // Open the raid application form directly (no second button interaction).
+            return interaction.showModal(buildRaidApplicationModal(interaction.user.id)).catch(() => null);
         }
 
         if (interaction.isStringSelectMenu() && typeof interaction.customId === 'string' && interaction.customId.startsWith('raid_mvp_select_')) {
