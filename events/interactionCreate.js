@@ -1942,7 +1942,7 @@ module.exports = {
                         'Your raid request has been successfully registered and the alert is now live.'
                     )
                 )
-                .addComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+                .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
                 .addTextDisplayComponents(
                     new TextDisplayBuilder().setContent(
                         '### 📋 Raid Information' + NL + NL +
@@ -1954,7 +1954,7 @@ module.exports = {
                         (countryName && countryName !== 'Unknown' ? ('🌐 **Country:** `' + countryName + '`' + NL) : '')
                     )
                 )
-                .addComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+                .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
                 .addTextDisplayComponents(
                     new TextDisplayBuilder().setContent(
                         '✅ Registered at <t:' + Math.floor(Date.now() / 1000) + ':F>.'
