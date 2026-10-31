@@ -42,15 +42,20 @@ function buildPayload() {
         new TextDisplayBuilder().setContent('## ℹ️ INFO')
     );
 
-    const codeBlock =
-        '┌──────────────┐ ┌──────────────┐ ┌──────────────┐' + '\n' +
-        '│ 🌍 REGION    │ │ ⚔️ ENEMY CLAN│ │ 🤝 ALLY CLAN │' + '\n' +
-        '│ ASIA INDIA   │ │ Test Clan    │ │ Kakuzu Clan  │' + '\n' +
-        '└──────────────┘ └──────────────┘ └──────────────┘' + '\n' +
-        'RQ CLAN';
+    const boxW = 14;
+    function pad(s) { return String(s || '').slice(0, boxW).padEnd(boxW, ' '); }
+    const regionLab = pad('🌍 REGION');
+    const enemyLab = pad('⚔️ ENEMY CLAN');
+    const allyLab = pad('🤝 ALLY CLAN');
+    const regionVal = pad('ASIA INDIA');
+    const enemyVal = pad('Test Clan');
+    const allyVal = pad('Kakuzu Clan');
+
+    const line1 = '`' + regionLab + '` `' + enemyLab + '` `' + allyLab + '`';
+    const line2 = '`' + regionVal + '` `' + enemyVal + '` `' + allyVal + '`';
 
     container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('```' + '\n' + codeBlock + '\n' + '```')
+        new TextDisplayBuilder().setContent(line1 + '\n' + line2 + '\nRQ CLAN')
     );
 
     container.addSeparatorComponents(
