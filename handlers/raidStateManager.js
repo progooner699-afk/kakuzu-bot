@@ -585,7 +585,7 @@ function formatRaidMessage(raid, guildId = null) {
 
     const embed = new EmbedBuilder()
         .setTitle('RAID ALERT')
-        .setDescription((raid.pingMention ? raid.pingMention + '\n' : '') + '\u{1F6A8} **RAID ALERT**\n\n> \u{1F64F} Please remain patient while our helpers make their way to assist you. Someone will be with you shortly!')
+        .setDescription((raid.pingMention ? raid.pingMention + '\n' : '') + '\u{1F6A8} **RAID ALERT**' + (raid.requesterId ? '  \u2022  <@' + raid.requesterId + '>' : '') + '\n\n> \u{1F64F} Please remain patient while our helpers make their way to assist you. Someone will be with you shortly!')
         .addFields([
             {
             name: '🎯 ENEMY NAMES',

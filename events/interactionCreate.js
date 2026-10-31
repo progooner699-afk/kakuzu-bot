@@ -2142,6 +2142,10 @@ module.exports = {
                 await interaction.reply({ content: 'This raid is already closed.', flags: 64 }).catch(() => null);
                 return;
             }
+            if (raid.requesterId && interaction.user.id === raid.requesterId) {
+                await interaction.reply({ content: "❌ You can't join your own backup.", flags: 64 }).catch(() => null);
+                return;
+            }
             const alreadyHelper = Array.isArray(raid.helpers) && raid.helpers.some(h => typeof h === 'object' && h.userId === interaction.user.id);
             if (alreadyHelper) {
                 await interaction.reply({ content: '✅ You are already a helper on this raid!', flags: 64 }).catch(() => null);
@@ -2264,6 +2268,10 @@ module.exports = {
             }
             if (raid.status === 'CLOSED') {
                 await interaction.reply({ content: 'This raid is closed and cannot accept helpers.', flags: 64 }).catch(() => null);
+                return;
+            }
+            if (raid.requesterId && interaction.user.id === raid.requesterId) {
+                await interaction.reply({ content: "❌ You can't join your own backup.", flags: 64 }).catch(() => null);
                 return;
             }
             const acceptModal = new ModalBuilder()
@@ -2489,6 +2497,10 @@ module.exports = {
             const currentRaid = raidStateManager.getRaidById(raidId, guildId);
             if (!currentRaid || currentRaid.status === 'CLOSED') {
                 await interaction.reply({ content: 'This raid operation is no longer active or closed.', flags: 64 }).catch(() => null);
+                return;
+            }
+            if (currentRaid.requesterId && interaction.user.id === currentRaid.requesterId) {
+                await interaction.reply({ content: "❌ You can't join your own backup.", flags: 64 }).catch(() => null);
                 return;
             }
 
