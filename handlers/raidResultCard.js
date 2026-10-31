@@ -60,6 +60,13 @@ const WON_EMOJI = '<:won:1543997297593946162>';
 // card; Whooped and Loss use their own emojis. Swap the emoji strings here to
 // restyle (custom Discord emojis work as soon as you paste their <:name:id>
 // markdown).
+const RESULT_STYLES = {
+    win:     { word: 'WON',     accent: 0x248046, message: 'Congratulations to every helper who showed up, GG on the win!' },
+    whooped: { word: 'WHOOPED', accent: 0xf1c40f, message: 'We whooped them! Absolute domination, GG to every helper!' },
+    loss:    { word: 'LOST',    accent: 0xda373c, message: 'Tough loss, but great effort from everyone - we go again!' }
+};
+
+
 const OUTCOME_STYLES = {
     win: { title: 'RAID WON ' + WON_EMOJI },
     whooped: { title: 'RAID WHOOPED \uD83D\uDC80' },   // 💀 skull
@@ -71,7 +78,10 @@ const OUTCOME_STYLES = {
 const NL = String.fromCharCode(10);
 
 function getOutcomeStyle(outcome) {
-    return OUTCOME_STYLES[outcome] || OUTCOME_STYLES.win;
+    const s = RESULT_STYLES[outcome];
+    if (!s) return { word: 'UNKNOWN', accent: 0x4e5058, message: null, title: 'RAID RESULT' };
+    const os = OUTCOME_STYLES[outcome] || { title: 'RAID ' + s.word };
+    return { word: s.word, accent: s.accent, message: s.message, title: os.title };
 }
 
 function findHelper(helpers, mvpUserId) {
@@ -150,16 +160,15 @@ function buildResultCardPayload(opts) {
             .toJSON();
     };
 
-    const container = new ContainerBuilder().setAccentColor(RESULT_NEUTRAL_COLOR).toJSON();
+    const container = new ContainerBuilder().setAccentColor(style.accent).toJSON();
     container.size = 'large';
     const contents = [];
 
-    // --- TOP banner: the rally picture (if uploaded) rendered edge-to-edge
-    // across the full card width, ABOVE everything else. No default gif. ---
-    if (rallyPicUrl) {
+    const bannerUrl = rallyPicUrl || DEFAULT_BANNER_IMAGE;
+    if (bannerUrl) {
         contents.push(new MediaGalleryBuilder().addItems([
             new MediaGalleryItemBuilder()
-                .setURL(rallyPicUrl)
+                .setURL(bannerUrl)
                 .setDescription(style.title)
                 .toJSON()
         ]).toJSON());
